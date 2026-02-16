@@ -4,6 +4,7 @@ import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../
 import Paginador from '../../components/ui/Paginador';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useComprasStore } from '../../stores/comprasStore';
+import { formatDateQuito } from '../../lib/formatDateQuito';
 
 const PAGE_SIZE = 10;
 
@@ -65,7 +66,7 @@ export default function ComprasPage() {
                     {o.estado}
                   </span>
                 </TablaCelda>
-                <TablaCelda>{String(o.fecha).slice(0, 19)}</TablaCelda>
+                <TablaCelda>{formatDateQuito(o.fecha)}</TablaCelda>
                 <TablaCelda className="space-x-2">
                   {(o.estado === 'ABIERTA' || o.estado === 'PARCIAL') && (
                     <button

@@ -6,6 +6,8 @@ import Paginador from '../../components/ui/Paginador';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useComprasStore } from '../../stores/comprasStore';
 import { formatMoney } from '../../lib/formatMoney';
+import { formatDateQuito } from '../../lib/formatDateQuito';
+import { formatQtyByUnit } from '../../lib/formatQty';
 
 export default function CompraDetallePage() {
   const { id } = useParams();
@@ -48,7 +50,7 @@ export default function CompraDetallePage() {
 
     return rows.map((r, idx) => {
       const factura = facturasProveedor.find((f) => f.numero_factura === r.factura_id);
-      const isLast = idx === rows.length - 1;
+      const isLast = idx === 0;
       const estado = ordenActual?.orden?.estado === 'COMPLETA' && isLast ? 'COMPLETA' : 'PARCIAL';
 
       return {
@@ -98,7 +100,7 @@ export default function CompraDetallePage() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
-                <p className="font-semibold text-slate-800">{String(ordenActual.orden.fecha).slice(0, 19)}</p>
+                <p className="font-semibold text-slate-800">{formatDateQuito(ordenActual.orden.fecha)}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Observacion</p>
@@ -111,16 +113,32 @@ export default function CompraDetallePage() {
         {recepcionesCards.length > 0 && (
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="font-semibold text-slate-800">Recepciones</p>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="space-y-4">
               {recepcionesCards.map((r) => (
                 <div key={r.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-semibold text-slate-800">Factura: {r.factura_id || '-'}</p>
-                  <p className="text-xs text-slate-600">Fecha: {String(r.fecha).slice(0, 19)}</p>
-                  <p className="text-xs text-slate-600">Total: {formatMoney(r.total)}</p>
-                  <p className="text-xs text-slate-600">Metodo: {r.metodo_pago}</p>
-                  <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(r.estado)}`}>
-                    {r.estado}
-                  </span>
+                  <p className="text-sm font-bold text-slate-800">Factura # {r.factura_id || '-'}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{formatDateQuito(r.fecha)}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Metodo</p>
+                      <span className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(r.metodo_pago)}`}>
+                        {r.metodo_pago}
+                      </span>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
+                      <span className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(r.estado)}`}>
+                        {r.estado}
+                      </span>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Monto</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{formatMoney(r.total)}</p>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -147,15 +165,19 @@ export default function CompraDetallePage() {
               </tr>
             </TablaCabecera>
             <TablaCuerpo>
-              {(ordenActual?.detalle || []).map((d) => (
-                <TablaFila key={d.id}>
-                  <TablaCelda>{d.producto_codigo} - {d.producto_nombre}</TablaCelda>
-                  <TablaCelda>{Number(d.cantidad).toFixed(3)}</TablaCelda>
-                  <TablaCelda>{Number(d.cantidad_recibida).toFixed(3)}</TablaCelda>
-                  <TablaCelda>{(Number(d.cantidad) - Number(d.cantidad_recibida)).toFixed(3)}</TablaCelda>
-                  <TablaCelda>{formatMoney(d.costo_unit_est)}</TablaCelda>
-                </TablaFila>
-              ))}
+              {(ordenActual?.detalle || []).map((d) => {
+                const unidad = d.unidad_medida || d.unidad;
+                const pendiente = Number(d.cantidad) - Number(d.cantidad_recibida);
+                return (
+                  <TablaFila key={d.id}>
+                    <TablaCelda>{d.producto_codigo} - {d.producto_nombre}</TablaCelda>
+                    <TablaCelda>{formatQtyByUnit(d.cantidad, unidad, { fixedLB: true })}</TablaCelda>
+                    <TablaCelda>{formatQtyByUnit(d.cantidad_recibida, unidad, { fixedLB: true })}</TablaCelda>
+                    <TablaCelda>{formatQtyByUnit(pendiente, unidad, { fixedLB: true })}</TablaCelda>
+                    <TablaCelda>{formatMoney(d.costo_unit_est)}</TablaCelda>
+                  </TablaFila>
+                );
+              })}
             </TablaCuerpo>
           </Tabla>
           <Paginador paginaActual={1} totalPaginas={1} totalRegistros={ordenActual?.detalle?.length || 0} mostrarSiempre />
