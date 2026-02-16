@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient, { normalizeResponse } from '../../lib/apiClient';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
@@ -6,6 +6,21 @@ import Paginador from '../../components/ui/Paginador';
 import { useComprasStore } from '../../stores/comprasStore';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
+import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
+
+function defaultQtyByUnit(unidad) {
+  return getUnidad(unidad) === 'UND' ? '1' : '1.00';
+}
+
+function parseQtyByUnit(value, unidad) {
+  const unit = getUnidad(unidad);
+  if (unit === 'UND') {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  const parsed = Number(String(value || '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
 
 export default function CompraNuevaPage() {
   const navigate = useNavigate();
@@ -16,9 +31,10 @@ export default function CompraNuevaPage() {
   const [categorias, setCategorias] = useState([]);
 
   const [proveedorId, setProveedorId] = useState('');
-  const [itemForm, setItemForm] = useState({ producto_id: '', cantidad: '1', costo_unit_est: '0' });
-  const [items, setItems] = useState([]);
   const [observacion, setObservacion] = useState('');
+  const [productoSearch, setProductoSearch] = useState('');
+  const [productoSeleccionadoId, setProductoSeleccionadoId] = useState('');
+  const [items, setItems] = useState([]);
 
   const [showProductoModal, setShowProductoModal] = useState(false);
   const [showCategoriaInline, setShowCategoriaInline] = useState(false);
@@ -45,23 +61,70 @@ export default function CompraNuevaPage() {
     loadCatalogos();
   }, [listarProveedores]);
 
+  const productosFiltrados = useMemo(() => {
+    const q = productoSearch.trim().toLowerCase();
+    if (!q) return productos;
+
+    return productos.filter((p) => {
+      const codigo = String(p.codigo || '').toLowerCase();
+      const nombre = String(p.nombre || '').toLowerCase();
+      return codigo.includes(q) || nombre.includes(q);
+    });
+  }, [productos, productoSearch]);
+
   const addItem = () => {
-    const producto = productos.find((p) => String(p.id) === String(itemForm.producto_id));
+    const producto = productos.find((p) => String(p.id) === String(productoSeleccionadoId));
     if (!producto) return;
 
-    setItems((prev) => [
-      ...prev,
-      {
-        producto_id: producto.id,
-        codigo: producto.codigo,
-        nombre: producto.nombre,
-        unidad: producto.unidad_medida || producto.unidad,
-        cantidad: Number(itemForm.cantidad || 0),
-        costo_unit_est: Number(itemForm.costo_unit_est || 0)
-      }
-    ]);
+    const unidad = getUnidad(producto.unidad_medida || producto.unidad);
+    const costoDefault = Number(producto.precio_referencia || 0).toFixed(2);
 
-    setItemForm((s) => ({ ...s, producto_id: '', cantidad: '1', costo_unit_est: '0' }));
+    setItems((prev) => {
+      const existing = prev.find((i) => i.producto_id === producto.id);
+      if (!existing) {
+        return [
+          ...prev,
+          {
+            producto_id: producto.id,
+            codigo: producto.codigo,
+            nombre: producto.nombre,
+            unidad,
+            cantidadInput: defaultQtyByUnit(unidad),
+            costoInput: costoDefault
+          }
+        ];
+      }
+
+      const currentQty = parseQtyByUnit(existing.cantidadInput, unidad);
+      const nextQty = (Number.isFinite(currentQty) ? currentQty : 0) + (unidad === 'UND' ? 1 : 1);
+      const normalizedQty = unidad === 'UND' ? String(nextQty) : Number(nextQty).toFixed(2);
+
+      return prev.map((it) =>
+        it.producto_id === producto.id
+          ? { ...it, cantidadInput: normalizedQty }
+          : it
+      );
+    });
+
+    setProductoSeleccionadoId('');
+  };
+
+  const updateItem = (index, key, value) => {
+    setItems((prev) =>
+      prev.map((item, idx) => {
+        if (idx !== index) return item;
+
+        if (key === 'cantidadInput') {
+          return { ...item, cantidadInput: sanitizeQtyInput(value, item.unidad) };
+        }
+
+        if (key === 'costoInput') {
+          return { ...item, costoInput: sanitizeDecimalInput(value, 2) };
+        }
+
+        return { ...item, [key]: value };
+      })
+    );
   };
 
   const removeItem = (idx) => {
@@ -71,14 +134,26 @@ export default function CompraNuevaPage() {
   const onGuardarOrden = async () => {
     if (!items.length) return;
 
+    const parsedItems = [];
+    for (const item of items) {
+      const cantidad = parseQtyByUnit(item.cantidadInput, item.unidad);
+      const costo = Number(String(item.costoInput || '').replace(',', '.'));
+
+      if (!Number.isFinite(cantidad) || cantidad <= 0) return;
+      if (getUnidad(item.unidad) === 'UND' && !Number.isInteger(cantidad)) return;
+      if (!Number.isFinite(costo) || costo < 0) return;
+
+      parsedItems.push({
+        producto_id: item.producto_id,
+        cantidad,
+        costo_unit_est: costo
+      });
+    }
+
     const payload = {
       proveedor_id: proveedorId ? Number(proveedorId) : null,
       observacion: observacion || undefined,
-      items: items.map((i) => ({
-        producto_id: i.producto_id,
-        cantidad: Number(i.cantidad),
-        costo_unit_est: Number(i.costo_unit_est)
-      }))
+      items: parsedItems
     };
 
     const response = await crearOrden(payload);
@@ -93,6 +168,8 @@ export default function CompraNuevaPage() {
   const onCrearCategoria = async () => {
     if (!categoriaNueva.trim()) return;
     const created = await crearCategoria({ nombre: categoriaNueva.trim(), activo: true });
+    if (!created?.id) return;
+
     setCategoriaNueva('');
     setShowCategoriaInline(false);
     await loadCatalogos();
@@ -110,10 +187,12 @@ export default function CompraNuevaPage() {
     };
 
     const created = await crearProducto(payload);
+    if (!created?.id) return;
+
     setShowProductoModal(false);
     setProductoNuevo({ codigo: '', nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' });
     await loadCatalogos();
-    setItemForm((s) => ({ ...s, producto_id: String(created.id) }));
+    setProductoSeleccionadoId(String(created.id));
   };
 
   return (
@@ -124,52 +203,56 @@ export default function CompraNuevaPage() {
             Volver
           </button>
           <h2 className="mt-3 text-2xl font-semibold text-slate-800">Crear orden de compra</h2>
-          <p className="text-sm text-slate-500">Selecciona proveedor, productos y costos estimados</p>
+          <p className="text-sm text-slate-500">Selecciona proveedor y agrega productos a la orden</p>
         </div>
 
         {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
 
-        <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-2 md:grid-cols-[1fr_1fr_120px_140px_auto] md:items-end">
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Proveedor</label>
-              <select className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorId} onChange={(e) => setProveedorId(e.target.value)}>
-                <option value="">Proveedor</option>
-                {proveedores.map((p) => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-slate-500">Selecciona a quien compraras.</p>
-            </div>
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Proveedor</label>
+            <select className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorId} onChange={(e) => setProveedorId(e.target.value)}>
+              <option value="">Selecciona proveedor</option>
+              {proveedores.map((p) => (
+                <option key={p.id} value={p.id}>{p.nombre}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">Selecciona a quien compraras.</p>
+          </div>
 
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Producto</label>
-              <select
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                value={itemForm.producto_id}
-                onChange={(e) => setItemForm((s) => ({ ...s, producto_id: e.target.value }))}
-              >
-                <option value="">Producto</option>
-                {productos.map((p) => (
-                  <option key={p.id} value={p.id}>{p.codigo} - {p.nombre}</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-slate-500">Selecciona un producto del inventario o crea uno nuevo.</p>
-            </div>
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Observacion</label>
+            <textarea className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Observacion (opcional)" value={observacion} onChange={(e) => setObservacion(e.target.value)} />
+          </div>
 
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Cantidad</label>
-              <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={itemForm.cantidad} onChange={(e) => setItemForm((s) => ({ ...s, cantidad: e.target.value }))} placeholder="Cantidad" />
-              <p className="mt-1 text-xs text-slate-500">Cantidad a comprar (segun unidad LB/UND).</p>
-            </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="font-semibold text-slate-800">Productos</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_auto_auto] md:items-end">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Buscador de productos</label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  placeholder="Codigo o nombre"
+                  value={productoSearch}
+                  onChange={(e) => setProductoSearch(e.target.value)}
+                />
+              </div>
 
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Precio estimado</label>
-              <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={itemForm.costo_unit_est} onChange={(e) => setItemForm((s) => ({ ...s, costo_unit_est: e.target.value }))} placeholder="Costo est" />
-              <p className="mt-1 text-xs text-slate-500">Costo estimado por unidad para la orden.</p>
-            </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Producto</label>
+                <select
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  value={productoSeleccionadoId}
+                  onChange={(e) => setProductoSeleccionadoId(e.target.value)}
+                >
+                  <option value="">Selecciona producto</option>
+                  {productosFiltrados.map((p) => (
+                    <option key={p.id} value={p.id}>{p.codigo} - {p.nombre}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">Selecciona un producto del inventario o crea uno nuevo.</p>
+              </div>
 
-            <div className="flex gap-2">
               <button className="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white" onClick={addItem} title="Anade a la orden">
                 Agregar
               </button>
@@ -178,8 +261,6 @@ export default function CompraNuevaPage() {
               </button>
             </div>
           </div>
-
-          <textarea className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Observacion (opcional)" value={observacion} onChange={(e) => setObservacion(e.target.value)} />
 
           <Tabla>
             <TablaCabecera>
@@ -196,8 +277,20 @@ export default function CompraNuevaPage() {
                 <TablaFila key={`${it.producto_id}-${index}`}>
                   <TablaCelda>{it.codigo} - {it.nombre}</TablaCelda>
                   <TablaCelda>{it.unidad}</TablaCelda>
-                  <TablaCelda>{Number(it.cantidad || 0).toFixed(3)}</TablaCelda>
-                  <TablaCelda>{formatMoney(it.costo_unit_est)}</TablaCelda>
+                  <TablaCelda>
+                    <input
+                      className="w-28 rounded-lg border border-slate-300 px-2 py-1"
+                      value={it.cantidadInput}
+                      onChange={(e) => updateItem(index, 'cantidadInput', e.target.value)}
+                    />
+                  </TablaCelda>
+                  <TablaCelda>
+                    <input
+                      className="w-28 rounded-lg border border-slate-300 px-2 py-1"
+                      value={it.costoInput}
+                      onChange={(e) => updateItem(index, 'costoInput', e.target.value)}
+                    />
+                  </TablaCelda>
                   <TablaCelda>
                     <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs" onClick={() => removeItem(index)}>
                       Quitar
@@ -220,19 +313,30 @@ export default function CompraNuevaPage() {
       {showProductoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowProductoModal(false)}>
           <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-800">Crear producto</h3>
-            <p className="text-sm text-slate-500">Registra un producto para agregarlo a la orden.</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">Crear producto</h3>
+                <p className="text-sm text-slate-500">Registra un producto para agregarlo a la orden.</p>
+              </div>
+              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setShowProductoModal(false)}>
+                X
+              </button>
+            </div>
+
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               <div>
-                <input className="rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="Codigo" value={productoNuevo.codigo} onChange={(e) => setProductoNuevo((s) => ({ ...s, codigo: e.target.value }))} />
+                <label className="text-sm font-medium text-slate-700">Codigo</label>
+                <input className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="P001" value={productoNuevo.codigo} onChange={(e) => setProductoNuevo((s) => ({ ...s, codigo: e.target.value }))} />
                 <p className="mt-1 text-xs text-slate-500">Codigo unico del producto.</p>
               </div>
               <div>
-                <input className="rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="Nombre" value={productoNuevo.nombre} onChange={(e) => setProductoNuevo((s) => ({ ...s, nombre: e.target.value }))} />
+                <label className="text-sm font-medium text-slate-700">Nombre</label>
+                <input className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="Nombre" value={productoNuevo.nombre} onChange={(e) => setProductoNuevo((s) => ({ ...s, nombre: e.target.value }))} />
                 <p className="mt-1 text-xs text-slate-500">Nombre comercial para busqueda y reportes.</p>
               </div>
               <div>
-                <select className="rounded-xl border border-slate-300 px-3 py-2 w-full" value={productoNuevo.categoria_id} onChange={(e) => setProductoNuevo((s) => ({ ...s, categoria_id: e.target.value }))}>
+                <label className="text-sm font-medium text-slate-700">Categoria</label>
+                <select className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" value={productoNuevo.categoria_id} onChange={(e) => setProductoNuevo((s) => ({ ...s, categoria_id: e.target.value }))}>
                   <option value="">Categoria</option>
                   {categorias.map((c) => (
                     <option key={c.id} value={c.id}>{c.nombre}</option>
@@ -241,18 +345,20 @@ export default function CompraNuevaPage() {
                 <p className="mt-1 text-xs text-slate-500">Categoria a la que pertenece el producto.</p>
               </div>
               <div>
-                <select className="rounded-xl border border-slate-300 px-3 py-2 w-full" value={productoNuevo.unidad_medida} onChange={(e) => setProductoNuevo((s) => ({ ...s, unidad_medida: e.target.value }))}>
+                <label className="text-sm font-medium text-slate-700">Unidad</label>
+                <select className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" value={productoNuevo.unidad_medida} onChange={(e) => setProductoNuevo((s) => ({ ...s, unidad_medida: e.target.value }))}>
                   <option value="UND">UND</option>
                   <option value="LB">LB</option>
                 </select>
                 <p className="mt-1 text-xs text-slate-500">Unidad de manejo para compras y ventas.</p>
               </div>
               <div>
-                <input className="rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="Precio referencia" value={productoNuevo.precio_referencia} onChange={(e) => setProductoNuevo((s) => ({ ...s, precio_referencia: e.target.value }))} />
+                <label className="text-sm font-medium text-slate-700">Precio referencia</label>
+                <input className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="0.00" value={productoNuevo.precio_referencia} onChange={(e) => setProductoNuevo((s) => ({ ...s, precio_referencia: sanitizeDecimalInput(e.target.value, 2) }))} />
                 <p className="mt-1 text-xs text-slate-500">Precio base de referencia para venta.</p>
               </div>
               <div>
-                <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm w-full" onClick={() => setShowCategoriaInline((prev) => !prev)}>
+                <button className="mt-6 rounded-xl border border-slate-300 px-3 py-2 text-sm w-full" onClick={() => setShowCategoriaInline((prev) => !prev)}>
                   {showCategoriaInline ? 'Cancelar categoria' : 'Crear categoria'}
                 </button>
                 <p className="mt-1 text-xs text-slate-500">Si no existe categoria, puedes crearla aqui.</p>
