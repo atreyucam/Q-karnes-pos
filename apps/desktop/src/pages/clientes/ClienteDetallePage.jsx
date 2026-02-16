@@ -6,6 +6,8 @@ import Paginador from '../../components/ui/Paginador';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useClientesStore } from '../../stores/clientesStore';
 import { formatMoney } from '../../lib/formatMoney';
+import { formatDateQuito } from '../../lib/formatDateQuito';
+import { formatQtyByUnit } from '../../lib/formatQty';
 
 const PAGE_SIZE = 8;
 
@@ -24,6 +26,20 @@ function calcPendientes(facturas, saldoCliente) {
   return pendientesById;
 }
 
+function metodoVenta(detalle) {
+  const pagos = detalle?.pagos || [];
+  const contado = pagos
+    .filter((p) => String(p.tipo || '').toUpperCase() === 'CONTADO')
+    .reduce((acc, p) => acc + Number(p.monto || 0), 0);
+  const credito = pagos
+    .filter((p) => String(p.tipo || '').toUpperCase() === 'CREDITO')
+    .reduce((acc, p) => acc + Number(p.monto || 0), 0);
+
+  if (contado > 0 && credito > 0) return 'MIXTO';
+  if (credito > 0) return 'CREDITO';
+  return 'CONTADO';
+}
+
 export default function ClienteDetallePage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -34,7 +50,7 @@ export default function ClienteDetallePage() {
   const [modalAbono, setModalAbono] = useState(null);
   const [abonoForm, setAbonoForm] = useState({ monto: '', referencia: '', observacion: '' });
   const [abonoError, setAbonoError] = useState('');
-  const [modalFactura, setModalFactura] = useState(null);
+  const [modalFactura, setModalFactura] = useState(false);
   const [ventaDetalle, setVentaDetalle] = useState(null);
 
   const loadData = async () => {
@@ -105,8 +121,10 @@ export default function ClienteDetallePage() {
   const abrirDetalleFactura = async (ventaId) => {
     const response = await apiClient.get(`/api/ventas/${ventaId}`);
     setVentaDetalle(normalizeResponse(response.data));
-    setModalFactura(ventaId);
+    setModalFactura(true);
   };
+
+  const metodoActual = metodoVenta(ventaDetalle);
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
@@ -157,6 +175,7 @@ export default function ClienteDetallePage() {
                 <TablaCelda as="th">VENTA/FACTURA</TablaCelda>
                 <TablaCelda as="th">FECHA</TablaCelda>
                 <TablaCelda as="th">METODO</TablaCelda>
+                <TablaCelda as="th">ESTADO</TablaCelda>
                 <TablaCelda as="th">TOTAL</TablaCelda>
                 <TablaCelda as="th">CREDITO PENDIENTE</TablaCelda>
                 <TablaCelda as="th">ACCIONES</TablaCelda>
@@ -170,10 +189,19 @@ export default function ClienteDetallePage() {
                 return (
                   <TablaFila key={f.id}>
                     <TablaCelda>{f.referencia || `#${f.id}`}</TablaCelda>
-                    <TablaCelda>{String(f.fecha).slice(0, 19)}</TablaCelda>
-                    <TablaCelda>{f.metodo}</TablaCelda>
+                    <TablaCelda>{formatDateQuito(f.fecha)}</TablaCelda>
+                    <TablaCelda>
+                      <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(f.metodo)}`}>
+                        {f.metodo}
+                      </span>
+                    </TablaCelda>
+                    <TablaCelda>
+                      <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(f.estado)}`}>
+                        {f.estado}
+                      </span>
+                    </TablaCelda>
                     <TablaCelda>{formatMoney(f.total)}</TablaCelda>
-                    <TablaCelda>{formatMoney(pendiente)}</TablaCelda>
+                    <TablaCelda className={pendiente > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(pendiente)}</TablaCelda>
                     <TablaCelda className="space-x-2">
                       <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => abrirDetalleFactura(f.id)}>
                         Ver
@@ -200,8 +228,16 @@ export default function ClienteDetallePage() {
       {modalAbono && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setModalAbono(null)}>
           <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
-            <p className="text-sm text-slate-500">Factura {modalAbono.referencia || `#${modalAbono.id}`}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
+                <p className="text-sm text-slate-500">Factura {modalAbono.referencia || `#${modalAbono.id}`}</p>
+              </div>
+              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setModalAbono(null)}>
+                X
+              </button>
+            </div>
+
             <p className="mt-1 text-sm text-slate-700">Saldo actual: {formatMoney(Math.min(Number(modalAbono.credito_pendiente || 0), Number(resumen?.saldo || 0)))}</p>
 
             {abonoError && <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{abonoError}</p>}
@@ -234,10 +270,41 @@ export default function ClienteDetallePage() {
       )}
 
       {modalFactura && ventaDetalle?.venta && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setModalFactura(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setModalFactura(false)}>
           <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-800">Detalle factura {ventaDetalle.venta.referencia || `#${ventaDetalle.venta.id}`}</h3>
-            <p className="text-sm text-slate-500">Total: {formatMoney(ventaDetalle.venta.total)}</p>
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-lg font-semibold text-slate-800">Detalle factura</h3>
+              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setModalFactura(false)}>
+                X
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Factura / venta</p>
+                <p className="font-medium text-slate-800">{ventaDetalle.venta.referencia || `#${ventaDetalle.venta.id}`}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Cliente</p>
+                <p className="font-medium text-slate-800">{clienteDetalle?.nombre || ventaDetalle.venta.cliente_nombre || 'Consumidor final'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
+                <p className="font-medium text-slate-800">{formatDateQuito(ventaDetalle.venta.fecha)}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Tipo de pago</p>
+                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(metodoActual)}`}>
+                  {metodoActual}
+                </span>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
+                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(ventaDetalle.venta.estado)}`}>
+                  {ventaDetalle.venta.estado}
+                </span>
+              </div>
+            </div>
 
             <div className="mt-4 space-y-3">
               <Tabla>
@@ -253,36 +320,17 @@ export default function ClienteDetallePage() {
                   {(ventaDetalle.detalle || []).map((d) => (
                     <TablaFila key={d.id}>
                       <TablaCelda>{d.producto_codigo} - {d.producto_nombre}</TablaCelda>
-                      <TablaCelda>{Number(d.cantidad || 0).toFixed(3)}</TablaCelda>
+                      <TablaCelda>{formatQtyByUnit(d.cantidad, d.unidad_medida || d.unidad, { fixedLB: true })}</TablaCelda>
                       <TablaCelda>{formatMoney(d.precio_unit)}</TablaCelda>
                       <TablaCelda>{formatMoney(d.total_linea)}</TablaCelda>
                     </TablaFila>
                   ))}
                 </TablaCuerpo>
               </Tabla>
-
-              <Tabla>
-                <TablaCabecera>
-                  <tr>
-                    <TablaCelda as="th">Tipo pago</TablaCelda>
-                    <TablaCelda as="th">Monto</TablaCelda>
-                  </tr>
-                </TablaCabecera>
-                <TablaCuerpo>
-                  {(ventaDetalle.pagos || []).map((p) => (
-                    <TablaFila key={p.id}>
-                      <TablaCelda>{p.tipo}</TablaCelda>
-                      <TablaCelda>{formatMoney(p.monto)}</TablaCelda>
-                    </TablaFila>
-                  ))}
-                </TablaCuerpo>
-              </Tabla>
             </div>
 
-            <div className="mt-4 flex justify-end">
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setModalFactura(null)}>
-                Cerrar
-              </button>
+            <div className="mt-3 text-right">
+              <p className="text-lg font-bold text-slate-800">Total: {formatMoney(ventaDetalle.venta.total)}</p>
             </div>
           </div>
         </div>

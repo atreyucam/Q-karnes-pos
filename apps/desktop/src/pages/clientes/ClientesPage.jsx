@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
 import Paginador from '../../components/ui/Paginador';
@@ -8,50 +8,25 @@ import { formatMoney } from '../../lib/formatMoney';
 
 const PAGE_SIZE = 10;
 
+const emptyClienteForm = {
+  id: null,
+  nombre: '',
+  telefono: '',
+  activo: true
+};
+
 export default function ClientesPage() {
   const { clientes, meta, error, loading, listar, crear, actualizar, abonar } = useClientesStore();
   const navigate = useNavigate();
 
   const [pagina, setPagina] = useState(1);
   const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', credito: 'TODOS' });
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [nuevoCliente, setNuevoCliente] = useState({ nombre: '', telefono: '', activo: true });
+  const [clienteModal, setClienteModal] = useState({ open: false, mode: 'create' });
+  const [clienteForm, setClienteForm] = useState(emptyClienteForm);
   const [abonoModal, setAbonoModal] = useState(null);
   const [abonoForm, setAbonoForm] = useState({ monto: '', referencia: '', observacion: '' });
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      listar({
-        include_credito: 1,
-        limit: PAGE_SIZE,
-        offset: (pagina - 1) * PAGE_SIZE,
-        search: filtros.search || undefined,
-        activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
-        credito: filtros.credito === 'TODOS' ? undefined : filtros.credito
-      });
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [listar, pagina, filtros]);
-
-  const totalRegistros = Number(meta?.total || 0);
-  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / PAGE_SIZE));
-
-  const onChangeFiltro = (key, value) => {
-    setPagina(1);
-    setFiltros((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const onCreate = async () => {
-    if (!nuevoCliente.nombre.trim()) return;
-    await crear({
-      nombre: nuevoCliente.nombre.trim(),
-      telefono: nuevoCliente.telefono.trim() || null,
-      activo: nuevoCliente.activo
-    });
-
-    setShowCreateModal(false);
-    setNuevoCliente({ nombre: '', telefono: '', activo: true });
+  const refreshList = () => {
     listar({
       include_credito: 1,
       limit: PAGE_SIZE,
@@ -60,6 +35,67 @@ export default function ClientesPage() {
       activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
       credito: filtros.credito === 'TODOS' ? undefined : filtros.credito
     });
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(refreshList, 250);
+    return () => clearTimeout(timer);
+  }, [listar, pagina, filtros]);
+
+  const totalRegistros = Number(meta?.total || 0);
+  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / PAGE_SIZE));
+
+  const clientesOrdenados = useMemo(() => {
+    return [...clientes].sort((a, b) => {
+      const saldoA = Number(a.saldo_credito || 0);
+      const saldoB = Number(b.saldo_credito || 0);
+      if (saldoB !== saldoA) return saldoB - saldoA;
+      return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
+    });
+  }, [clientes]);
+
+  const onChangeFiltro = (key, value) => {
+    setPagina(1);
+    setFiltros((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const openCreateModal = () => {
+    setClienteModal({ open: true, mode: 'create' });
+    setClienteForm({ ...emptyClienteForm });
+  };
+
+  const openEditModal = (cliente) => {
+    setClienteModal({ open: true, mode: 'edit' });
+    setClienteForm({
+      id: cliente.id,
+      nombre: cliente.nombre || '',
+      telefono: cliente.telefono || '',
+      activo: Boolean(cliente.activo)
+    });
+  };
+
+  const closeClienteModal = () => {
+    setClienteModal({ open: false, mode: 'create' });
+    setClienteForm({ ...emptyClienteForm });
+  };
+
+  const onSaveCliente = async () => {
+    if (!clienteForm.nombre.trim()) return;
+
+    const payload = {
+      nombre: clienteForm.nombre.trim(),
+      telefono: clienteForm.telefono.trim() || null,
+      activo: clienteForm.activo
+    };
+
+    if (clienteModal.mode === 'edit' && clienteForm.id) {
+      await actualizar(clienteForm.id, payload);
+    } else {
+      await crear(payload);
+    }
+
+    closeClienteModal();
+    refreshList();
   };
 
   const onRegistrarAbono = async () => {
@@ -72,14 +108,7 @@ export default function ClientesPage() {
 
     setAbonoModal(null);
     setAbonoForm({ monto: '', referencia: '', observacion: '' });
-    listar({
-      include_credito: 1,
-      limit: PAGE_SIZE,
-      offset: (pagina - 1) * PAGE_SIZE,
-      search: filtros.search || undefined,
-      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
-      credito: filtros.credito === 'TODOS' ? undefined : filtros.credito
-    });
+    refreshList();
   };
 
   return (
@@ -130,10 +159,7 @@ export default function ClientesPage() {
           </div>
 
           <div className="flex items-end">
-            <button
-              className="w-full rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]"
-              onClick={() => setShowCreateModal(true)}
-            >
+            <button className="w-full rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={openCreateModal}>
               Nuevo cliente
             </button>
           </div>
@@ -151,7 +177,7 @@ export default function ClientesPage() {
             </tr>
           </TablaCabecera>
           <TablaCuerpo>
-            {clientes.map((c) => {
+            {clientesOrdenados.map((c) => {
               const saldoCredito = Number(c.saldo_credito || 0);
               const sinSaldo = saldoCredito <= 0;
               return (
@@ -164,7 +190,7 @@ export default function ClientesPage() {
                       {c.activo ? 'ACTIVO' : 'INACTIVO'}
                     </span>
                   </TablaCelda>
-                  <TablaCelda>{formatMoney(saldoCredito)}</TablaCelda>
+                  <TablaCelda className={saldoCredito > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(saldoCredito)}</TablaCelda>
                   <TablaCelda className="space-x-2">
                     <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => navigate(`/clientes/${c.id}`)}>
                       Ver
@@ -180,18 +206,14 @@ export default function ClientesPage() {
                     >
                       Registrar abono
                     </button>
+                    <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs" onClick={() => openEditModal(c)}>
+                      Editar
+                    </button>
                     <button
                       className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
                       onClick={async () => {
                         await actualizar(c.id, { activo: !c.activo });
-                        listar({
-                          include_credito: 1,
-                          limit: PAGE_SIZE,
-                          offset: (pagina - 1) * PAGE_SIZE,
-                          search: filtros.search || undefined,
-                          activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
-                          credito: filtros.credito === 'TODOS' ? undefined : filtros.credito
-                        });
+                        refreshList();
                       }}
                     >
                       {c.activo ? 'Desactivar' : 'Activar'}
@@ -214,19 +236,26 @@ export default function ClientesPage() {
         {loading && <p className="text-xs text-slate-500">Cargando...</p>}
       </div>
 
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowCreateModal(false)}>
+      {clienteModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeClienteModal}>
           <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-800">Nuevo cliente</h3>
-            <p className="text-sm text-slate-500">Registra un nuevo cliente para ventas y credito.</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">{clienteModal.mode === 'edit' ? 'Editar cliente' : 'Nuevo cliente'}</h3>
+                <p className="text-sm text-slate-500">Registra o actualiza clientes para ventas y credito.</p>
+              </div>
+              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={closeClienteModal}>
+                X
+              </button>
+            </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <div>
                 <label className="text-sm font-medium text-slate-700">Nombre</label>
                 <input
                   className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                  value={nuevoCliente.nombre}
-                  onChange={(e) => setNuevoCliente((s) => ({ ...s, nombre: e.target.value }))}
+                  value={clienteForm.nombre}
+                  onChange={(e) => setClienteForm((s) => ({ ...s, nombre: e.target.value }))}
                   placeholder="Ej: Restaurante El Buen Sabor"
                 />
                 <p className="mt-1 text-xs text-slate-500">Nombre comercial o de la persona.</p>
@@ -236,8 +265,8 @@ export default function ClientesPage() {
                 <label className="text-sm font-medium text-slate-700">Telefono</label>
                 <input
                   className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                  value={nuevoCliente.telefono}
-                  onChange={(e) => setNuevoCliente((s) => ({ ...s, telefono: e.target.value }))}
+                  value={clienteForm.telefono}
+                  onChange={(e) => setClienteForm((s) => ({ ...s, telefono: e.target.value }))}
                   placeholder="0990000000"
                 />
                 <p className="mt-1 text-xs text-slate-500">Contacto para seguimiento de facturas y credito.</p>
@@ -247,8 +276,8 @@ export default function ClientesPage() {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={nuevoCliente.activo}
-                    onChange={(e) => setNuevoCliente((s) => ({ ...s, activo: e.target.checked }))}
+                    checked={clienteForm.activo}
+                    onChange={(e) => setClienteForm((s) => ({ ...s, activo: e.target.checked }))}
                   />
                   Cliente activo
                 </label>
@@ -257,11 +286,11 @@ export default function ClientesPage() {
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setShowCreateModal(false)}>
+              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={closeClienteModal}>
                 Cancelar
               </button>
-              <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onCreate}>
-                Guardar cliente
+              <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onSaveCliente}>
+                {clienteModal.mode === 'edit' ? 'Guardar cambios' : 'Guardar cliente'}
               </button>
             </div>
           </div>
@@ -271,8 +300,16 @@ export default function ClientesPage() {
       {abonoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setAbonoModal(null)}>
           <div className="w-full max-w-md max-h-[85vh] overflow-auto rounded-2xl bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
-            <p className="text-sm text-slate-500">Cliente: {abonoModal.nombre}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
+                <p className="text-sm text-slate-500">Cliente: {abonoModal.nombre}</p>
+              </div>
+              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setAbonoModal(null)}>
+                X
+              </button>
+            </div>
+
             <p className="mt-1 text-sm text-slate-600">Saldo actual: {formatMoney(abonoModal.saldo_credito)}</p>
             <div className="mt-3 space-y-2">
               <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Monto" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
