@@ -5,6 +5,7 @@ import Paginador from '../../components/ui/Paginador';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
+import { formatDateQuito } from '../../lib/formatDateQuito';
 
 const PAGE_SIZE = 8;
 
@@ -133,36 +134,39 @@ export default function ProveedorDetallePage() {
               </tr>
             </TablaCabecera>
             <TablaCuerpo>
-              {facturasPaginadas.map((f) => (
-                <TablaFila key={f.id}>
-                  <TablaCelda>{f.numero_factura}</TablaCelda>
-                  <TablaCelda>{String(f.fecha).slice(0, 19)}</TablaCelda>
-                  <TablaCelda>{formatMoney(f.total)}</TablaCelda>
-                  <TablaCelda>
-                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(f.metodo_pago === 'CREDITO' ? 'PARCIAL' : 'OK')}`}>
-                      {f.metodo_pago}
-                    </span>
-                  </TablaCelda>
-                  <TablaCelda>{formatMoney(f.pendiente)}</TablaCelda>
-                  <TablaCelda className="space-x-2">
-                    {f.metodo_pago === 'CREDITO' && Number(f.pendiente || 0) > 0 ? (
-                      <button
-                        className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
-                        onClick={() => {
-                          setModalPago(f);
-                          setMontoPago(String(Number(f.pendiente || 0).toFixed(2)));
-                        }}
-                      >
-                        Pagar credito
-                      </button>
-                    ) : (
-                      <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" disabled={!f.orden_id} onClick={() => f.orden_id && navigate(`/compras/ordenes/${f.orden_id}`)}>
-                        Ver
-                      </button>
-                    )}
-                  </TablaCelda>
-                </TablaFila>
-              ))}
+              {facturasPaginadas.map((f) => {
+                const pendiente = Number(f.pendiente || 0);
+                return (
+                  <TablaFila key={f.id}>
+                    <TablaCelda>{f.numero_factura}</TablaCelda>
+                    <TablaCelda>{formatDateQuito(f.fecha)}</TablaCelda>
+                    <TablaCelda>{formatMoney(f.total)}</TablaCelda>
+                    <TablaCelda>
+                      <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(f.metodo_pago)}`}>
+                        {f.metodo_pago}
+                      </span>
+                    </TablaCelda>
+                    <TablaCelda className={pendiente > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(pendiente)}</TablaCelda>
+                    <TablaCelda className="space-x-2">
+                      {f.metodo_pago === 'CREDITO' && pendiente > 0 ? (
+                        <button
+                          className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
+                          onClick={() => {
+                            setModalPago(f);
+                            setMontoPago(String(Number(f.pendiente || 0).toFixed(2)));
+                          }}
+                        >
+                          Pagar credito
+                        </button>
+                      ) : (
+                        <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" disabled={!f.orden_id} onClick={() => f.orden_id && navigate(`/compras/ordenes/${f.orden_id}`)}>
+                          Ver
+                        </button>
+                      )}
+                    </TablaCelda>
+                  </TablaFila>
+                );
+              })}
             </TablaCuerpo>
           </Tabla>
 
@@ -173,8 +177,16 @@ export default function ProveedorDetallePage() {
       {modalPago && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setModalPago(null)}>
           <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-800">Pagar credito</h3>
-            <p className="text-sm text-slate-500">Factura {modalPago.numero_factura}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">Pagar credito</h3>
+                <p className="text-sm text-slate-500">Factura {modalPago.numero_factura}</p>
+              </div>
+              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setModalPago(null)}>
+                X
+              </button>
+            </div>
+
             <p className="mt-1 text-sm text-slate-600">Pendiente: {formatMoney(modalPago.pendiente)}</p>
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               <input className="w-full rounded-xl border border-slate-300 px-3 py-2" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} placeholder="Monto a pagar" />
