@@ -1,0 +1,105 @@
+const db = require('../../db/knex');
+
+async function list(filters = {}, trx = db) {
+  const query = trx('proveedores').orderBy('id', 'desc');
+
+  if (filters.search) {
+    query.where((qb) => {
+      qb.where('nombre', 'like', `%${filters.search}%`)
+        .orWhere('telefono', 'like', `%${filters.search}%`)
+        .orWhere('id', Number(filters.search) || -1);
+    });
+  }
+
+  if (filters.activo !== undefined) {
+    query.where('activo', filters.activo ? 1 : 0);
+  }
+
+  if (filters.tiene_credito !== undefined) {
+    query.where('tiene_credito', filters.tiene_credito ? 1 : 0);
+  }
+
+  if (filters.include_cxp) {
+    query.select(
+      'proveedores.*',
+      trx.raw(`(
+        COALESCE((SELECT SUM(monto) FROM cxp_movimientos WHERE proveedor_id = proveedores.id AND tipo = 'CARGO'), 0) -
+        COALESCE((SELECT SUM(monto) FROM cxp_movimientos WHERE proveedor_id = proveedores.id AND tipo = 'ABONO'), 0)
+      ) as saldo_pendiente`)
+    );
+  }
+
+  return query;
+}
+
+async function create(data, trx = db) {
+  const [id] = await trx('proveedores').insert(data);
+  return trx('proveedores').where({ id }).first();
+}
+
+async function update(id, payload, trx = db) {
+  await trx('proveedores').where({ id }).update(payload);
+  return trx('proveedores').where({ id }).first();
+}
+
+async function getById(id, trx = db) {
+  return trx('proveedores').where({ id }).first();
+}
+
+async function historialPrecios(proveedorId, trx = db) {
+  return trx('proveedor_precios_historial as h')
+    .join('productos as p', 'h.producto_id', 'p.id')
+    .select('h.*', 'p.codigo as producto_codigo', 'p.nombre as producto_nombre')
+    .where('h.proveedor_id', proveedorId)
+    .orderBy('h.fecha', 'desc');
+}
+
+async function listFacturasByProveedor(proveedorId, trx = db) {
+  return trx('compras_facturas as f')
+    .where('f.proveedor_id', proveedorId)
+    .select(
+      'f.id',
+      'f.numero_factura',
+      'f.metodo_pago',
+      'f.total',
+      'f.fecha',
+      trx.raw(`(
+        SELECT r.id
+        FROM compras_recepciones r
+        JOIN compras_ordenes o ON o.id = r.orden_id
+        WHERE r.factura_id = f.numero_factura
+          AND o.proveedor_id = f.proveedor_id
+        ORDER BY r.id DESC
+        LIMIT 1
+      ) as recepcion_id`),
+      trx.raw(`(
+        SELECT r.orden_id
+        FROM compras_recepciones r
+        JOIN compras_ordenes o ON o.id = r.orden_id
+        WHERE r.factura_id = f.numero_factura
+          AND o.proveedor_id = f.proveedor_id
+        ORDER BY r.id DESC
+        LIMIT 1
+      ) as orden_id`),
+      trx.raw(`COALESCE((
+        SELECT SUM(cm.monto)
+        FROM cxp_movimientos cm
+        WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'
+      ), 0) as cargos`),
+      trx.raw(`COALESCE((
+        SELECT SUM(cm.monto)
+        FROM cxp_movimientos cm
+        WHERE cm.factura_id = f.id AND cm.tipo = 'ABONO'
+      ), 0) as abonos`)
+    )
+    .orderBy('f.id', 'desc');
+}
+
+module.exports = {
+  list,
+  create,
+  update,
+  getById,
+  historialPrecios,
+  listFacturasByProveedor
+};
