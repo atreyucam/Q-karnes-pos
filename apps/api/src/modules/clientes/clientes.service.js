@@ -8,12 +8,16 @@ const { moneyRound } = require('../../helpers/money');
 const createSchema = z.object({
   nombre: z.string().min(1),
   telefono: z.string().trim().optional().nullable(),
+  direccion: z.string().trim().optional().nullable(),
+  observacion: z.string().trim().optional().nullable(),
   activo: z.boolean().optional()
 });
 
 const updateSchema = z.object({
   nombre: z.string().min(1).optional(),
   telefono: z.string().trim().optional().nullable(),
+  direccion: z.string().trim().optional().nullable(),
+  observacion: z.string().trim().optional().nullable(),
   activo: z.boolean().optional()
 }).refine((data) => Object.keys(data).length > 0, {
   message: 'Debe enviar al menos un campo'
@@ -21,6 +25,7 @@ const updateSchema = z.object({
 
 const abonoSchema = z.object({
   monto: z.number().positive(),
+  venta_id: z.number().int().positive().optional(),
   referencia: z.string().optional(),
   observacion: z.string().optional()
 });
@@ -63,6 +68,8 @@ async function create(body) {
   return repository.create({
     nombre: parsed.data.nombre,
     telefono: parsed.data.telefono || null,
+    direccion: parsed.data.direccion || null,
+    observacion: parsed.data.observacion || null,
     activo: parsed.data.activo ?? true
   });
 }
@@ -110,6 +117,13 @@ async function abono(id, body) {
     const cliente = await repository.getById(id, trx);
     if (!cliente) throw new AppError(404, 'Cliente no encontrado');
 
+    if (parsed.data.venta_id) {
+      const venta = await repository.getVentaById(parsed.data.venta_id, trx);
+      if (!venta || Number(venta.cliente_id) !== Number(id)) {
+        throw new AppError(400, 'La venta indicada no pertenece al cliente');
+      }
+    }
+
     const saldos = await repository.saldoCliente(id, trx);
     const saldo = moneyRound(saldos.cargos - saldos.abonos);
     const monto = moneyRound(parsed.data.monto);
@@ -121,6 +135,7 @@ async function abono(id, body) {
     const movimiento = await repository.insertCxc(
       {
         cliente_id: id,
+        venta_id: parsed.data.venta_id || null,
         tipo: 'ABONO',
         monto,
         referencia: parsed.data.referencia || null,

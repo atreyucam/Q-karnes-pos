@@ -1,0 +1,21 @@
+{
+  "name": "qkarnes-pos",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/api",
+    "apps/desktop"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:desktop": "npm --workspace apps/desktop run dev",
+    "electron:dev": "npm --workspace apps/desktop run electron:dev",
+    "test:bloque2": "npm --workspace apps/api run test:bloque2",
+    "test:bloque3": "npm --workspace apps/api run test:bloque3",
+    "test:bloque4": "npm --workspace apps/api run test:bloque4",
+    "test:bloque5": "npm --workspace apps/api run test:bloque5",
+    "test:regression": "npm --workspace apps/api run test:regression",
+    "test:bloque6": "npm --workspace apps/desktop run test:bloque6",
+    "test:frontend:build": "npm --workspace apps/desktop run build"
+  }
+}

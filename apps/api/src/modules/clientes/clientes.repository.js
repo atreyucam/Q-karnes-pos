@@ -5,6 +5,8 @@ function applyListFilters(query, filters) {
     query.where((qb) => {
       qb.where('nombre', 'like', `%${filters.search}%`)
         .orWhere('telefono', 'like', `%${filters.search}%`)
+        .orWhere('direccion', 'like', `%${filters.search}%`)
+        .orWhere('observacion', 'like', `%${filters.search}%`)
         .orWhere('id', Number(filters.search) || -1);
     });
   }
@@ -29,15 +31,19 @@ function applyListFilters(query, filters) {
 }
 
 async function list(filters = {}, trx = db) {
-  const query = trx('clientes').orderBy('id', 'desc');
+  const saldoExpr = `(
+    COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'CARGO'), 0) -
+    COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'ABONO'), 0)
+  )`;
+
+  const query = trx('clientes')
+    .orderByRaw(`${saldoExpr} DESC`)
+    .orderBy('nombre', 'asc');
 
   if (filters.include_credito) {
     query.select(
       'clientes.*',
-      trx.raw(`(
-        COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'CARGO'), 0) -
-        COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'ABONO'), 0)
-      ) as saldo_credito`)
+      trx.raw(`${saldoExpr} as saldo_credito`)
     );
   }
 
@@ -96,6 +102,10 @@ async function insertCxc(data, trx = db) {
   return trx('cxc_movimientos').where({ id }).first();
 }
 
+async function getVentaById(id, trx = db) {
+  return trx('ventas').where({ id }).first();
+}
+
 async function listFacturasByCliente(clienteId, trx = db) {
   return trx('ventas as v')
     .leftJoin('venta_pagos as vp', 'vp.venta_id', 'v.id')
@@ -124,5 +134,6 @@ module.exports = {
   listCxcByCliente,
   saldoCliente,
   insertCxc,
+  getVentaById,
   listFacturasByCliente
 };

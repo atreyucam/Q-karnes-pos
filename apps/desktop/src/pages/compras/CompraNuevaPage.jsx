@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
+import { parseApiError } from '../../lib/apiClient';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
 import Paginador from '../../components/ui/Paginador';
+import Modal from '../../components/ui/Modal';
 import { useComprasStore } from '../../stores/comprasStore';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
+import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoService';
 
 function defaultQtyByUnit(unidad) {
   return getUnidad(unidad) === 'UND' ? '1' : '1.00';
@@ -32,6 +34,7 @@ export default function CompraNuevaPage() {
 
   const [proveedorId, setProveedorId] = useState('');
   const [observacion, setObservacion] = useState('');
+  const [authAdmin, setAuthAdmin] = useState({ usuario: '', password: '' });
   const [productoSearch, setProductoSearch] = useState('');
   const [productoSeleccionadoId, setProductoSeleccionadoId] = useState('');
   const [items, setItems] = useState([]);
@@ -46,19 +49,23 @@ export default function CompraNuevaPage() {
     precio_referencia: '0'
   });
   const [categoriaNueva, setCategoriaNueva] = useState('');
+  const [localError, setLocalError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const loadCatalogos = async () => {
-    const [productosResp, categoriasResp] = await Promise.all([
-      apiClient.get('/api/productos', { params: { activo: 1 } }),
-      apiClient.get('/api/categorias')
+    const [nextProductos, nextCategorias] = await Promise.all([
+      fetchProductosActivos(),
+      fetchCategorias()
     ]);
-    setProductos(normalizeResponse(productosResp.data) || []);
-    setCategorias(normalizeResponse(categoriasResp.data) || []);
+    setProductos(nextProductos);
+    setCategorias(nextCategorias);
   };
 
   useEffect(() => {
     listarProveedores({ include_cxp: 1, activo: 1 });
-    loadCatalogos();
+    loadCatalogos().catch((error) => {
+      setLocalError(parseApiError(error) || 'No se pudo cargar catalogos');
+    });
   }, [listarProveedores]);
 
   const productosFiltrados = useMemo(() => {
@@ -132,16 +139,37 @@ export default function CompraNuevaPage() {
   };
 
   const onGuardarOrden = async () => {
-    if (!items.length) return;
+    setLocalError('');
+    if (!items.length) {
+      setLocalError('Agrega al menos un producto a la orden');
+      return;
+    }
+    if (!proveedorId) {
+      setLocalError('Selecciona un proveedor antes de guardar la orden');
+      return;
+    }
+    if (!authAdmin.usuario.trim() || !authAdmin.password) {
+      setLocalError('Registrar compra requiere autorización ADMIN (usuario y clave)');
+      return;
+    }
 
     const parsedItems = [];
     for (const item of items) {
       const cantidad = parseQtyByUnit(item.cantidadInput, item.unidad);
       const costo = Number(String(item.costoInput || '').replace(',', '.'));
 
-      if (!Number.isFinite(cantidad) || cantidad <= 0) return;
-      if (getUnidad(item.unidad) === 'UND' && !Number.isInteger(cantidad)) return;
-      if (!Number.isFinite(costo) || costo < 0) return;
+      if (!Number.isFinite(cantidad) || cantidad <= 0) {
+        setLocalError(`Cantidad inválida para ${item.codigo}`);
+        return;
+      }
+      if (getUnidad(item.unidad) === 'UND' && !Number.isInteger(cantidad)) {
+        setLocalError(`Cantidad inválida para ${item.codigo}: UND solo acepta enteros`);
+        return;
+      }
+      if (!Number.isFinite(costo) || costo < 0) {
+        setLocalError(`Costo inválido para ${item.codigo}`);
+        return;
+      }
 
       parsedItems.push({
         producto_id: item.producto_id,
@@ -153,30 +181,48 @@ export default function CompraNuevaPage() {
     const payload = {
       proveedor_id: proveedorId ? Number(proveedorId) : null,
       observacion: observacion || undefined,
+      autorizacion: {
+        usuario: authAdmin.usuario.trim(),
+        password: authAdmin.password
+      },
       items: parsedItems
     };
 
-    const response = await crearOrden(payload);
-    const ordenId = response?.orden?.id;
-    if (ordenId) {
-      navigate(`/compras/ordenes/${ordenId}`);
-      return;
+    setSaving(true);
+    try {
+      const response = await crearOrden(payload);
+      const ordenId = response?.orden?.id;
+      if (ordenId) {
+        navigate(`/compras/ordenes/${ordenId}`);
+        return;
+      }
+      navigate('/compras');
+    } catch (error) {
+      setLocalError(parseApiError(error));
+    } finally {
+      setSaving(false);
     }
-    navigate('/compras');
   };
 
   const onCrearCategoria = async () => {
+    setLocalError('');
     if (!categoriaNueva.trim()) return;
-    const created = await crearCategoria({ nombre: categoriaNueva.trim(), activo: true });
+    const created = await crearCategoria({ nombre: categoriaNueva.trim(), activo: true }).catch((error) => {
+      setLocalError(parseApiError(error));
+      return null;
+    });
     if (!created?.id) return;
 
     setCategoriaNueva('');
     setShowCategoriaInline(false);
-    await loadCatalogos();
+    await loadCatalogos().catch((error) => {
+      setLocalError(parseApiError(error));
+    });
     setProductoNuevo((s) => ({ ...s, categoria_id: String(created.id) }));
   };
 
   const onCrearProducto = async () => {
+    setLocalError('');
     const payload = {
       codigo: productoNuevo.codigo,
       nombre: productoNuevo.nombre,
@@ -186,12 +232,17 @@ export default function CompraNuevaPage() {
       activo: true
     };
 
-    const created = await crearProducto(payload);
+    const created = await crearProducto(payload).catch((error) => {
+      setLocalError(parseApiError(error));
+      return null;
+    });
     if (!created?.id) return;
 
     setShowProductoModal(false);
     setProductoNuevo({ codigo: '', nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' });
-    await loadCatalogos();
+    await loadCatalogos().catch((error) => {
+      setLocalError(parseApiError(error));
+    });
     setProductoSeleccionadoId(String(created.id));
   };
 
@@ -206,7 +257,11 @@ export default function CompraNuevaPage() {
           <p className="text-sm text-slate-500">Selecciona proveedor y agrega productos a la orden</p>
         </div>
 
-        {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+        {(error || localError) && (
+          <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {localError || error}
+          </p>
+        )}
 
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div>
@@ -223,6 +278,25 @@ export default function CompraNuevaPage() {
           <div>
             <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Observacion</label>
             <textarea className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Observacion (opcional)" value={observacion} onChange={(e) => setObservacion(e.target.value)} />
+          </div>
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="font-semibold text-amber-800">Autorización ADMIN requerida</p>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <input
+                className="rounded-xl border border-amber-300 px-3 py-2"
+                placeholder="Usuario admin"
+                value={authAdmin.usuario}
+                onChange={(e) => setAuthAdmin((s) => ({ ...s, usuario: e.target.value }))}
+              />
+              <input
+                type="password"
+                className="rounded-xl border border-amber-300 px-3 py-2"
+                placeholder="Clave admin"
+                value={authAdmin.password}
+                onChange={(e) => setAuthAdmin((s) => ({ ...s, password: e.target.value }))}
+              />
+            </div>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -303,16 +377,18 @@ export default function CompraNuevaPage() {
           <Paginador paginaActual={1} totalPaginas={1} totalRegistros={items.length} mostrarSiempre />
 
           <div className="flex justify-end">
-            <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onGuardarOrden}>
-              Guardar orden
+            <button
+              className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020] disabled:opacity-60"
+              onClick={onGuardarOrden}
+              disabled={saving}
+            >
+              {saving ? 'Guardando...' : 'Guardar orden'}
             </button>
           </div>
         </div>
       </div>
 
-      {showProductoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowProductoModal(false)}>
-          <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <Modal open={showProductoModal} onClose={() => setShowProductoModal(false)} maxWidthClass="max-w-3xl" panelClassName="p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-slate-800">Crear producto</h3>
@@ -385,9 +461,7 @@ export default function CompraNuevaPage() {
                 Guardar producto
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 }

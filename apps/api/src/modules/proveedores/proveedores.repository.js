@@ -1,12 +1,21 @@
 const db = require('../../db/knex');
 
 async function list(filters = {}, trx = db) {
-  const query = trx('proveedores').orderBy('id', 'desc');
+  const saldoExpr = `(
+    COALESCE((SELECT SUM(monto) FROM cxp_movimientos WHERE proveedor_id = proveedores.id AND tipo = 'CARGO'), 0) -
+    COALESCE((SELECT SUM(monto) FROM cxp_movimientos WHERE proveedor_id = proveedores.id AND tipo = 'ABONO'), 0)
+  )`;
+
+  const query = trx('proveedores')
+    .orderByRaw(`${saldoExpr} DESC`)
+    .orderBy('nombre', 'asc');
 
   if (filters.search) {
     query.where((qb) => {
       qb.where('nombre', 'like', `%${filters.search}%`)
         .orWhere('telefono', 'like', `%${filters.search}%`)
+        .orWhere('direccion', 'like', `%${filters.search}%`)
+        .orWhere('observacion', 'like', `%${filters.search}%`)
         .orWhere('id', Number(filters.search) || -1);
     });
   }
@@ -22,10 +31,7 @@ async function list(filters = {}, trx = db) {
   if (filters.include_cxp) {
     query.select(
       'proveedores.*',
-      trx.raw(`(
-        COALESCE((SELECT SUM(monto) FROM cxp_movimientos WHERE proveedor_id = proveedores.id AND tipo = 'CARGO'), 0) -
-        COALESCE((SELECT SUM(monto) FROM cxp_movimientos WHERE proveedor_id = proveedores.id AND tipo = 'ABONO'), 0)
-      ) as saldo_pendiente`)
+      trx.raw(`${saldoExpr} as saldo_pendiente`)
     );
   }
 
@@ -67,7 +73,7 @@ async function listFacturasByProveedor(proveedorId, trx = db) {
         SELECT r.id
         FROM compras_recepciones r
         JOIN compras_ordenes o ON o.id = r.orden_id
-        WHERE r.factura_id = f.numero_factura
+        WHERE (r.factura_compra_id = f.id OR (r.factura_compra_id IS NULL AND r.factura_id = f.numero_factura))
           AND o.proveedor_id = f.proveedor_id
         ORDER BY r.id DESC
         LIMIT 1
@@ -76,7 +82,7 @@ async function listFacturasByProveedor(proveedorId, trx = db) {
         SELECT r.orden_id
         FROM compras_recepciones r
         JOIN compras_ordenes o ON o.id = r.orden_id
-        WHERE r.factura_id = f.numero_factura
+        WHERE (r.factura_compra_id = f.id OR (r.factura_compra_id IS NULL AND r.factura_id = f.numero_factura))
           AND o.proveedor_id = f.proveedor_id
         ORDER BY r.id DESC
         LIMIT 1
@@ -95,11 +101,50 @@ async function listFacturasByProveedor(proveedorId, trx = db) {
     .orderBy('f.id', 'desc');
 }
 
+async function getFacturaByProveedor(proveedorId, facturaId, trx = db) {
+  return trx('compras_facturas')
+    .where({ id: facturaId, proveedor_id: proveedorId })
+    .first();
+}
+
+async function listFacturaItemsByProveedor(proveedorId, facturaId, numeroFactura, trx = db) {
+  return trx('compras_recepciones as r')
+    .join('compras_recepcion_detalle as rd', 'rd.recepcion_id', 'r.id')
+    .join('compras_orden_detalle as od', 'rd.orden_detalle_id', 'od.id')
+    .join('productos as p', 'od.producto_id', 'p.id')
+    .join('compras_ordenes as o', 'o.id', 'r.orden_id')
+    .where('o.proveedor_id', proveedorId)
+    .andWhere((qb) => {
+      qb.where('r.factura_compra_id', facturaId);
+      if (numeroFactura) qb.orWhere('r.factura_id', numeroFactura);
+    })
+    .select(
+      'rd.id',
+      'rd.cantidad',
+      'rd.costo_unit_real',
+      'rd.subtotal',
+      'p.codigo as producto_codigo',
+      'p.nombre as producto_nombre',
+      'p.unidad',
+      'p.unidad_medida'
+    )
+    .orderBy('rd.id', 'asc');
+}
+
+async function listCxpMovimientosByFactura(facturaId, trx = db) {
+  return trx('cxp_movimientos')
+    .where({ factura_id: facturaId })
+    .orderBy('id', 'asc');
+}
+
 module.exports = {
   list,
   create,
   update,
   getById,
   historialPrecios,
-  listFacturasByProveedor
+  listFacturasByProveedor,
+  getFacturaByProveedor,
+  listFacturaItemsByProveedor,
+  listCxpMovimientosByFactura
 };

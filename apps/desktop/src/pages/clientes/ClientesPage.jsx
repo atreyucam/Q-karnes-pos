@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
 import Paginador from '../../components/ui/Paginador';
+import Modal from '../../components/ui/Modal';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useClientesStore } from '../../stores/clientesStore';
 import { formatMoney } from '../../lib/formatMoney';
@@ -12,6 +13,8 @@ const emptyClienteForm = {
   id: null,
   nombre: '',
   telefono: '',
+  direccion: '',
+  observacion: '',
   activo: true
 };
 
@@ -70,6 +73,8 @@ export default function ClientesPage() {
       id: cliente.id,
       nombre: cliente.nombre || '',
       telefono: cliente.telefono || '',
+      direccion: cliente.direccion || '',
+      observacion: cliente.observacion || '',
       activo: Boolean(cliente.activo)
     });
   };
@@ -85,6 +90,8 @@ export default function ClientesPage() {
     const payload = {
       nombre: clienteForm.nombre.trim(),
       telefono: clienteForm.telefono.trim() || null,
+      direccion: clienteForm.direccion.trim() || null,
+      observacion: clienteForm.observacion.trim() || null,
       activo: clienteForm.activo
     };
 
@@ -128,7 +135,7 @@ export default function ClientesPage() {
               className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
               value={filtros.search}
               onChange={(e) => onChangeFiltro('search', e.target.value)}
-              placeholder="Nombre o telefono"
+              placeholder="Nombre, telefono, direccion"
             />
           </div>
 
@@ -172,7 +179,7 @@ export default function ClientesPage() {
               <TablaCelda as="th">Nombre</TablaCelda>
               <TablaCelda as="th">Telefono</TablaCelda>
               <TablaCelda as="th">Estado</TablaCelda>
-              <TablaCelda as="th">Credito</TablaCelda>
+              <TablaCelda as="th">Credito pendiente</TablaCelda>
               <TablaCelda as="th">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -191,33 +198,35 @@ export default function ClientesPage() {
                     </span>
                   </TablaCelda>
                   <TablaCelda className={saldoCredito > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(saldoCredito)}</TablaCelda>
-                  <TablaCelda className="space-x-2">
-                    <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => navigate(`/clientes/${c.id}`)}>
-                      Ver
-                    </button>
-                    <button
-                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                      disabled={sinSaldo}
-                      title={sinSaldo ? 'Sin saldo pendiente' : 'Registrar abono'}
-                      onClick={() => {
-                        setAbonoModal(c);
-                        setAbonoForm({ monto: '', referencia: '', observacion: '' });
-                      }}
-                    >
-                      Registrar abono
-                    </button>
-                    <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs" onClick={() => openEditModal(c)}>
-                      Editar
-                    </button>
-                    <button
-                      className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
-                      onClick={async () => {
-                        await actualizar(c.id, { activo: !c.activo });
-                        refreshList();
-                      }}
-                    >
-                      {c.activo ? 'Desactivar' : 'Activar'}
-                    </button>
+                  <TablaCelda>
+                    <div className="flex justify-end gap-2">
+                      <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => navigate(`/clientes/${c.id}`)}>
+                        Ver
+                      </button>
+                      <button
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={sinSaldo}
+                        title={sinSaldo ? 'Sin saldo pendiente' : 'Registrar abono'}
+                        onClick={() => {
+                          setAbonoModal(c);
+                          setAbonoForm({ monto: '', referencia: '', observacion: '' });
+                        }}
+                      >
+                        Registrar abono
+                      </button>
+                      <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs" onClick={() => openEditModal(c)}>
+                        Editar
+                      </button>
+                      <button
+                        className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
+                        onClick={async () => {
+                          await actualizar(c.id, { activo: !c.activo });
+                          refreshList();
+                        }}
+                      >
+                        {c.activo ? 'Desactivar' : 'Activar'}
+                      </button>
+                    </div>
                   </TablaCelda>
                 </TablaFila>
               );
@@ -236,97 +245,111 @@ export default function ClientesPage() {
         {loading && <p className="text-xs text-slate-500">Cargando...</p>}
       </div>
 
-      {clienteModal.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeClienteModal}>
-          <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-800">{clienteModal.mode === 'edit' ? 'Editar cliente' : 'Nuevo cliente'}</h3>
-                <p className="text-sm text-slate-500">Registra o actualiza clientes para ventas y credito.</p>
-              </div>
-              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={closeClienteModal}>
-                X
-              </button>
-            </div>
+      <Modal open={clienteModal.open} onClose={closeClienteModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">{clienteModal.mode === 'edit' ? 'Editar cliente' : 'Nuevo cliente'}</h3>
+            <p className="text-sm text-slate-500">Registra o actualiza clientes para ventas y credito.</p>
+          </div>
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={closeClienteModal}>
+            X
+          </button>
+        </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium text-slate-700">Nombre</label>
-                <input
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                  value={clienteForm.nombre}
-                  onChange={(e) => setClienteForm((s) => ({ ...s, nombre: e.target.value }))}
-                  placeholder="Ej: Restaurante El Buen Sabor"
-                />
-                <p className="mt-1 text-xs text-slate-500">Nombre comercial o de la persona.</p>
-              </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="text-sm font-medium text-slate-700">Nombre</label>
+            <input
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              value={clienteForm.nombre}
+              onChange={(e) => setClienteForm((s) => ({ ...s, nombre: e.target.value }))}
+              placeholder="Ej: Restaurante El Buen Sabor"
+            />
+            <p className="mt-1 text-xs text-slate-500">Nombre comercial o de la persona.</p>
+          </div>
 
-              <div>
-                <label className="text-sm font-medium text-slate-700">Telefono</label>
-                <input
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                  value={clienteForm.telefono}
-                  onChange={(e) => setClienteForm((s) => ({ ...s, telefono: e.target.value }))}
-                  placeholder="0990000000"
-                />
-                <p className="mt-1 text-xs text-slate-500">Contacto para seguimiento de facturas y credito.</p>
-              </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Telefono</label>
+            <input
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              value={clienteForm.telefono}
+              onChange={(e) => setClienteForm((s) => ({ ...s, telefono: e.target.value }))}
+              placeholder="0990000000"
+            />
+            <p className="mt-1 text-xs text-slate-500">Contacto para seguimiento de facturas y credito.</p>
+          </div>
 
-              <div className="md:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={clienteForm.activo}
-                    onChange={(e) => setClienteForm((s) => ({ ...s, activo: e.target.checked }))}
-                  />
-                  Cliente activo
-                </label>
-                <p className="mt-1 text-xs text-slate-500">Si esta inactivo no podra ser usado para ventas a credito.</p>
-              </div>
-            </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Direccion</label>
+            <input
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              value={clienteForm.direccion}
+              onChange={(e) => setClienteForm((s) => ({ ...s, direccion: e.target.value }))}
+              placeholder="Sector / calle"
+            />
+            <p className="mt-1 text-xs text-slate-500">Direccion de referencia para entregas o cobranza.</p>
+          </div>
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={closeClienteModal}>
-                Cancelar
-              </button>
-              <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onSaveCliente}>
-                {clienteModal.mode === 'edit' ? 'Guardar cambios' : 'Guardar cliente'}
-              </button>
-            </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Observacion</label>
+            <textarea
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              value={clienteForm.observacion}
+              onChange={(e) => setClienteForm((s) => ({ ...s, observacion: e.target.value }))}
+              placeholder="Notas del cliente"
+            />
+            <p className="mt-1 text-xs text-slate-500">Notas internas sobre condiciones o seguimiento.</p>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={clienteForm.activo}
+                onChange={(e) => setClienteForm((s) => ({ ...s, activo: e.target.checked }))}
+              />
+              Cliente activo
+            </label>
+            <p className="mt-1 text-xs text-slate-500">Si esta inactivo no podra ser usado para ventas a credito.</p>
           </div>
         </div>
-      )}
 
-      {abonoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setAbonoModal(null)}>
-          <div className="w-full max-w-md max-h-[85vh] overflow-auto rounded-2xl bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
-                <p className="text-sm text-slate-500">Cliente: {abonoModal.nombre}</p>
-              </div>
-              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setAbonoModal(null)}>
-                X
-              </button>
-            </div>
-
-            <p className="mt-1 text-sm text-slate-600">Saldo actual: {formatMoney(abonoModal.saldo_credito)}</p>
-            <div className="mt-3 space-y-2">
-              <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Monto" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
-              <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Referencia" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
-              <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Observacion" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
-            </div>
-            <div className="mt-3 flex justify-end gap-2">
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setAbonoModal(null)}>
-                Cancelar
-              </button>
-              <button className="rounded-xl bg-[#b41428] px-3 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onRegistrarAbono}>
-                Guardar
-              </button>
-            </div>
-          </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={closeClienteModal}>
+            Cancelar
+          </button>
+          <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onSaveCliente}>
+            {clienteModal.mode === 'edit' ? 'Guardar cambios' : 'Guardar cliente'}
+          </button>
         </div>
-      )}
+      </Modal>
+
+      <Modal open={Boolean(abonoModal)} onClose={() => setAbonoModal(null)} maxWidthClass="max-w-md" panelClassName="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
+            <p className="text-sm text-slate-500">Cliente: {abonoModal?.nombre}</p>
+          </div>
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setAbonoModal(null)}>
+            X
+          </button>
+        </div>
+
+        <p className="mt-1 text-sm text-slate-600">Saldo actual: {formatMoney(abonoModal?.saldo_credito)}</p>
+        <div className="mt-3 space-y-2">
+          <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Monto" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
+          <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Referencia" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
+          <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Observacion" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
+        </div>
+        <div className="mt-3 flex justify-end gap-2">
+          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setAbonoModal(null)}>
+            Cancelar
+          </button>
+          <button className="rounded-xl bg-[#b41428] px-3 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onRegistrarAbono}>
+            Guardar
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

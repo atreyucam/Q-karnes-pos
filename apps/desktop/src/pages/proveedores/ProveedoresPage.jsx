@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
 import Paginador from '../../components/ui/Paginador';
+import Modal from '../../components/ui/Modal';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
@@ -12,6 +13,8 @@ const emptyProveedorForm = {
   id: null,
   nombre: '',
   telefono: '',
+  direccion: '',
+  observacion: '',
   tiene_credito: true,
   dias_pago: '15',
   activo: true
@@ -66,6 +69,8 @@ export default function ProveedoresPage() {
       id: proveedor.id,
       nombre: proveedor.nombre || '',
       telefono: proveedor.telefono || '',
+      direccion: proveedor.direccion || '',
+      observacion: proveedor.observacion || '',
       tiene_credito: Boolean(proveedor.tiene_credito),
       dias_pago: String(Number(proveedor.dias_pago || 0)),
       activo: Boolean(proveedor.activo)
@@ -83,6 +88,8 @@ export default function ProveedoresPage() {
     const payload = {
       nombre: proveedorForm.nombre.trim(),
       telefono: proveedorForm.telefono.trim() || null,
+      direccion: proveedorForm.direccion.trim() || null,
+      observacion: proveedorForm.observacion.trim() || null,
       tiene_credito: proveedorForm.tiene_credito,
       dias_pago: proveedorForm.tiene_credito ? Number(proveedorForm.dias_pago || 0) : 0,
       activo: proveedorForm.activo
@@ -115,7 +122,7 @@ export default function ProveedoresPage() {
               className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
               value={filtros.search}
               onChange={(e) => setFiltros((s) => ({ ...s, search: e.target.value }))}
-              placeholder="Nombre o telefono"
+              placeholder="Nombre, telefono, direccion"
             />
           </div>
 
@@ -170,22 +177,24 @@ export default function ProveedoresPage() {
                       {p.activo ? 'ACTIVO' : 'INACTIVO'}
                     </span>
                   </TablaCelda>
-                  <TablaCelda className="space-x-2">
-                    <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => navigate(`/proveedores/${p.id}`)}>
-                      Ver
-                    </button>
-                    <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs" onClick={() => openEditModal(p)}>
-                      Editar
-                    </button>
-                    <button
-                      className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
-                      onClick={async () => {
-                        await actualizar(p.id, { activo: !p.activo });
-                        refreshList();
-                      }}
-                    >
-                      {p.activo ? 'Desactivar' : 'Activar'}
-                    </button>
+                  <TablaCelda>
+                    <div className="flex justify-end gap-2">
+                      <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => navigate(`/proveedores/${p.id}`)}>
+                        Ver
+                      </button>
+                      <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs" onClick={() => openEditModal(p)}>
+                        Editar
+                      </button>
+                      <button
+                        className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
+                        onClick={async () => {
+                          await actualizar(p.id, { activo: !p.activo });
+                          refreshList();
+                        }}
+                      >
+                        {p.activo ? 'Desactivar' : 'Activar'}
+                      </button>
+                    </div>
                   </TablaCelda>
                 </TablaFila>
               );
@@ -196,66 +205,74 @@ export default function ProveedoresPage() {
         <Paginador paginaActual={pagina} totalPaginas={totalPaginas} totalRegistros={proveedoresOrdenados.length} mostrarSiempre onPageChange={setPagina} />
       </div>
 
-      {proveedorModal.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeProveedorModal}>
-          <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-800">{proveedorModal.mode === 'edit' ? 'Editar proveedor' : 'Nuevo proveedor'}</h3>
-                <p className="text-sm text-slate-500">Crea o actualiza condiciones de compra y pago.</p>
-              </div>
-              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={closeProveedorModal}>
-                X
-              </button>
-            </div>
+      <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">{proveedorModal.mode === 'edit' ? 'Editar proveedor' : 'Nuevo proveedor'}</h3>
+            <p className="text-sm text-slate-500">Crea o actualiza condiciones de compra y pago.</p>
+          </div>
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={closeProveedorModal}>
+            X
+          </button>
+        </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium text-slate-700">Nombre</label>
-                <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.nombre} onChange={(e) => setProveedorForm((s) => ({ ...s, nombre: e.target.value }))} placeholder="Pronaca" />
-                <p className="mt-1 text-xs text-slate-500">Nombre del proveedor para compras y reportes.</p>
-              </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="text-sm font-medium text-slate-700">Nombre</label>
+            <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.nombre} onChange={(e) => setProveedorForm((s) => ({ ...s, nombre: e.target.value }))} placeholder="Pronaca" />
+            <p className="mt-1 text-xs text-slate-500">Nombre del proveedor para compras y reportes.</p>
+          </div>
 
-              <div>
-                <label className="text-sm font-medium text-slate-700">Telefono</label>
-                <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.telefono} onChange={(e) => setProveedorForm((s) => ({ ...s, telefono: e.target.value }))} placeholder="0990000000" />
-                <p className="mt-1 text-xs text-slate-500">Contacto para pedidos y seguimiento de facturas.</p>
-              </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Telefono</label>
+            <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.telefono} onChange={(e) => setProveedorForm((s) => ({ ...s, telefono: e.target.value }))} placeholder="0990000000" />
+            <p className="mt-1 text-xs text-slate-500">Contacto para pedidos y seguimiento de facturas.</p>
+          </div>
 
-              <div>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input type="checkbox" checked={proveedorForm.tiene_credito} onChange={(e) => setProveedorForm((s) => ({ ...s, tiene_credito: e.target.checked }))} />
-                  Tiene credito
-                </label>
-                <p className="mt-1 text-xs text-slate-500">Si se activa, permite facturas a credito con saldo pendiente.</p>
-              </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Direccion</label>
+            <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.direccion} onChange={(e) => setProveedorForm((s) => ({ ...s, direccion: e.target.value }))} placeholder="Sector / calle" />
+            <p className="mt-1 text-xs text-slate-500">Direccion comercial o punto de despacho.</p>
+          </div>
 
-              <div>
-                <label className="text-sm font-medium text-slate-700">Cada cuantos dias se paga</label>
-                <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.dias_pago} onChange={(e) => setProveedorForm((s) => ({ ...s, dias_pago: e.target.value }))} disabled={!proveedorForm.tiene_credito} placeholder="15" />
-                <p className="mt-1 text-xs text-slate-500">Periodicidad esperada de pago para credito.</p>
-              </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Observacion</label>
+            <textarea className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.observacion} onChange={(e) => setProveedorForm((s) => ({ ...s, observacion: e.target.value }))} placeholder="Notas internas" />
+            <p className="mt-1 text-xs text-slate-500">Notas sobre plazos, entregas y condiciones.</p>
+          </div>
 
-              <div className="md:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input type="checkbox" checked={proveedorForm.activo} onChange={(e) => setProveedorForm((s) => ({ ...s, activo: e.target.checked }))} />
-                  Proveedor activo
-                </label>
-                <p className="mt-1 text-xs text-slate-500">Si esta inactivo no aparecera para nuevas ordenes.</p>
-              </div>
-            </div>
+          <div>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={proveedorForm.tiene_credito} onChange={(e) => setProveedorForm((s) => ({ ...s, tiene_credito: e.target.checked }))} />
+              Tiene credito
+            </label>
+            <p className="mt-1 text-xs text-slate-500">Si se activa, permite facturas a credito con saldo pendiente.</p>
+          </div>
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={closeProveedorModal}>
-                Cancelar
-              </button>
-              <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onSaveProveedor}>
-                {proveedorModal.mode === 'edit' ? 'Guardar cambios' : 'Guardar proveedor'}
-              </button>
-            </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Cada cuantos dias se paga</label>
+            <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorForm.dias_pago} onChange={(e) => setProveedorForm((s) => ({ ...s, dias_pago: e.target.value }))} disabled={!proveedorForm.tiene_credito} placeholder="15" />
+            <p className="mt-1 text-xs text-slate-500">Periodicidad esperada de pago para credito.</p>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={proveedorForm.activo} onChange={(e) => setProveedorForm((s) => ({ ...s, activo: e.target.checked }))} />
+              Proveedor activo
+            </label>
+            <p className="mt-1 text-xs text-slate-500">Si esta inactivo no aparecera para nuevas ordenes.</p>
           </div>
         </div>
-      )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={closeProveedorModal}>
+            Cancelar
+          </button>
+          <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onSaveProveedor}>
+            {proveedorModal.mode === 'edit' ? 'Guardar cambios' : 'Guardar proveedor'}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

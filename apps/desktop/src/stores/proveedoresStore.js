@@ -72,6 +72,19 @@ export const useProveedoresStore = create((set) => ({
       return [];
     }
   },
+  cargarFacturaDetalle: async (id, facturaId) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.get(`/api/proveedores/${id}/facturas/${facturaId}/detalle`);
+      const data = normalizeResponse(response.data);
+      set({ loading: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ loading: false, error: message });
+      return null;
+    }
+  },
   cargarResumenCxp: async (id) => {
     set({ loading: true, error: null });
     try {

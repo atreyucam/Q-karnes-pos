@@ -5,6 +5,7 @@ import Paginador from '../../components/ui/Paginador';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useComprasStore } from '../../stores/comprasStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
+import { formatMoney } from '../../lib/formatMoney';
 
 const PAGE_SIZE = 10;
 
@@ -12,10 +13,21 @@ export default function ComprasPage() {
   const { ordenes, error, listarOrdenes } = useComprasStore();
   const navigate = useNavigate();
   const [pagina, setPagina] = useState(1);
+  const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', credito: 'TODOS' });
+
+  const refresh = () => {
+    listarOrdenes({
+      search: filtros.search || undefined,
+      estado: filtros.estado === 'TODOS' ? undefined : filtros.estado,
+      con_credito: filtros.credito === 'CON' ? 1 : undefined,
+      credito_parcial: filtros.credito === 'PARCIAL' ? 1 : undefined
+    });
+  };
 
   useEffect(() => {
-    listarOrdenes();
-  }, [listarOrdenes]);
+    const timer = setTimeout(refresh, 250);
+    return () => clearTimeout(timer);
+  }, [listarOrdenes, filtros]);
 
   useEffect(() => {
     setPagina(1);
@@ -46,6 +58,44 @@ export default function ComprasPage() {
 
         {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
 
+        <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[1fr_180px_220px]">
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Buscar</label>
+            <input
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              value={filtros.search}
+              onChange={(e) => setFiltros((s) => ({ ...s, search: e.target.value }))}
+              placeholder="Proveedor, id u observacion"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado</label>
+            <select
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              value={filtros.estado}
+              onChange={(e) => setFiltros((s) => ({ ...s, estado: e.target.value }))}
+            >
+              <option value="TODOS">Todos</option>
+              <option value="ABIERTA">ABIERTA</option>
+              <option value="PARCIAL">PARCIAL</option>
+              <option value="COMPLETA">COMPLETA</option>
+              <option value="CANCELADA">CANCELADA</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Credito</label>
+            <select
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              value={filtros.credito}
+              onChange={(e) => setFiltros((s) => ({ ...s, credito: e.target.value }))}
+            >
+              <option value="TODOS">Todos</option>
+              <option value="CON">Con credito pendiente</option>
+              <option value="PARCIAL">Credito parcial</option>
+            </select>
+          </div>
+        </div>
+
         <Tabla>
           <TablaCabecera>
             <tr>
@@ -53,6 +103,7 @@ export default function ComprasPage() {
               <TablaCelda as="th">Proveedor</TablaCelda>
               <TablaCelda as="th">Estado</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
+              <TablaCelda as="th">Credito pendiente</TablaCelda>
               <TablaCelda as="th">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -67,21 +118,24 @@ export default function ComprasPage() {
                   </span>
                 </TablaCelda>
                 <TablaCelda>{formatDateQuito(o.fecha)}</TablaCelda>
-                <TablaCelda className="space-x-2">
-                  {(o.estado === 'ABIERTA' || o.estado === 'PARCIAL') && (
+                <TablaCelda className={Number(o.credito_pendiente || 0) > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(o.credito_pendiente || 0)}</TablaCelda>
+                <TablaCelda>
+                  <div className="flex justify-end gap-2">
+                    {(o.estado === 'ABIERTA' || o.estado === 'PARCIAL') && (
+                      <button
+                        className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
+                        onClick={() => navigate(`/compras/ordenes/${o.id}/cargar`)}
+                      >
+                        Cargar
+                      </button>
+                    )}
                     <button
-                      className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
-                      onClick={() => navigate(`/compras/ordenes/${o.id}/cargar`)}
+                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white"
+                      onClick={() => navigate(`/compras/ordenes/${o.id}`)}
                     >
-                      Cargar
+                      Ver
                     </button>
-                  )}
-                  <button
-                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white"
-                    onClick={() => navigate(`/compras/ordenes/${o.id}`)}
-                  >
-                    Ver
-                  </button>
+                  </div>
                 </TablaCelda>
               </TablaFila>
             ))}

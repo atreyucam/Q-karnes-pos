@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import apiClient, { normalizeResponse } from '../../lib/apiClient';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
 import Paginador from '../../components/ui/Paginador';
+import Modal from '../../components/ui/Modal';
 import { getStatusClasses } from '../../components/ui/statusColors';
 import { useClientesStore } from '../../stores/clientesStore';
 import { formatMoney } from '../../lib/formatMoney';
@@ -68,14 +69,19 @@ export default function ClienteDetallePage() {
 
   const pendientesById = useMemo(() => calcPendientes(facturas, resumen?.saldo), [facturas, resumen?.saldo]);
 
-  const facturasDecoradas = useMemo(
-    () =>
-      facturas.map((row) => ({
-        ...row,
-        credito_pendiente: pendientesById.get(row.id) || 0
-      })),
-    [facturas, pendientesById]
-  );
+  const facturasDecoradas = useMemo(() => {
+    const rows = facturas.map((row) => ({
+      ...row,
+      credito_pendiente: pendientesById.get(row.id) || 0
+    }));
+
+    return rows.sort((a, b) => {
+      const pA = Number(a.credito_pendiente || 0) > 0 ? 0 : 1;
+      const pB = Number(b.credito_pendiente || 0) > 0 ? 0 : 1;
+      if (pA !== pB) return pA - pB;
+      return Number(b.id) - Number(a.id);
+    });
+  }, [facturas, pendientesById]);
 
   const facturasPaginadas = useMemo(() => {
     const start = (pagina - 1) * PAGE_SIZE;
@@ -108,6 +114,7 @@ export default function ClienteDetallePage() {
 
     await abonar(clienteId, {
       monto,
+      venta_id: modalAbono.id,
       referencia: abonoForm.referencia || undefined,
       observacion: abonoForm.observacion || undefined
     });
@@ -116,6 +123,11 @@ export default function ClienteDetallePage() {
     setAbonoForm({ monto: '', referencia: '', observacion: '' });
     setAbonoError('');
     await loadData();
+
+    if (ventaDetalle?.venta?.id === modalAbono.id) {
+      const response = await apiClient.get(`/api/ventas/${modalAbono.id}`);
+      setVentaDetalle(normalizeResponse(response.data));
+    }
   };
 
   const abrirDetalleFactura = async (ventaId) => {
@@ -160,7 +172,7 @@ export default function ClienteDetallePage() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Saldo credito</p>
-                <p className="text-lg font-bold text-[#b41428]">{formatMoney(resumen?.saldo)}</p>
+                <p className={`text-lg font-bold ${Number(resumen?.saldo || 0) > 0 ? 'text-[#b41428]' : 'text-slate-800'}`}>{formatMoney(resumen?.saldo)}</p>
               </div>
             </div>
           </div>
@@ -202,18 +214,20 @@ export default function ClienteDetallePage() {
                     </TablaCelda>
                     <TablaCelda>{formatMoney(f.total)}</TablaCelda>
                     <TablaCelda className={pendiente > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(pendiente)}</TablaCelda>
-                    <TablaCelda className="space-x-2">
-                      <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => abrirDetalleFactura(f.id)}>
-                        Ver
-                      </button>
-                      <button
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                        disabled={sinPendiente}
-                        title={sinPendiente ? 'Sin saldo pendiente' : 'Registrar abono'}
-                        onClick={() => abrirModalAbono(f)}
-                      >
-                        Registrar abono
-                      </button>
+                    <TablaCelda>
+                      <div className="flex justify-end gap-2">
+                        <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => abrirDetalleFactura(f.id)}>
+                          Ver
+                        </button>
+                        <button
+                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={sinPendiente}
+                          title={sinPendiente ? 'Sin saldo pendiente' : 'Registrar abono'}
+                          onClick={() => abrirModalAbono(f)}
+                        >
+                          Registrar abono
+                        </button>
+                      </div>
                     </TablaCelda>
                   </TablaFila>
                 );
@@ -225,116 +239,134 @@ export default function ClienteDetallePage() {
         </div>
       </div>
 
-      {modalAbono && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setModalAbono(null)}>
-          <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
-                <p className="text-sm text-slate-500">Factura {modalAbono.referencia || `#${modalAbono.id}`}</p>
-              </div>
-              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setModalAbono(null)}>
-                X
-              </button>
-            </div>
+      <Modal open={Boolean(modalAbono)} onClose={() => setModalAbono(null)} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
+            <p className="text-sm text-slate-500">Factura {modalAbono?.referencia || `#${modalAbono?.id || ''}`}</p>
+          </div>
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setModalAbono(null)}>
+            X
+          </button>
+        </div>
 
-            <p className="mt-1 text-sm text-slate-700">Saldo actual: {formatMoney(Math.min(Number(modalAbono.credito_pendiente || 0), Number(resumen?.saldo || 0)))}</p>
+        <p className="mt-1 text-sm text-slate-700">Saldo actual: {formatMoney(Math.min(Number(modalAbono?.credito_pendiente || 0), Number(resumen?.saldo || 0)))}</p>
 
-            {abonoError && <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{abonoError}</p>}
+        {abonoError && <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{abonoError}</p>}
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium text-slate-700">Monto</label>
-                <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="10.00" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Referencia (opcional)</label>
-                <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Transferencia / efectivo" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
-              </div>
-              <div className="md:col-span-2">
-                <label className="text-sm font-medium text-slate-700">Observacion (opcional)</label>
-                <textarea className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setModalAbono(null)}>
-                Cancelar
-              </button>
-              <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={registrarAbono}>
-                Guardar abono
-              </button>
-            </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="text-sm font-medium text-slate-700">Valor</label>
+            <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="10.00" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Referencia (opcional)</label>
+            <input className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Transferencia / efectivo" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-sm font-medium text-slate-700">Observacion (opcional)</label>
+            <textarea className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
           </div>
         </div>
-      )}
 
-      {modalFactura && ventaDetalle?.venta && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setModalFactura(false)}>
-          <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="text-lg font-semibold text-slate-800">Detalle factura</h3>
-              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setModalFactura(false)}>
-                X
-              </button>
-            </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setModalAbono(null)}>
+            Cancelar
+          </button>
+          <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={registrarAbono}>
+            Guardar abono
+          </button>
+        </div>
+      </Modal>
 
-            <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Factura / venta</p>
-                <p className="font-medium text-slate-800">{ventaDetalle.venta.referencia || `#${ventaDetalle.venta.id}`}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Cliente</p>
-                <p className="font-medium text-slate-800">{clienteDetalle?.nombre || ventaDetalle.venta.cliente_nombre || 'Consumidor final'}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
-                <p className="font-medium text-slate-800">{formatDateQuito(ventaDetalle.venta.fecha)}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Tipo de pago</p>
-                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(metodoActual)}`}>
-                  {metodoActual}
-                </span>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
-                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(ventaDetalle.venta.estado)}`}>
-                  {ventaDetalle.venta.estado}
-                </span>
-              </div>
-            </div>
+      <Modal open={modalFactura && Boolean(ventaDetalle?.venta)} onClose={() => setModalFactura(false)} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-lg font-semibold text-slate-800">Detalle factura</h3>
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setModalFactura(false)}>
+            X
+          </button>
+        </div>
 
-            <div className="mt-4 space-y-3">
-              <Tabla>
-                <TablaCabecera>
-                  <tr>
-                    <TablaCelda as="th">Producto</TablaCelda>
-                    <TablaCelda as="th">Cantidad</TablaCelda>
-                    <TablaCelda as="th">P.unit</TablaCelda>
-                    <TablaCelda as="th">Subtotal</TablaCelda>
-                  </tr>
-                </TablaCabecera>
-                <TablaCuerpo>
-                  {(ventaDetalle.detalle || []).map((d) => (
-                    <TablaFila key={d.id}>
-                      <TablaCelda>{d.producto_codigo} - {d.producto_nombre}</TablaCelda>
-                      <TablaCelda>{formatQtyByUnit(d.cantidad, d.unidad_medida || d.unidad, { fixedLB: true })}</TablaCelda>
-                      <TablaCelda>{formatMoney(d.precio_unit)}</TablaCelda>
-                      <TablaCelda>{formatMoney(d.total_linea)}</TablaCelda>
-                    </TablaFila>
-                  ))}
-                </TablaCuerpo>
-              </Tabla>
-            </div>
-
-            <div className="mt-3 text-right">
-              <p className="text-lg font-bold text-slate-800">Total: {formatMoney(ventaDetalle.venta.total)}</p>
-            </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">N factura / venta</p>
+            <p className="font-medium text-slate-800">{ventaDetalle?.venta?.referencia || `#${ventaDetalle?.venta?.id || ''}`}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Cliente</p>
+            <p className="font-medium text-slate-800">{clienteDetalle?.nombre || ventaDetalle?.venta?.cliente_nombre || 'Consumidor final'}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
+            <p className="font-medium text-slate-800">{formatDateQuito(ventaDetalle?.venta?.fecha)}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Tipo de pago</p>
+            <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(metodoActual)}`}>
+              {metodoActual}
+            </span>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
+            <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(ventaDetalle?.venta?.estado)}`}>
+              {ventaDetalle?.venta?.estado}
+            </span>
           </div>
         </div>
-      )}
+
+        <div className="mt-4 space-y-3">
+          <Tabla>
+            <TablaCabecera>
+              <tr>
+                <TablaCelda as="th">Producto</TablaCelda>
+                <TablaCelda as="th">Cantidad</TablaCelda>
+                <TablaCelda as="th">P.unit</TablaCelda>
+                <TablaCelda as="th">Subtotal</TablaCelda>
+              </tr>
+            </TablaCabecera>
+            <TablaCuerpo>
+              {(ventaDetalle?.detalle || []).map((d) => (
+                <TablaFila key={d.id}>
+                  <TablaCelda>{d.producto_codigo} - {d.producto_nombre}</TablaCelda>
+                  <TablaCelda>{formatQtyByUnit(d.cantidad, d.unidad_medida || d.unidad, { fixedLB: true })}</TablaCelda>
+                  <TablaCelda>{formatMoney(d.precio_unit)}</TablaCelda>
+                  <TablaCelda>{formatMoney(d.total_linea)}</TablaCelda>
+                </TablaFila>
+              ))}
+            </TablaCuerpo>
+          </Tabla>
+
+          {(ventaDetalle?.abonos || []).length > 0 && (
+            <Tabla>
+              <TablaCabecera>
+                <tr>
+                  <TablaCelda as="th">Fecha</TablaCelda>
+                  <TablaCelda as="th">Monto</TablaCelda>
+                  <TablaCelda as="th">Referencia</TablaCelda>
+                  <TablaCelda as="th">Observacion</TablaCelda>
+                </tr>
+              </TablaCabecera>
+              <TablaCuerpo>
+                {(ventaDetalle.abonos || []).map((abono) => (
+                  <TablaFila key={abono.id}>
+                    <TablaCelda>{formatDateQuito(abono.fecha)}</TablaCelda>
+                    <TablaCelda>{formatMoney(abono.monto)}</TablaCelda>
+                    <TablaCelda>{abono.referencia || '-'}</TablaCelda>
+                    <TablaCelda>{abono.observacion || '-'}</TablaCelda>
+                  </TablaFila>
+                ))}
+              </TablaCuerpo>
+            </Tabla>
+          )}
+        </div>
+
+        <div className="mt-3 flex justify-end">
+          <div className="space-y-1 text-right">
+            <p className="text-sm text-slate-600">Subtotal: {formatMoney(ventaDetalle?.venta?.subtotal)}</p>
+            <p className="text-lg font-bold text-slate-800">Total: {formatMoney(ventaDetalle?.venta?.total)}</p>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
