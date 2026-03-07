@@ -54,11 +54,21 @@ async function facturas(req, res, next) {
   }
 }
 
+async function facturaDetalle(req, res, next) {
+  try {
+    const data = await service.facturaDetalle(Number(req.params.id), Number(req.params.facturaId));
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   list,
   create,
   update,
   historialPrecios,
   getById,
-  facturas
+  facturas,
+  facturaDetalle
 };

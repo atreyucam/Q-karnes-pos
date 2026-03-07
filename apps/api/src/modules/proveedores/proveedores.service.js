@@ -7,6 +7,8 @@ const { moneyRound } = require('../../helpers/money');
 const createSchema = z.object({
   nombre: z.string().min(1),
   telefono: z.string().trim().optional().nullable(),
+  direccion: z.string().trim().optional().nullable(),
+  observacion: z.string().trim().optional().nullable(),
   tiene_credito: z.boolean().optional(),
   dias_pago: z.number().int().nonnegative().optional(),
   activo: z.boolean().optional()
@@ -15,6 +17,8 @@ const createSchema = z.object({
 const updateSchema = z.object({
   nombre: z.string().min(1).optional(),
   telefono: z.string().trim().optional().nullable(),
+  direccion: z.string().trim().optional().nullable(),
+  observacion: z.string().trim().optional().nullable(),
   tiene_credito: z.boolean().optional(),
   dias_pago: z.number().int().nonnegative().optional(),
   activo: z.boolean().optional()
@@ -50,6 +54,8 @@ async function create(body) {
   return repository.create({
     nombre: parsed.data.nombre,
     telefono: parsed.data.telefono || null,
+    direccion: parsed.data.direccion || null,
+    observacion: parsed.data.observacion || null,
     tiene_credito: parsed.data.tiene_credito ?? false,
     dias_pago: parsed.data.dias_pago ?? 0,
     activo: parsed.data.activo ?? true
@@ -99,11 +105,34 @@ async function facturas(id) {
   return { ok: true, data };
 }
 
+async function facturaDetalle(id, facturaId) {
+  const proveedor = await repository.getById(id);
+  if (!proveedor) throw new AppError(404, 'Proveedor no encontrado');
+
+  const factura = await repository.getFacturaByProveedor(id, facturaId);
+  if (!factura) throw new AppError(404, 'Factura no encontrada para el proveedor');
+
+  const [items, movimientos] = await Promise.all([
+    repository.listFacturaItemsByProveedor(id, factura.id, factura.numero_factura),
+    repository.listCxpMovimientosByFactura(factura.id)
+  ]);
+
+  return {
+    ok: true,
+    data: {
+      factura,
+      items,
+      movimientos
+    }
+  };
+}
+
 module.exports = {
   list,
   create,
   update,
   historialPrecios,
   getById,
-  facturas
+  facturas,
+  facturaDetalle
 };

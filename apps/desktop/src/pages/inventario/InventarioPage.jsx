@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
+import { parseApiError } from '../../lib/apiClient';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
 import Paginador from '../../components/ui/Paginador';
+import Modal from '../../components/ui/Modal';
 import { getTipoClasses } from '../../components/ui/statusColors';
 import { useInventarioStore } from '../../stores/inventarioStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatQtyByUnit } from '../../lib/formatQty';
+import { fetchCategorias } from '../../services/catalogoService';
 
 const PAGE_SIZE = 10;
 
@@ -15,6 +17,19 @@ function SectionTitle({ title, subtitle }) {
       <h2 className="text-2xl font-semibold text-slate-800">{title}</h2>
       <p className="text-sm text-slate-500">{subtitle}</p>
     </div>
+  );
+}
+
+function ProductoSelect({ value, onChange, productos, placeholder = 'Selecciona producto' }) {
+  return (
+    <select className="w-full rounded-xl border border-slate-300 px-3 py-2" value={value} onChange={onChange}>
+      <option value="">{placeholder}</option>
+      {productos.map((producto) => (
+        <option key={producto.id} value={producto.id}>
+          {producto.codigo} - {producto.nombre}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -50,6 +65,8 @@ export default function InventarioPage() {
   const [editForm, setEditForm] = useState({ nombre: '', stock_minimo: '', activo: true, categoria_id: '' });
   const [tab, setTab] = useState('disponible');
   const [pagina, setPagina] = useState(1);
+  const [catalogoError, setCatalogoError] = useState('');
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     cargarDisponible();
@@ -57,10 +74,12 @@ export default function InventarioPage() {
     cargarMermas();
     cargarMovimientos();
 
-    apiClient.get('/api/categorias').then((response) => {
-      setCategorias(normalizeResponse(response.data) || []);
-    }).catch(() => {
+    fetchCategorias().then((data) => {
+      setCategorias(data || []);
+      setCatalogoError('');
+    }).catch((error) => {
       setCategorias([]);
+      setCatalogoError(parseApiError(error));
     });
   }, [cargarDisponible, cargarAlertas, cargarMermas, cargarMovimientos]);
 
@@ -76,6 +95,11 @@ export default function InventarioPage() {
   };
 
   const rows = rowsByTab[tab] || [];
+
+  const productoOpciones = useMemo(() => {
+    const source = Array.isArray(disponible) && disponible.length ? disponible : alertas;
+    return [...(source || [])].sort((a, b) => String(a.codigo || '').localeCompare(String(b.codigo || ''), 'es'));
+  }, [disponible, alertas]);
 
   const filteredRows = useMemo(() => {
     if (tab !== 'disponible' && tab !== 'alertas') {
@@ -113,16 +137,30 @@ export default function InventarioPage() {
     <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
       <div className="space-y-5">
         <SectionTitle title="Inventario" subtitle="Control de stock, conteos y ajustes" />
-        {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+        {(error || catalogoError || formError) && (
+          <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {formError || error || catalogoError}
+          </p>
+        )}
 
         <div className="grid gap-4 xl:grid-cols-2">
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="font-semibold text-slate-800">Stock minimo</p>
-            <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Producto ID" value={stockMin.id} onChange={(e) => setStockMin((s) => ({ ...s, id: e.target.value }))} />
+            <ProductoSelect
+              value={stockMin.id}
+              onChange={(e) => setStockMin((s) => ({ ...s, id: e.target.value }))}
+              productos={productoOpciones}
+              placeholder="Selecciona producto"
+            />
             <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Nuevo stock minimo" value={stockMin.stock} onChange={(e) => setStockMin((s) => ({ ...s, stock: e.target.value }))} />
             <button
               className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]"
               onClick={async () => {
+                setFormError('');
+                if (!stockMin.id) {
+                  setFormError('Selecciona un producto para actualizar stock mínimo');
+                  return;
+                }
                 await actualizarStockMinimo(Number(stockMin.id), Number(stockMin.stock));
                 cargarDisponible();
                 cargarAlertas();
@@ -134,12 +172,22 @@ export default function InventarioPage() {
 
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="font-semibold text-slate-800">Conteo</p>
-            <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Producto ID" value={conteo.producto_id} onChange={(e) => setConteo((s) => ({ ...s, producto_id: e.target.value }))} />
+            <ProductoSelect
+              value={conteo.producto_id}
+              onChange={(e) => setConteo((s) => ({ ...s, producto_id: e.target.value }))}
+              productos={productoOpciones}
+              placeholder="Selecciona producto"
+            />
             <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Stock contado" value={conteo.stock_conteo} onChange={(e) => setConteo((s) => ({ ...s, stock_conteo: e.target.value }))} />
             <div className="flex flex-wrap gap-2">
               <button
                 className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white"
                 onClick={async () => {
+                  setFormError('');
+                  if (!conteo.producto_id) {
+                    setFormError('Selecciona un producto para crear el conteo');
+                    return;
+                  }
                   const result = await crearConteo({ items: [{ producto_id: Number(conteo.producto_id), stock_conteo: Number(conteo.stock_conteo) }] });
                   setConteoId(String(result.conteo.id));
                 }}
@@ -150,6 +198,11 @@ export default function InventarioPage() {
               <button
                 className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]"
                 onClick={async () => {
+                  setFormError('');
+                  if (!conteoId) {
+                    setFormError('Ingresa el ID del conteo a aplicar');
+                    return;
+                  }
                   await aplicarConteo(Number(conteoId));
                   cargarDisponible();
                   cargarMovimientos();
@@ -165,11 +218,21 @@ export default function InventarioPage() {
         <div className="grid gap-4 xl:grid-cols-2">
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="font-semibold text-slate-800">Ajuste masivo</p>
-            <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Producto ID" value={ajuste.producto_id} onChange={(e) => setAjuste((s) => ({ ...s, producto_id: e.target.value }))} />
+            <ProductoSelect
+              value={ajuste.producto_id}
+              onChange={(e) => setAjuste((s) => ({ ...s, producto_id: e.target.value }))}
+              productos={productoOpciones}
+              placeholder="Selecciona producto"
+            />
             <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Cantidad (negativa o positiva)" value={ajuste.cantidad} onChange={(e) => setAjuste((s) => ({ ...s, cantidad: e.target.value }))} />
             <button
               className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]"
               onClick={async () => {
+                setFormError('');
+                if (!ajuste.producto_id) {
+                  setFormError('Selecciona un producto para aplicar ajuste');
+                  return;
+                }
                 await ajustesMasivo({ items: [{ producto_id: Number(ajuste.producto_id), cantidad: Number(ajuste.cantidad) }] });
                 cargarDisponible();
                 cargarMovimientos();
@@ -182,12 +245,22 @@ export default function InventarioPage() {
 
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="font-semibold text-slate-800">Merma</p>
-            <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Producto ID" value={merma.producto_id} onChange={(e) => setMerma((s) => ({ ...s, producto_id: e.target.value }))} />
+            <ProductoSelect
+              value={merma.producto_id}
+              onChange={(e) => setMerma((s) => ({ ...s, producto_id: e.target.value }))}
+              productos={productoOpciones}
+              placeholder="Selecciona producto"
+            />
             <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Cantidad" value={merma.cantidad} onChange={(e) => setMerma((s) => ({ ...s, cantidad: e.target.value }))} />
             <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Motivo" value={merma.motivo} onChange={(e) => setMerma((s) => ({ ...s, motivo: e.target.value }))} />
             <button
               className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]"
               onClick={async () => {
+                setFormError('');
+                if (!merma.producto_id) {
+                  setFormError('Selecciona un producto para registrar merma');
+                  return;
+                }
                 await crearMerma({ producto_id: Number(merma.producto_id), cantidad: Number(merma.cantidad), motivo: merma.motivo });
                 cargarDisponible();
                 cargarMermas();
@@ -341,9 +414,7 @@ export default function InventarioPage() {
           onPageChange={setPagina}
         />
 
-        {productoEdit && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setProductoEdit(null)}>
-            <div className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
+        <Modal open={Boolean(productoEdit)} onClose={() => setProductoEdit(null)} maxWidthClass="max-w-lg" panelClassName="border border-slate-200 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-semibold text-slate-800">Editar producto</h3>
@@ -426,9 +497,7 @@ export default function InventarioPage() {
                   Guardar cambios
                 </button>
               </div>
-            </div>
-          </div>
-        )}
+        </Modal>
       </div>
     </div>
   );

@@ -18,7 +18,10 @@ export const statusColorMap = {
   DEVUELTA_TOTAL: 'bg-purple-100 text-purple-700 ring-purple-200',
   ABIERTA: 'bg-sky-100 text-sky-700 ring-sky-200',
   INGRESO: 'bg-green-100 text-green-700 ring-green-200',
-  EGRESO: 'bg-rose-100 text-rose-700 ring-rose-200'
+  EGRESO: 'bg-rose-100 text-rose-700 ring-rose-200',
+  DEVOLUCION: 'bg-rose-100 text-rose-700 ring-rose-200',
+  CARGO: 'bg-amber-100 text-amber-700 ring-amber-200',
+  ABONO: 'bg-green-100 text-green-700 ring-green-200'
 };
 
 function normalize(value) {

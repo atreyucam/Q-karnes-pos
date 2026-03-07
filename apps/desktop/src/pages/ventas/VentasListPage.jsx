@@ -14,6 +14,7 @@ export default function VentasListPage() {
   const [motivo, setMotivo] = useState('Cliente no conforme');
   const [contado, setContado] = useState('');
   const [credito, setCredito] = useState('');
+  const [authAdmin, setAuthAdmin] = useState({ usuario: '', password: '' });
   const [qtyByDetail, setQtyByDetail] = useState({});
   const [pagina, setPagina] = useState(1);
 
@@ -50,7 +51,11 @@ export default function VentasListPage() {
       motivo,
       items: devolucionItems,
       contado: contado === '' ? undefined : Number(contado),
-      credito: credito === '' ? undefined : Number(credito)
+      credito: credito === '' ? undefined : Number(credito),
+      autorizacion: {
+        usuario: authAdmin.usuario.trim(),
+        password: authAdmin.password
+      }
     });
     await detalle(selected);
     await cargarDevoluciones(selected);
@@ -58,7 +63,8 @@ export default function VentasListPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
+      <div className="space-y-5">
       <div>
         <h2 className="text-2xl font-semibold text-slate-800">Listado de ventas</h2>
         <p className="text-sm text-slate-500">Consulta, ticket y devoluciones</p>
@@ -159,6 +165,21 @@ export default function VentasListPage() {
               <input className="rounded-xl border border-slate-300 px-3 py-2" value={contado} onChange={(e) => setContado(e.target.value)} placeholder="Contado opcional" />
               <input className="rounded-xl border border-slate-300 px-3 py-2" value={credito} onChange={(e) => setCredito(e.target.value)} placeholder="Credito opcional" />
             </div>
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-amber-200 bg-amber-50 p-2">
+              <input
+                className="rounded-xl border border-amber-300 px-3 py-2"
+                value={authAdmin.usuario}
+                onChange={(e) => setAuthAdmin((s) => ({ ...s, usuario: e.target.value }))}
+                placeholder="Usuario admin"
+              />
+              <input
+                type="password"
+                className="rounded-xl border border-amber-300 px-3 py-2"
+                value={authAdmin.password}
+                onChange={(e) => setAuthAdmin((s) => ({ ...s, password: e.target.value }))}
+                placeholder="Clave admin"
+              />
+            </div>
             <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={submitDevolucion}>
               Guardar devolucion
             </button>
@@ -199,6 +220,7 @@ export default function VentasListPage() {
           <pre className="overflow-auto rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{JSON.stringify(ticket, null, 2)}</pre>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -1,0 +1,34 @@
+{
+  "name": "qkarnes-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "migrate": "knex migrate:latest",
+    "seed": "knex seed:run",
+    "db:check": "node scripts/sqlite-integrity-check.js",
+    "db:backup": "node scripts/sqlite-backup.js",
+    "db:restore": "node scripts/sqlite-restore.js",
+    "test:bloque2": "node scripts/bloque2-tests.js",
+    "test:bloque3": "node scripts/bloque3-security-tests.js",
+    "test:bloque4": "node scripts/bloque4-sqlite-tests.js",
+    "test:bloque5": "node scripts/bloque5-quality-tests.js",
+    "test:regression": "node scripts/regression-suite.js",
+    "test:all": "npm run test:regression && npm run test:bloque5"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^12.4.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "knex": "^3.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

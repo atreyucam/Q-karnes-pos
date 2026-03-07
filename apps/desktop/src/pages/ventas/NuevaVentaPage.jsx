@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useAuthStore } from '../../stores/authStore';
 import { useVentasStore } from '../../stores/ventasStore';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
 import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
 import FacturaModal from './FacturaModal';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
+import { useVentaCatalogo } from './hooks/useVentaCatalogo';
 
 function round2(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
@@ -43,15 +42,19 @@ function formatStock(value, unidad) {
 }
 
 export default function NuevaVentaPage() {
-  const user = useAuthStore((s) => s.user);
   const crearVenta = useVentasStore((s) => s.crear);
   const errorVenta = useVentasStore((s) => s.error);
-
-  const [categorias, setCategorias] = useState([]);
-  const [categoriaActiva, setCategoriaActiva] = useState(null);
-  const [productosAll, setProductosAll] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const {
+    categorias,
+    categoriaActiva,
+    setCategoriaActiva,
+    productosMostrados,
+    searchTerm,
+    setSearchTerm,
+    debouncedSearch,
+    loadingCatalogo,
+    catalogError
+  } = useVentaCatalogo();
   const [carrito, setCarrito] = useState([]);
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
@@ -63,56 +66,9 @@ export default function NuevaVentaPage() {
   const [contadoTouched, setContadoTouched] = useState(false);
   const [creditoTouched, setCreditoTouched] = useState(false);
 
-  const [loadingCatalogo, setLoadingCatalogo] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const [successToast, setSuccessToast] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchTerm.trim().toLowerCase());
-    }, 280);
-
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  useEffect(() => {
-    async function initCatalogo() {
-      setLoadingCatalogo(true);
-      setLocalError('');
-      try {
-        const [categoriasResp, productosResp] = await Promise.all([
-          apiClient.get('/api/categorias'),
-          apiClient.get('/api/productos', { params: { activo: 1 } })
-        ]);
-
-        const dataCategorias = normalizeResponse(categoriasResp.data) || [];
-        const dataProductos = normalizeResponse(productosResp.data) || [];
-
-        setCategorias(dataCategorias);
-        setProductosAll(dataProductos);
-        setCategoriaActiva(dataCategorias[0]?.id || null);
-      } catch (error) {
-        setLocalError(error?.response?.data?.error || 'No se pudo cargar catalogo');
-      } finally {
-        setLoadingCatalogo(false);
-      }
-    }
-
-    initCatalogo();
-  }, []);
-
-  const productosMostrados = useMemo(() => {
-    if (debouncedSearch) {
-      return productosAll.filter((producto) => {
-        const codigo = String(producto.codigo || '').toLowerCase();
-        const nombre = String(producto.nombre || '').toLowerCase();
-        return codigo.includes(debouncedSearch) || nombre.includes(debouncedSearch);
-      });
-    }
-
-    return productosAll.filter((producto) => Number(producto.categoria_id) === Number(categoriaActiva));
-  }, [productosAll, categoriaActiva, debouncedSearch]);
 
   const carritoConEstado = useMemo(
     () =>
@@ -297,7 +253,6 @@ export default function NuevaVentaPage() {
     }
 
     const payload = {
-      usuario_id: user?.id,
       cliente_id: clienteSeleccionado?.id ?? null,
       items: carritoConEstado.map((item) => ({
         producto_id: item.producto_id,
@@ -376,8 +331,10 @@ export default function NuevaVentaPage() {
         </div>
       </div>
 
-      {(localError || errorVenta) && (
-        <p className="shrink-0 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{localError || errorVenta}</p>
+      {(localError || errorVenta || catalogError) && (
+        <p className="shrink-0 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {localError || errorVenta || catalogError}
+        </p>
       )}
 
       <div className="flex-1 min-h-0 grid gap-4 xl:grid-cols-[1fr_1.25fr]">
@@ -439,13 +396,15 @@ export default function NuevaVentaPage() {
                         </p>
                       </div>
 
-                      <button
-                        type="button"
-                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white"
-                        onClick={() => addProductoToCarrito(producto)}
-                      >
-                        Agregar
-                      </button>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white"
+                          onClick={() => addProductoToCarrito(producto)}
+                        >
+                          Agregar
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -527,23 +486,23 @@ export default function NuevaVentaPage() {
 
             {!clienteSeleccionado ? (
               <div className="mt-3 shrink-0 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <label className="text-sm text-slate-600">
-                  Descuento
+                <div className="grid grid-cols-[110px_1fr] items-center gap-2">
+                  <p className="text-sm text-slate-600">Descuento</p>
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2"
+                    className="block w-full rounded-xl border border-slate-300 px-3 py-2"
                     value={descuento}
                     onChange={(e) => setDescuento(sanitizeDecimalInput(e.target.value, 2))}
                   />
-                </label>
+                </div>
 
-                <label className="text-sm text-slate-600">
-                  Contado
+                <div className="grid grid-cols-[110px_1fr] items-center gap-2">
+                  <p className="text-sm text-slate-600">Contado</p>
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2"
+                    className="block w-full rounded-xl border border-slate-300 px-3 py-2"
                     value={contado}
                     onChange={(e) => {
                       setContado(sanitizeDecimalInput(e.target.value, 2));
@@ -556,7 +515,7 @@ export default function NuevaVentaPage() {
                       }
                     }}
                   />
-                </label>
+                </div>
 
                 <div className="text-right">
                   <p className="text-sm text-slate-500">Metodo: CONTADO</p>
@@ -565,23 +524,23 @@ export default function NuevaVentaPage() {
               </div>
             ) : (
               <div className="mt-3 shrink-0 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2 md:items-end">
-                <label className="text-sm text-slate-600">
-                  Descuento
+                <div className="grid grid-cols-[110px_1fr] items-center gap-2">
+                  <p className="text-sm text-slate-600">Descuento</p>
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2"
+                    className="block w-full rounded-xl border border-slate-300 px-3 py-2"
                     value={descuento}
                     onChange={(e) => setDescuento(sanitizeDecimalInput(e.target.value, 2))}
                   />
-                </label>
+                </div>
 
-                <label className="text-sm text-slate-600">
-                  Contado
+                <div className="grid grid-cols-[110px_1fr] items-center gap-2">
+                  <p className="text-sm text-slate-600">Contado</p>
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2"
+                    className="block w-full rounded-xl border border-slate-300 px-3 py-2"
                     value={contado}
                     onChange={(e) => {
                       setContado(sanitizeDecimalInput(e.target.value, 2));
@@ -594,14 +553,14 @@ export default function NuevaVentaPage() {
                       }
                     }}
                   />
-                </label>
+                </div>
 
-                <label className="text-sm text-slate-600">
-                  Credito
+                <div className="grid grid-cols-[110px_1fr] items-center gap-2">
+                  <p className="text-sm text-slate-600">Credito</p>
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2"
+                    className="block w-full rounded-xl border border-slate-300 px-3 py-2"
                     value={credito}
                     onChange={(e) => {
                       setCredito(sanitizeDecimalInput(e.target.value, 2));
@@ -614,7 +573,7 @@ export default function NuevaVentaPage() {
                       }
                     }}
                   />
-                </label>
+                </div>
 
                 <div className="text-right">
                   <p className="text-sm text-slate-500">Metodo: {tipoPago}</p>

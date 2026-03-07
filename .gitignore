@@ -1,0 +1,7 @@
+node_modules/
+*.log
+apps/api/data/*.sqlite
+apps/desktop/dist/
+apps/desktop/dist-electron/
+apps/desktop/.vite/
+.env
