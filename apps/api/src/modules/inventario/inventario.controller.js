@@ -18,6 +18,15 @@ async function alertas(req, res, next) {
   }
 }
 
+async function conteos(req, res, next) {
+  try {
+    const data = await service.conteos();
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function stockMinimo(req, res, next) {
   try {
     const data = await service.updateStockMinimo(Number(req.params.id), req.body);
@@ -38,7 +47,7 @@ async function crearConteo(req, res, next) {
 
 async function aplicarConteo(req, res, next) {
   try {
-    const data = await service.aplicarConteo(Number(req.params.id));
+    const data = await service.aplicarConteo(Number(req.params.id), req.user);
     return res.json(data);
   } catch (error) {
     return next(error);
@@ -47,7 +56,7 @@ async function aplicarConteo(req, res, next) {
 
 async function ajustesMasivo(req, res, next) {
   try {
-    const data = await service.ajustesMasivo(req.body);
+    const data = await service.ajustesMasivo(req.body, req.user);
     return res.json(data);
   } catch (error) {
     return next(error);
@@ -65,7 +74,7 @@ async function mermas(req, res, next) {
 
 async function crearMerma(req, res, next) {
   try {
-    const data = await service.createMerma(req.body);
+    const data = await service.createMerma(req.body, req.user);
     return res.json(data);
   } catch (error) {
     return next(error);
@@ -84,6 +93,7 @@ async function movimientos(req, res, next) {
 module.exports = {
   disponible,
   alertas,
+  conteos,
   stockMinimo,
   crearConteo,
   aplicarConteo,

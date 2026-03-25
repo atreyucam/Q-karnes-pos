@@ -96,7 +96,22 @@ async function listFacturasByProveedor(proveedorId, trx = db) {
         SELECT SUM(cm.monto)
         FROM cxp_movimientos cm
         WHERE cm.factura_id = f.id AND cm.tipo = 'ABONO'
-      ), 0) as abonos`)
+      ), 0) as abonos`),
+      trx.raw(`COALESCE((
+        SELECT MAX(cm.numero_documento)
+        FROM cxp_movimientos cm
+        WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'
+      ), f.numero_factura) as numero_documento`),
+      trx.raw(`COALESCE((
+        SELECT MAX(cm.fecha_emision)
+        FROM cxp_movimientos cm
+        WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'
+      ), DATE(f.fecha)) as fecha_emision`),
+      trx.raw(`COALESCE((
+        SELECT MAX(cm.fecha_vencimiento)
+        FROM cxp_movimientos cm
+        WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'
+      ), DATE(f.fecha, '+' || COALESCE((SELECT p.dias_pago FROM proveedores p WHERE p.id = f.proveedor_id), 0) || ' day')) as fecha_vencimiento`)
     )
     .orderBy('f.id', 'desc');
 }

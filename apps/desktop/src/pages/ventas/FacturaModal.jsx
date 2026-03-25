@@ -1,10 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PiMagnifyingGlass, PiUserPlus, PiUsersThree, PiX } from 'react-icons/pi';
 import apiClient from '../../lib/apiClient';
-import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
-import Paginador from '../../components/ui/Paginador';
+import {
+  Alert,
+  Button,
+  Input,
+  Modal,
+  Paginador,
+  StatusBadge,
+  Tabla,
+  TablaCabecera,
+  TablaCuerpo,
+  TablaFila,
+  TablaCelda
+} from '../../shared/ui';
+import { uiClassTokens } from '../../shared/tokens/uiClassTokens';
 
 const PAGE_SIZE = 8;
-const MIN_SEARCH_LENGTH = 2;
+const MIN_SEARCH_LENGTH = 0;
 
 export default function FacturaModal({ open, onClose, onSelectCliente }) {
   const [searchInput, setSearchInput] = useState('');
@@ -32,13 +45,6 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
   useEffect(() => {
     if (!open) return;
 
-    if (!canSearch) {
-      setRows([]);
-      setTotal(0);
-      setLoading(false);
-      return;
-    }
-
     async function loadClientes() {
       setLoading(true);
       setError('');
@@ -46,7 +52,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
         const offset = (page - 1) * PAGE_SIZE;
         const response = await apiClient.get('/api/clientes', {
           params: {
-            search: debouncedSearch,
+            search: debouncedSearch || undefined,
             limit: PAGE_SIZE,
             offset
           }
@@ -79,19 +85,6 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return undefined;
-
-    function onKeyDown(event) {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
-
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
   const crearYSeleccionar = async () => {
@@ -115,85 +108,103 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
     }
   };
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="w-[min(900px,calc(100vw-32px))] max-w-3xl max-h-[calc(100vh-32px)] rounded-2xl border border-slate-200 bg-white shadow-lg flex flex-col min-h-0"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 border-b border-slate-100 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-lg font-semibold text-slate-800">Factura - Seleccionar cliente</h3>
-            <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={onClose}>
-              X
-            </button>
-          </div>
-
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <input
-              className="flex-1 rounded-xl border border-slate-300 px-3 py-2"
-              placeholder="Buscar cliente..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-            />
+    <Modal open={open} onClose={onClose} maxWidthClass={uiClassTokens.modal.width.large} panelClassName="p-0">
+      <div className="flex min-h-0 flex-1 flex-col bg-white">
+        <div className="bg-slate-50/50 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-2 text-emerald-700">
+                <PiUsersThree className="text-2xl" />
+              </div>
+              <div>
+                <p className="ui-page-eyebrow !text-emerald-700">Venta</p>
+                <h3 className="text-lg font-extrabold leading-tight text-slate-900 sm:text-xl">Buscar cliente</h3>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Selecciona un cliente existente o crea uno nuevo sin salir del flujo de venta.
+                </p>
+              </div>
+            </div>
             <button
               type="button"
-              className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+              onClick={onClose}
+              aria-label="Cerrar modal"
+            >
+              <PiX className="text-xl" />
+            </button>
+          </div>
+          <div className="mt-4 h-px w-full bg-slate-200" />
+        </div>
+
+        <div className="border-b border-slate-200 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex-1">
+              <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-700">Buscar cliente</p>
+              <div className="relative max-w-[450px]">
+                <PiMagnifyingGlass className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl text-slate-400" />
+                <Input
+                  className="py-2.5 pl-10 pr-3"
+                  placeholder="Nombre, RUC, telefono..."
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                />
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="primary"
               onClick={() => setShowCreate((prev) => !prev)}
             >
-              {showCreate ? 'Cancelar' : 'Agregar cliente'}
-            </button>
+              <PiUserPlus className="h-4 w-4" />
+              {showCreate ? 'Cancelar alta' : 'Agregar nuevo cliente'}
+            </Button>
           </div>
 
           {showCreate && (
-            <div className="mt-3 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[1fr_auto]">
-              <input
-                className="rounded-xl border border-slate-300 px-3 py-2"
+            <div className="mt-4 grid gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 sm:grid-cols-[1fr_auto]">
+              <Input
+                className="py-2.5 px-3"
                 placeholder="Nombre del cliente"
                 value={nuevoNombre}
-                onChange={(e) => setNuevoNombre(e.target.value)}
+                onChange={(event) => setNuevoNombre(event.target.value)}
               />
-              <button
+              <Button
                 type="button"
+                variant="primary"
                 disabled={saving}
                 onClick={crearYSeleccionar}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
               >
                 {saving ? 'Guardando...' : 'Crear y seleccionar'}
-              </button>
+              </Button>
             </div>
           )}
 
-          {error && <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+          {error ? <Alert tone="error" className="mt-4">{error}</Alert> : null}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto p-4">
-          <Tabla>
+        <div className="flex-1 min-h-0 overflow-auto px-4 py-4 sm:px-6 lg:px-8">
+          <Tabla className="overflow-hidden rounded-[1.35rem] border border-[#d8e2ee] shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
             <TablaCabecera>
               <tr>
-                <TablaCelda as="th">ID</TablaCelda>
+                <TablaCelda as="th">Cliente</TablaCelda>
                 <TablaCelda as="th">Nombre</TablaCelda>
                 <TablaCelda as="th">Estado</TablaCelda>
-                <TablaCelda as="th">Seleccionar</TablaCelda>
+                <TablaCelda as="th">Accion</TablaCelda>
               </tr>
             </TablaCabecera>
             <TablaCuerpo>
               {!canSearch && (
                 <TablaFila>
-                  <TablaCelda colSpan={4} className="text-center text-slate-500">
-                    Busca al cliente
+                  <TablaCelda colSpan={4} className="py-8 text-center text-[var(--color-text-muted)]">
+                    Escribe un nombre para filtrar o selecciona un cliente de la lista.
                   </TablaCelda>
                 </TablaFila>
               )}
 
               {canSearch && loading && (
                 <TablaFila>
-                  <TablaCelda colSpan={4} className="text-center text-slate-500">
+                  <TablaCelda colSpan={4} className="py-8 text-center text-[var(--color-text-muted)]">
                     Cargando clientes...
                   </TablaCelda>
                 </TablaFila>
@@ -201,29 +212,31 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
 
               {canSearch && !loading && rows.length === 0 && (
                 <TablaFila>
-                  <TablaCelda colSpan={4} className="text-center text-slate-500">
-                    Sin resultados
+                  <TablaCelda colSpan={4} className="py-8 text-center text-[var(--color-text-muted)]">
+                    No se encontraron clientes con ese criterio.
                   </TablaCelda>
                 </TablaFila>
               )}
 
               {canSearch && !loading && rows.map((cliente) => (
                 <TablaFila key={cliente.id}>
-                  <TablaCelda>#{cliente.id}</TablaCelda>
+                  <TablaCelda className="font-semibold text-[var(--color-text)]">#{cliente.id}</TablaCelda>
                   <TablaCelda>{cliente.nombre}</TablaCelda>
-                  <TablaCelda>{cliente.activo ? 'ACTIVO' : 'INACTIVO'}</TablaCelda>
+                  <TablaCelda><StatusBadge status={cliente.activo ? 'ACTIVO' : 'INACTIVO'} /></TablaCelda>
                   <TablaCelda>
-                    <button
+                    <Button
                       type="button"
+                      variant="primary"
+                      size="sm"
+                      className="rounded-2xl px-5"
                       disabled={!cliente.activo}
                       onClick={() => {
                         onSelectCliente(cliente);
                         onClose();
                       }}
-                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-40"
                     >
-                      Elegir
-                    </button>
+                      Seleccionar
+                    </Button>
                   </TablaCelda>
                 </TablaFila>
               ))}
@@ -231,7 +244,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
           </Tabla>
         </div>
 
-        <div className="shrink-0 border-t border-slate-100 px-4 pb-4">
+        <div className="border-t border-slate-200 px-4 py-4 sm:px-6 lg:px-8">
           <Paginador
             paginaActual={page}
             totalPaginas={totalPages}
@@ -241,6 +254,6 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
           />
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -9,6 +9,7 @@ router.use(authenticate, authorizeRoles('ADMIN', 'CAJERO'));
 
 router.get('/disponible', controller.disponible);
 router.get('/alertas', controller.alertas);
+router.get('/conteos', controller.conteos);
 router.patch('/productos/:id/stock-minimo', controller.stockMinimo);
 router.post('/conteos', controller.crearConteo);
 router.post('/conteos/:id/aplicar', controller.aplicarConteo);

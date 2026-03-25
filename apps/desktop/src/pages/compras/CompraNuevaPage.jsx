@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PiMagnifyingGlass, PiPlus } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import { parseApiError } from '../../lib/apiClient';
-import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
-import Paginador from '../../components/ui/Paginador';
-import Modal from '../../components/ui/Modal';
+import { Alert, Button, EmptyState, Input, Modal, Paginador, Select, Tabla, TablaCabecera, TablaCuerpo, TablaCelda, TablaFila } from '../../ui';
 import { useComprasStore } from '../../stores/comprasStore';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
-import { formatMoney } from '../../lib/formatMoney';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoService';
 
-function defaultQtyByUnit(unidad) {
-  return getUnidad(unidad) === 'UND' ? '1' : '1.00';
+const emptyProveedorForm = { nombre: '', telefono: '', direccion: '', dias_pago: '15' };
+const emptyProductoForm = { codigo: '', nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' };
+const MODAL_PAGE_SIZE = 10;
+
+function getTodayInEcuador() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Guayaquil', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
 function parseQtyByUnit(value, unidad) {
@@ -24,443 +26,592 @@ function parseQtyByUnit(value, unidad) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function validateItem(item) {
+  const unidad = getUnidad(item.unidad);
+  const cantidad = parseQtyByUnit(item.cantidadInput, unidad);
+  const cantidadError = !String(item.cantidadInput || '').trim()
+    ? 'Cantidad requerida.'
+    : !Number.isFinite(cantidad) || cantidad <= 0
+      ? 'Debe ser mayor a cero.'
+      : unidad === 'UND' && !Number.isInteger(cantidad)
+        ? 'UND solo acepta enteros.'
+        : '';
+  return { cantidad, cantidadError };
+}
+
+function labelClassName() {
+  return 'text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]';
+}
+
+function sectionTitleClassName() {
+  return 'text-sm font-semibold uppercase tracking-[0.12em] text-[var(--color-text)]';
+}
+
 export default function CompraNuevaPage() {
   const navigate = useNavigate();
-  const { crearOrden, crearProducto, crearCategoria, error } = useComprasStore();
-  const { proveedores, listar: listarProveedores } = useProveedoresStore();
-
+  const { crearOrden, crearProducto, errorMeta } = useComprasStore();
+  const { proveedores, listar: listarProveedores, crear: crearProveedor } = useProveedoresStore();
   const [productos, setProductos] = useState([]);
   const [categorias, setCategorias] = useState([]);
-
   const [proveedorId, setProveedorId] = useState('');
+  const [fechaEmision, setFechaEmision] = useState(getTodayInEcuador());
   const [observacion, setObservacion] = useState('');
-  const [authAdmin, setAuthAdmin] = useState({ usuario: '', password: '' });
-  const [productoSearch, setProductoSearch] = useState('');
-  const [productoSeleccionadoId, setProductoSeleccionadoId] = useState('');
   const [items, setItems] = useState([]);
-
-  const [showProductoModal, setShowProductoModal] = useState(false);
-  const [showCategoriaInline, setShowCategoriaInline] = useState(false);
-  const [productoNuevo, setProductoNuevo] = useState({
-    codigo: '',
-    nombre: '',
-    categoria_id: '',
-    unidad_medida: 'UND',
-    precio_referencia: '0'
-  });
-  const [categoriaNueva, setCategoriaNueva] = useState('');
   const [localError, setLocalError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showConfirmSave, setShowConfirmSave] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [createdOrderId, setCreatedOrderId] = useState(null);
+  const [showProveedorPicker, setShowProveedorPicker] = useState(false);
+  const [showProveedorCreate, setShowProveedorCreate] = useState(false);
+  const [showProductoPicker, setShowProductoPicker] = useState(false);
+  const [showProductoCreate, setShowProductoCreate] = useState(false);
+  const [proveedorSearch, setProveedorSearch] = useState('');
+  const [productoSearch, setProductoSearch] = useState('');
+  const [productoCategoria, setProductoCategoria] = useState('TODAS');
+  const [proveedorPage, setProveedorPage] = useState(1);
+  const [productoPage, setProductoPage] = useState(1);
+  const [proveedorNuevo, setProveedorNuevo] = useState(emptyProveedorForm);
+  const [productoNuevo, setProductoNuevo] = useState(emptyProductoForm);
 
-  const loadCatalogos = async () => {
-    const [nextProductos, nextCategorias] = await Promise.all([
-      fetchProductosActivos(),
-      fetchCategorias()
-    ]);
-    setProductos(nextProductos);
-    setCategorias(nextCategorias);
-  };
+  const proveedorSeleccionado = useMemo(() => proveedores.find((p) => Number(p.id) === Number(proveedorId)) || null, [proveedorId, proveedores]);
+  const lineErrors = errorMeta?.details?.lines || [];
 
   useEffect(() => {
     listarProveedores({ include_cxp: 1, activo: 1 });
-    loadCatalogos().catch((error) => {
-      setLocalError(parseApiError(error) || 'No se pudo cargar catalogos');
-    });
+    Promise.all([fetchProductosActivos(), fetchCategorias()])
+      .then(([nextProductos, nextCategorias]) => {
+        setProductos(nextProductos);
+        setCategorias(nextCategorias);
+      })
+      .catch((nextError) => setLocalError(parseApiError(nextError) || 'No se pudo cargar catálogos'));
   }, [listarProveedores]);
+
+  useEffect(() => setProveedorPage(1), [proveedorSearch, showProveedorPicker]);
+  useEffect(() => setProductoPage(1), [productoSearch, productoCategoria, showProductoPicker]);
+
+  const proveedoresFiltrados = useMemo(() => {
+    const q = proveedorSearch.trim().toLowerCase();
+    if (!q) return proveedores;
+    return proveedores.filter((p) => [p.nombre, p.telefono, p.direccion].some((value) => String(value || '').toLowerCase().includes(q)));
+  }, [proveedorSearch, proveedores]);
 
   const productosFiltrados = useMemo(() => {
     const q = productoSearch.trim().toLowerCase();
-    if (!q) return productos;
-
-    return productos.filter((p) => {
-      const codigo = String(p.codigo || '').toLowerCase();
-      const nombre = String(p.nombre || '').toLowerCase();
-      return codigo.includes(q) || nombre.includes(q);
+    return productos.filter((producto) => {
+      const matchesSearch = !q || [producto.codigo, producto.nombre, producto.categoria_nombre].some((value) => String(value || '').toLowerCase().includes(q));
+      const matchesCategory = productoCategoria === 'TODAS' || String(producto.categoria_id || '') === productoCategoria;
+      return matchesSearch && matchesCategory;
     });
-  }, [productos, productoSearch]);
+  }, [productoCategoria, productoSearch, productos]);
 
-  const addItem = () => {
-    const producto = productos.find((p) => String(p.id) === String(productoSeleccionadoId));
-    if (!producto) return;
+  const proveedoresTotalPaginas = Math.max(1, Math.ceil(proveedoresFiltrados.length / MODAL_PAGE_SIZE));
+  const proveedoresPaginados = useMemo(() => proveedoresFiltrados.slice((proveedorPage - 1) * MODAL_PAGE_SIZE, proveedorPage * MODAL_PAGE_SIZE), [proveedorPage, proveedoresFiltrados]);
+  const productosTotalPaginas = Math.max(1, Math.ceil(productosFiltrados.length / MODAL_PAGE_SIZE));
+  const productosPaginados = useMemo(() => productosFiltrados.slice((productoPage - 1) * MODAL_PAGE_SIZE, productoPage * MODAL_PAGE_SIZE), [productoPage, productosFiltrados]);
 
+  const totals = useMemo(() => items.reduce((acc, item) => {
+    const next = validateItem(item);
+    return {
+      validRows: acc.validRows + (next.cantidadError ? 0 : 1),
+      invalidRows: acc.invalidRows + (next.cantidadError ? 1 : 0)
+    };
+  }, { validRows: 0, invalidRows: 0 }), [items]);
+
+  const addItem = (producto) => {
     const unidad = getUnidad(producto.unidad_medida || producto.unidad);
-    const costoDefault = Number(producto.precio_referencia || 0).toFixed(2);
-
-    setItems((prev) => {
-      const existing = prev.find((i) => i.producto_id === producto.id);
-      if (!existing) {
-        return [
-          ...prev,
-          {
-            producto_id: producto.id,
-            codigo: producto.codigo,
-            nombre: producto.nombre,
-            unidad,
-            cantidadInput: defaultQtyByUnit(unidad),
-            costoInput: costoDefault
-          }
-        ];
-      }
-
-      const currentQty = parseQtyByUnit(existing.cantidadInput, unidad);
-      const nextQty = (Number.isFinite(currentQty) ? currentQty : 0) + (unidad === 'UND' ? 1 : 1);
-      const normalizedQty = unidad === 'UND' ? String(nextQty) : Number(nextQty).toFixed(2);
-
-      return prev.map((it) =>
-        it.producto_id === producto.id
-          ? { ...it, cantidadInput: normalizedQty }
-          : it
-      );
-    });
-
-    setProductoSeleccionadoId('');
+    setItems((prev) => prev.some((item) => item.producto_id === producto.id)
+      ? prev.map((item) => item.producto_id === producto.id
+        ? { ...item, cantidadInput: unidad === 'UND' ? String((Number(item.cantidadInput) || 0) + 1) : Number((Number(item.cantidadInput) || 0) + 1).toFixed(2) }
+        : item)
+      : [...prev, { producto_id: producto.id, codigo: producto.codigo, nombre: producto.nombre, unidad, cantidadInput: unidad === 'UND' ? '1' : '1.00' }]);
+    setProductoSearch('');
+    setProductoCategoria('TODAS');
+    setShowProductoPicker(false);
   };
 
   const updateItem = (index, key, value) => {
-    setItems((prev) =>
-      prev.map((item, idx) => {
-        if (idx !== index) return item;
-
-        if (key === 'cantidadInput') {
-          return { ...item, cantidadInput: sanitizeQtyInput(value, item.unidad) };
-        }
-
-        if (key === 'costoInput') {
-          return { ...item, costoInput: sanitizeDecimalInput(value, 2) };
-        }
-
-        return { ...item, [key]: value };
-      })
-    );
-  };
-
-  const removeItem = (idx) => {
-    setItems((prev) => prev.filter((_, i) => i !== idx));
+    setItems((prev) => prev.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      if (key === 'cantidadInput') return { ...item, cantidadInput: sanitizeQtyInput(value, item.unidad) };
+      return item;
+    }));
   };
 
   const onGuardarOrden = async () => {
     setLocalError('');
-    if (!items.length) {
-      setLocalError('Agrega al menos un producto a la orden');
-      return;
-    }
-    if (!proveedorId) {
-      setLocalError('Selecciona un proveedor antes de guardar la orden');
-      return;
-    }
-    if (!authAdmin.usuario.trim() || !authAdmin.password) {
-      setLocalError('Registrar compra requiere autorización ADMIN (usuario y clave)');
-      return;
-    }
-
-    const parsedItems = [];
-    for (const item of items) {
-      const cantidad = parseQtyByUnit(item.cantidadInput, item.unidad);
-      const costo = Number(String(item.costoInput || '').replace(',', '.'));
-
-      if (!Number.isFinite(cantidad) || cantidad <= 0) {
-        setLocalError(`Cantidad inválida para ${item.codigo}`);
-        return;
-      }
-      if (getUnidad(item.unidad) === 'UND' && !Number.isInteger(cantidad)) {
-        setLocalError(`Cantidad inválida para ${item.codigo}: UND solo acepta enteros`);
-        return;
-      }
-      if (!Number.isFinite(costo) || costo < 0) {
-        setLocalError(`Costo inválido para ${item.codigo}`);
-        return;
-      }
-
-      parsedItems.push({
-        producto_id: item.producto_id,
-        cantidad,
-        costo_unit_est: costo
-      });
-    }
-
-    const payload = {
-      proveedor_id: proveedorId ? Number(proveedorId) : null,
-      observacion: observacion || undefined,
-      autorizacion: {
-        usuario: authAdmin.usuario.trim(),
-        password: authAdmin.password
-      },
-      items: parsedItems
-    };
-
+    if (!proveedorId) return setLocalError('Selecciona un proveedor antes de guardar.');
+    if (!items.length) return setLocalError('Agrega al menos un producto.');
+    if (totals.invalidRows > 0) return setLocalError('Corrige cantidades inválidas.');
     setSaving(true);
     try {
-      const response = await crearOrden(payload);
-      const ordenId = response?.orden?.id;
-      if (ordenId) {
-        navigate(`/compras/ordenes/${ordenId}`);
-        return;
-      }
-      navigate('/compras');
-    } catch (error) {
-      setLocalError(parseApiError(error));
+      const response = await crearOrden({
+        proveedor_id: Number(proveedorId),
+        fecha_emision: fechaEmision || undefined,
+        observacion: observacion || undefined,
+        items: items.map((item) => {
+          const next = validateItem(item);
+          return { producto_id: item.producto_id, cantidad: next.cantidad };
+        })
+      });
+      setShowConfirmSave(false);
+      setCreatedOrderId(response?.orden?.id || null);
+      setShowSuccessModal(true);
+    } catch (nextError) {
+      setLocalError(parseApiError(nextError));
     } finally {
       setSaving(false);
     }
   };
 
-  const onCrearCategoria = async () => {
+  const onSolicitarGuardado = () => {
     setLocalError('');
-    if (!categoriaNueva.trim()) return;
-    const created = await crearCategoria({ nombre: categoriaNueva.trim(), activo: true }).catch((error) => {
-      setLocalError(parseApiError(error));
+    if (!proveedorId) return setLocalError('Selecciona un proveedor antes de guardar.');
+    if (!items.length) return setLocalError('Agrega al menos un producto.');
+    if (totals.invalidRows > 0) return setLocalError('Corrige cantidades inválidas.');
+    setShowConfirmSave(true);
+  };
+
+  const onCrearProveedor = async () => {
+    setLocalError('');
+    if (!proveedorNuevo.nombre.trim()) return setLocalError('El nombre del proveedor es obligatorio.');
+    const created = await crearProveedor({
+      nombre: proveedorNuevo.nombre.trim(),
+      telefono: proveedorNuevo.telefono.trim() || null,
+      direccion: proveedorNuevo.direccion.trim() || null,
+      tiene_credito: true,
+      dias_pago: Number(proveedorNuevo.dias_pago || 0),
+      activo: true
+    }).catch((nextError) => {
+      setLocalError(parseApiError(nextError));
       return null;
     });
     if (!created?.id) return;
-
-    setCategoriaNueva('');
-    setShowCategoriaInline(false);
-    await loadCatalogos().catch((error) => {
-      setLocalError(parseApiError(error));
-    });
-    setProductoNuevo((s) => ({ ...s, categoria_id: String(created.id) }));
+    await listarProveedores({ include_cxp: 1, activo: 1 });
+    setProveedorId(String(created.id));
+    setProveedorNuevo(emptyProveedorForm);
+    setShowProveedorCreate(false);
+    setShowProveedorPicker(false);
   };
 
   const onCrearProducto = async () => {
     setLocalError('');
-    const payload = {
-      codigo: productoNuevo.codigo,
-      nombre: productoNuevo.nombre,
+    if (!productoNuevo.codigo.trim() || !productoNuevo.nombre.trim()) return setLocalError('Código y nombre del producto son obligatorios.');
+    const created = await crearProducto({
+      codigo: productoNuevo.codigo.trim(),
+      nombre: productoNuevo.nombre.trim(),
       categoria_id: productoNuevo.categoria_id ? Number(productoNuevo.categoria_id) : null,
       unidad_medida: productoNuevo.unidad_medida,
-      precio_referencia: Number(productoNuevo.precio_referencia || 0),
+      precio_venta: Number(productoNuevo.precio_referencia || 0),
       activo: true
-    };
-
-    const created = await crearProducto(payload).catch((error) => {
-      setLocalError(parseApiError(error));
+    }).catch((nextError) => {
+      setLocalError(parseApiError(nextError));
       return null;
     });
     if (!created?.id) return;
-
-    setShowProductoModal(false);
-    setProductoNuevo({ codigo: '', nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' });
-    await loadCatalogos().catch((error) => {
-      setLocalError(parseApiError(error));
-    });
-    setProductoSeleccionadoId(String(created.id));
+    const nextProductos = await fetchProductosActivos();
+    setProductos(nextProductos);
+    setProductoNuevo(emptyProductoForm);
+    setShowProductoCreate(false);
+    addItem(created);
   };
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
-      <div className="space-y-5">
-        <div>
-          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => navigate('/compras')}>
-            Volver
-          </button>
-          <h2 className="mt-3 text-2xl font-semibold text-slate-800">Crear orden de compra</h2>
-          <p className="text-sm text-slate-500">Selecciona proveedor y agrega productos a la orden</p>
+    <div className="space-y-5">
+      <div className="w-full">
+        <button type="button" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-text-muted)] transition hover:text-[var(--color-text)]" onClick={() => navigate('/compras')}>
+          <span aria-hidden="true">←</span>
+          Volver a órdenes
+        </button>
+
+        <div className="mt-5 space-y-1">
+          <h1 className="text-[2rem] font-bold tracking-[-0.02em] text-[var(--color-text)]">Nueva orden de compra</h1>
+          <p className="text-base text-[var(--color-text-muted)]">Registra proveedor, fecha y detalle de orden. Guardar orden no ingresa stock.</p>
         </div>
 
-        {(error || localError) && (
-          <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            {localError || error}
-          </p>
-        )}
+        <div className="mt-6 space-y-4">
+          {localError && <Alert tone="error">{localError}</Alert>}
+          {lineErrors.length > 0 && (
+            <Alert tone="error">
+              <ul className="list-disc pl-5 text-sm">
+                {lineErrors.map((line) => <li key={`${line.index}-${line.code}`}>Línea {Number(line.index) + 1}: {line.message}</li>)}
+              </ul>
+            </Alert>
+          )}
+        </div>
 
-        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Proveedor</label>
-            <select className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" value={proveedorId} onChange={(e) => setProveedorId(e.target.value)}>
-              <option value="">Selecciona proveedor</option>
-              {proveedores.map((p) => (
-                <option key={p.id} value={p.id}>{p.nombre}</option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-500">Selecciona a quien compraras.</p>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Observacion</label>
-            <textarea className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Observacion (opcional)" value={observacion} onChange={(e) => setObservacion(e.target.value)} />
-          </div>
-
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <p className="font-semibold text-amber-800">Autorización ADMIN requerida</p>
-            <div className="mt-2 grid gap-2 md:grid-cols-2">
-              <input
-                className="rounded-xl border border-amber-300 px-3 py-2"
-                placeholder="Usuario admin"
-                value={authAdmin.usuario}
-                onChange={(e) => setAuthAdmin((s) => ({ ...s, usuario: e.target.value }))}
-              />
-              <input
-                type="password"
-                className="rounded-xl border border-amber-300 px-3 py-2"
-                placeholder="Clave admin"
-                value={authAdmin.password}
-                onChange={(e) => setAuthAdmin((s) => ({ ...s, password: e.target.value }))}
-              />
+        <div className="mt-6 space-y-5">
+          <div className="space-y-4 border-b border-[var(--color-border)] pb-6">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <label className={labelClassName()}>Proveedor</label>
+                <div className="mt-2 flex gap-2">
+                  <Input
+                    readOnly
+                    className="flex-1"
+                    value={proveedorSeleccionado ? proveedorSeleccionado.nombre : ''}
+                    placeholder="Seleccionar proveedor"
+                    onClick={() => setShowProveedorPicker(true)}
+                  />
+                  <Button type="button" variant="ghost" className="shrink-0" onClick={() => setShowProveedorPicker(true)}>
+                    Buscar
+                  </Button>
+                </div>
+                <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                  {proveedorSeleccionado
+                    ? [proveedorSeleccionado.telefono || null, proveedorSeleccionado.direccion || null].filter(Boolean).join(' • ') || 'Sin datos adicionales'
+                    : 'Selecciona un proveedor activo para la orden.'}
+                </p>
+              </div>
+              <div>
+                <label className={labelClassName()}>Fecha</label>
+                <Input className="mt-2" type="date" value={fechaEmision} onChange={(e) => setFechaEmision(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className={labelClassName()}>Observación</label>
+              <Input className="mt-2" value={observacion} onChange={(e) => setObservacion(e.target.value)} placeholder="Opcional" />
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="font-semibold text-slate-800">Productos</p>
-            <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_auto_auto] md:items-end">
-              <div>
-                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Buscador de productos</label>
-                <input
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                  placeholder="Codigo o nombre"
-                  value={productoSearch}
-                  onChange={(e) => setProductoSearch(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Producto</label>
-                <select
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                  value={productoSeleccionadoId}
-                  onChange={(e) => setProductoSeleccionadoId(e.target.value)}
-                >
-                  <option value="">Selecciona producto</option>
-                  {productosFiltrados.map((p) => (
-                    <option key={p.id} value={p.id}>{p.codigo} - {p.nombre}</option>
-                  ))}
-                </select>
-                <p className="mt-1 text-xs text-slate-500">Selecciona un producto del inventario o crea uno nuevo.</p>
-              </div>
-
-              <button className="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white" onClick={addItem} title="Anade a la orden">
-                Agregar
-              </button>
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setShowProductoModal(true)}>
-                Crear producto
-              </button>
+          <section className="overflow-hidden rounded-[24px] border border-[var(--color-border)] bg-white">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-background-alt)] px-5 py-4">
+              <p className={sectionTitleClassName()}>Detalle de orden</p>
+              <Button onClick={() => setShowProductoPicker(true)}>
+                <PiPlus className="text-base" />
+                Agregar producto
+              </Button>
             </div>
+
+            <div className="px-5 py-5">
+              <Tabla>
+                <TablaCabecera>
+                  <tr>
+                    <TablaCelda as="th" className="w-16 !px-4 !py-3 text-center">#</TablaCelda>
+                    <TablaCelda as="th" className="!px-4 !py-3">Producto</TablaCelda>
+                    <TablaCelda as="th" className="!px-4 !py-3">Unidad</TablaCelda>
+                    <TablaCelda as="th" className="w-[220px] !px-4 !py-3">Cantidad</TablaCelda>
+                    <TablaCelda as="th" className="!px-4 !py-3 text-right">Acciones</TablaCelda>
+                  </tr>
+                </TablaCabecera>
+                <TablaCuerpo>
+                  {!items.length && (
+                    <TablaFila>
+                      <TablaCelda colSpan={5} className="!py-16">
+                        <div className="flex justify-center">
+                          <EmptyState
+                            className="max-w-md text-center"
+                            title="Sin productos en la orden"
+                            description="Presiona agregar producto para empezar a construir la orden."
+                          />
+                        </div>
+                      </TablaCelda>
+                    </TablaFila>
+                  )}
+                  {items.map((item, index) => {
+                    const next = validateItem(item);
+                    return (
+                      <TablaFila key={`${item.producto_id}-${index}`} className="align-middle">
+                        <TablaCelda className="!px-4 !py-3 text-center font-semibold text-[var(--color-text)]">{index + 1}</TablaCelda>
+                        <TablaCelda className="!px-4 !py-3">
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-[var(--color-text)]">{item.nombre}</p>
+                            <p className="text-xs text-[var(--color-text-muted)]">{item.codigo}</p>
+                          </div>
+                        </TablaCelda>
+                        <TablaCelda className="!px-4 !py-3 font-semibold text-[var(--color-text)]">{item.unidad}</TablaCelda>
+                        <TablaCelda className="!px-4 !py-3">
+                          <Input className={next.cantidadError ? 'border-[var(--color-danger)]' : ''} value={item.cantidadInput} onChange={(e) => updateItem(index, 'cantidadInput', e.target.value)} />
+                          <p className={`mt-1 text-xs ${next.cantidadError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-muted)]'}`}>
+                            {next.cantidadError || (item.unidad === 'UND' ? 'Solo enteros.' : 'Permite decimales.')}
+                          </p>
+                        </TablaCelda>
+                        <TablaCelda className="!px-4 !py-3">
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="iconDanger"
+                              size="sm"
+                              className="font-bold"
+                              aria-label={`Quitar ${item.nombre}`}
+                              title="Quitar"
+                              onClick={() => setItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                            >
+                              <span className="text-lg font-extrabold leading-none text-current">×</span>
+                            </Button>
+                          </div>
+                        </TablaCelda>
+                      </TablaFila>
+                    );
+                  })}
+                </TablaCuerpo>
+              </Tabla>
+
+              <div className="mt-6 flex justify-end">
+                <div className="w-full max-w-[280px] rounded-[20px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                  <div className="flex items-center justify-between text-sm text-[var(--color-text-muted)]">
+                    <span>Filas</span>
+                    <span className="font-semibold text-[var(--color-text)]">{items.length}</span>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-3 text-sm font-semibold text-[var(--color-text)]">
+                    <span>Filas válidas</span>
+                    <span>{totals.validRows}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--color-border)] pt-6">
+          <Button variant="secondary" onClick={() => navigate('/compras')}>
+            Cancelar
+          </Button>
+          <Button onClick={onSolicitarGuardado} disabled={saving}>
+            {saving ? 'Guardando...' : 'Guardar orden'}
+          </Button>
+        </div>
+      </div>
+
+      <Modal open={showProveedorPicker} onClose={() => setShowProveedorPicker(false)} maxWidthClass="max-w-5xl" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-[var(--color-text)]">Seleccionar proveedor</h3>
+              <p className="text-sm text-[var(--color-text-muted)]">Busca y selecciona un proveedor disponible.</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowProveedorPicker(false)}>X</Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-[280px] flex-1">
+              <PiMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+              <Input className="pl-10" placeholder="Buscar proveedor..." value={proveedorSearch} onChange={(e) => setProveedorSearch(e.target.value)} />
+            </div>
+            <Button variant="secondary" onClick={() => setShowProveedorCreate(true)}>
+              <PiPlus className="text-base" />
+              Agregar proveedor
+            </Button>
           </div>
 
           <Tabla>
             <TablaCabecera>
               <tr>
-                <TablaCelda as="th">Producto</TablaCelda>
-                <TablaCelda as="th">Unidad</TablaCelda>
-                <TablaCelda as="th">Cantidad</TablaCelda>
-                <TablaCelda as="th">Costo estimado</TablaCelda>
-                <TablaCelda as="th">Accion</TablaCelda>
+                <TablaCelda as="th">Proveedor</TablaCelda>
+                <TablaCelda as="th">Teléfono</TablaCelda>
+                <TablaCelda as="th">Dirección</TablaCelda>
+                <TablaCelda as="th" className="text-right">Acción</TablaCelda>
               </tr>
             </TablaCabecera>
             <TablaCuerpo>
-              {items.map((it, index) => (
-                <TablaFila key={`${it.producto_id}-${index}`}>
-                  <TablaCelda>{it.codigo} - {it.nombre}</TablaCelda>
-                  <TablaCelda>{it.unidad}</TablaCelda>
+              {proveedoresPaginados.map((proveedor) => (
+                <TablaFila key={proveedor.id}>
+                  <TablaCelda className="font-semibold text-[var(--color-text)]">{proveedor.nombre}</TablaCelda>
+                  <TablaCelda>{proveedor.telefono || '-'}</TablaCelda>
+                  <TablaCelda>{proveedor.direccion || '-'}</TablaCelda>
                   <TablaCelda>
-                    <input
-                      className="w-28 rounded-lg border border-slate-300 px-2 py-1"
-                      value={it.cantidadInput}
-                      onChange={(e) => updateItem(index, 'cantidadInput', e.target.value)}
-                    />
-                  </TablaCelda>
-                  <TablaCelda>
-                    <input
-                      className="w-28 rounded-lg border border-slate-300 px-2 py-1"
-                      value={it.costoInput}
-                      onChange={(e) => updateItem(index, 'costoInput', e.target.value)}
-                    />
-                  </TablaCelda>
-                  <TablaCelda>
-                    <button className="rounded-lg border border-slate-300 px-2 py-1 text-xs" onClick={() => removeItem(index)}>
-                      Quitar
-                    </button>
+                    <div className="flex justify-end">
+                      <Button size="sm" onClick={() => {
+                        setProveedorId(String(proveedor.id));
+                        setShowProveedorPicker(false);
+                      }}>
+                        Seleccionar
+                      </Button>
+                    </div>
                   </TablaCelda>
                 </TablaFila>
               ))}
             </TablaCuerpo>
           </Tabla>
-          <Paginador paginaActual={1} totalPaginas={1} totalRegistros={items.length} mostrarSiempre />
 
-          <div className="flex justify-end">
-            <button
-              className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020] disabled:opacity-60"
-              onClick={onGuardarOrden}
-              disabled={saving}
-            >
-              {saving ? 'Guardando...' : 'Guardar orden'}
-            </button>
+          <Paginador paginaActual={proveedorPage} totalPaginas={proveedoresTotalPaginas} totalRegistros={proveedoresFiltrados.length} mostrarSiempre onPageChange={setProveedorPage} />
+        </div>
+      </Modal>
+
+      <Modal open={showProveedorCreate} onClose={() => setShowProveedorCreate(false)} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-[var(--color-text)]">Agregar proveedor</h3>
+              <p className="text-sm text-[var(--color-text-muted)]">Alta rápida desde la orden.</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowProveedorCreate(false)}>X</Button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className={labelClassName()}>Nombre del proveedor</label>
+              <Input className="mt-2" value={proveedorNuevo.nombre} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, nombre: e.target.value }))} />
+            </div>
+            <div>
+              <label className={labelClassName()}>Teléfono de contacto</label>
+              <Input className="mt-2" value={proveedorNuevo.telefono} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, telefono: e.target.value }))} />
+            </div>
+            <div className="md:col-span-2">
+              <label className={labelClassName()}>Dirección del proveedor</label>
+              <Input className="mt-2" value={proveedorNuevo.direccion} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, direccion: e.target.value }))} />
+            </div>
+            <div>
+              <label className={labelClassName()}>Días de pago crédito</label>
+              <Input className="mt-2" value={proveedorNuevo.dias_pago} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, dias_pago: e.target.value }))} />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowProveedorCreate(false)}>Cancelar</Button>
+            <Button onClick={onCrearProveedor}>Guardar proveedor</Button>
           </div>
         </div>
-      </div>
+      </Modal>
 
-      <Modal open={showProductoModal} onClose={() => setShowProductoModal(false)} maxWidthClass="max-w-3xl" panelClassName="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-800">Crear producto</h3>
-                <p className="text-sm text-slate-500">Registra un producto para agregarlo a la orden.</p>
-              </div>
-              <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setShowProductoModal(false)}>
-                X
-              </button>
+      <Modal open={showProductoPicker} onClose={() => setShowProductoPicker(false)} maxWidthClass="sm:max-w-[min(1120px,calc(100vw-1rem))]" panelClassName="p-0">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 py-4">
+            <div>
+              <h3 className="text-lg font-semibold text-[var(--color-text)]">Agregar producto</h3>
+              <p className="text-sm text-[var(--color-text-muted)]">Busca y selecciona un producto para la orden.</p>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowProductoPicker(false)}>X</Button>
+          </div>
 
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium text-slate-700">Codigo</label>
-                <input className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="P001" value={productoNuevo.codigo} onChange={(e) => setProductoNuevo((s) => ({ ...s, codigo: e.target.value }))} />
-                <p className="mt-1 text-xs text-slate-500">Codigo unico del producto.</p>
+          <div className="shrink-0 px-5 py-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative min-w-[280px] flex-1">
+                <PiMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+                <Input className="pl-10" placeholder="Buscar producto..." value={productoSearch} onChange={(e) => setProductoSearch(e.target.value)} />
               </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Nombre</label>
-                <input className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="Nombre" value={productoNuevo.nombre} onChange={(e) => setProductoNuevo((s) => ({ ...s, nombre: e.target.value }))} />
-                <p className="mt-1 text-xs text-slate-500">Nombre comercial para busqueda y reportes.</p>
+              <div className="min-w-[220px]">
+                <Select value={productoCategoria} onChange={(e) => setProductoCategoria(e.target.value)}>
+                  <option value="TODAS">Todas las categorías</option>
+                  {categorias.map((categoria) => <option key={categoria.id} value={String(categoria.id)}>{categoria.nombre}</option>)}
+                </Select>
               </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Categoria</label>
-                <select className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" value={productoNuevo.categoria_id} onChange={(e) => setProductoNuevo((s) => ({ ...s, categoria_id: e.target.value }))}>
-                  <option value="">Categoria</option>
-                  {categorias.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nombre}</option>
-                  ))}
-                </select>
-                <p className="mt-1 text-xs text-slate-500">Categoria a la que pertenece el producto.</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Unidad</label>
-                <select className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" value={productoNuevo.unidad_medida} onChange={(e) => setProductoNuevo((s) => ({ ...s, unidad_medida: e.target.value }))}>
-                  <option value="UND">UND</option>
-                  <option value="LB">LB</option>
-                </select>
-                <p className="mt-1 text-xs text-slate-500">Unidad de manejo para compras y ventas.</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">Precio referencia</label>
-                <input className="mt-1 rounded-xl border border-slate-300 px-3 py-2 w-full" placeholder="0.00" value={productoNuevo.precio_referencia} onChange={(e) => setProductoNuevo((s) => ({ ...s, precio_referencia: sanitizeDecimalInput(e.target.value, 2) }))} />
-                <p className="mt-1 text-xs text-slate-500">Precio base de referencia para venta.</p>
-              </div>
-              <div>
-                <button className="mt-6 rounded-xl border border-slate-300 px-3 py-2 text-sm w-full" onClick={() => setShowCategoriaInline((prev) => !prev)}>
-                  {showCategoriaInline ? 'Cancelar categoria' : 'Crear categoria'}
-                </button>
-                <p className="mt-1 text-xs text-slate-500">Si no existe categoria, puedes crearla aqui.</p>
-              </div>
+              <Button variant="secondary" onClick={() => setShowProductoCreate(true)}>
+                <PiPlus className="text-base" />
+                Crear producto
+              </Button>
             </div>
+          </div>
 
-            {showCategoriaInline && (
-              <div className="mt-3 space-y-1">
-                <div className="flex gap-2">
-                  <input className="flex-1 rounded-xl border border-slate-300 px-3 py-2" placeholder="Nombre categoria" value={categoriaNueva} onChange={(e) => setCategoriaNueva(e.target.value)} />
-                  <button className="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white" onClick={onCrearCategoria}>
-                    Guardar categoria
-                  </button>
-                </div>
-                <p className="text-xs text-slate-500">Define la familia del producto para filtros y reportes.</p>
-              </div>
-            )}
+          <div className="min-h-0 flex-1 overflow-auto px-5 pb-4">
+            <Tabla>
+              <TablaCabecera>
+                <tr>
+                  <TablaCelda as="th">Producto</TablaCelda>
+                  <TablaCelda as="th">Código</TablaCelda>
+                  <TablaCelda as="th">Unidad</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Acción</TablaCelda>
+                </tr>
+              </TablaCabecera>
+              <TablaCuerpo>
+                {productosPaginados.map((producto) => (
+                  <TablaFila key={producto.id}>
+                    <TablaCelda>
+                      <div>
+                        <p className="font-semibold text-[var(--color-text)]">{producto.nombre}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">{producto.categoria_nombre || 'Sin categoría'}</p>
+                      </div>
+                    </TablaCelda>
+                    <TablaCelda>{producto.codigo}</TablaCelda>
+                    <TablaCelda>{getUnidad(producto.unidad_medida || producto.unidad)}</TablaCelda>
+                    <TablaCelda>
+                      <div className="flex justify-end">
+                        <Button size="sm" onClick={() => addItem(producto)}>Seleccionar</Button>
+                      </div>
+                    </TablaCelda>
+                  </TablaFila>
+                ))}
+              </TablaCuerpo>
+            </Tabla>
+          </div>
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setShowProductoModal(false)}>
-                Cancelar
-              </button>
-              <button className="rounded-xl bg-[#b41428] px-3 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onCrearProducto}>
-                Guardar producto
-              </button>
+          <div className="shrink-0 border-t border-[var(--color-border)] px-5 py-4">
+            <Paginador paginaActual={productoPage} totalPaginas={productosTotalPaginas} totalRegistros={productosFiltrados.length} mostrarSiempre onPageChange={setProductoPage} />
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showProductoCreate} onClose={() => setShowProductoCreate(false)} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-[var(--color-text)]">Crear producto</h3>
+              <p className="text-sm text-[var(--color-text-muted)]">Alta rápida desde la orden.</p>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowProductoCreate(false)}>X</Button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className={labelClassName()}>Código del producto</label>
+              <Input className="mt-2" value={productoNuevo.codigo} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, codigo: e.target.value }))} />
+            </div>
+            <div>
+              <label className={labelClassName()}>Nombre descriptivo</label>
+              <Input className="mt-2" value={productoNuevo.nombre} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, nombre: e.target.value }))} />
+            </div>
+            <div>
+              <label className={labelClassName()}>Categoría</label>
+              <Select className="mt-2" value={productoNuevo.categoria_id} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, categoria_id: e.target.value }))}>
+                <option value="">Selecciona categoría</option>
+                {categorias.map((categoria) => <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className={labelClassName()}>Unidad de medida</label>
+              <Select className="mt-2" value={productoNuevo.unidad_medida} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, unidad_medida: e.target.value }))}>
+                <option value="UND">UND</option>
+                <option value="LB">LB</option>
+              </Select>
+            </div>
+            <div>
+              <label className={labelClassName()}>Precio de venta</label>
+              <Input className="mt-2" value={productoNuevo.precio_referencia} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, precio_referencia: sanitizeDecimalInput(e.target.value, 2) }))} />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowProductoCreate(false)}>Cancelar</Button>
+            <Button onClick={onCrearProducto}>Guardar producto</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showConfirmSave} onClose={() => setShowConfirmSave(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Confirmar guardado</h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              Se guardará la orden para {proveedorSeleccionado?.nombre || 'el proveedor seleccionado'} con {items.length} fila(s) en el detalle.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowConfirmSave(false)}>Cancelar</Button>
+            <Button onClick={onGuardarOrden} disabled={saving}>{saving ? 'Guardando...' : 'Confirmar y guardar'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showSuccessModal} onClose={() => setShowSuccessModal(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Orden creada correctamente</h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              La orden de compra {createdOrderId ? `#${createdOrderId}` : ''} fue registrada con éxito. Recuerda que todavía no ingresa stock hasta la recepción.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => {
+              setShowSuccessModal(false);
+              navigate('/compras');
+            }}>
+              Cerrar
+            </Button>
+            <Button onClick={() => navigate(createdOrderId ? `/compras/ordenes/${createdOrderId}` : '/compras')}>
+              Ver orden
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

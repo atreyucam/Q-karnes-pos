@@ -1,22 +1,40 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
-import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
-import Paginador from '../../components/ui/Paginador';
-import { getStatusClasses } from '../../components/ui/statusColors';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import apiClient, { normalizeResponse, parseApiError } from '../../lib/apiClient';
+import {
+  Alert,
+  Button,
+  Card,
+  Modal,
+  PageHeader,
+  Paginador,
+  StatusBadge,
+  Tabla,
+  TablaCabecera,
+  TablaCuerpo,
+  TablaFila,
+  TablaCelda,
+  Textarea
+} from '../../ui';
 import { useComprasStore } from '../../stores/comprasStore';
-import { formatMoney } from '../../lib/formatMoney';
 import { formatDateQuito } from '../../lib/formatDateQuito';
+import { formatMoney } from '../../lib/formatMoney';
 import { formatQtyByUnit } from '../../lib/formatQty';
+import { resolveCompraStatus } from './comprasStatus';
 
 export default function CompraDetallePage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { ordenActual, recepciones, error, cargarOrden, cargarRecepciones } = useComprasStore();
+  const [searchParams] = useSearchParams();
+  const { ordenActual, recepciones, error, cargarOrden, cargarRecepciones, cancelarOrden, cerrarOrdenParcial } = useComprasStore();
 
   const ordenId = Number(id);
+  const isReadOnly = searchParams.get('readonly') === '1';
   const [proveedorInfo, setProveedorInfo] = useState(null);
-  const [facturasProveedor, setFacturasProveedor] = useState([]);
+  const [actionModal, setActionModal] = useState({ open: false, mode: null });
+  const [actionObservation, setActionObservation] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     if (!Number.isFinite(ordenId) || ordenId <= 0) return;
@@ -25,133 +43,176 @@ export default function CompraDetallePage() {
   }, [ordenId, cargarOrden, cargarRecepciones]);
 
   useEffect(() => {
+    let active = true;
+
     async function loadProveedorData() {
       const proveedorId = ordenActual?.orden?.proveedor_id;
       if (!proveedorId) {
-        setProveedorInfo(null);
-        setFacturasProveedor([]);
+        if (active) setProveedorInfo(null);
         return;
       }
 
-      const [proveedorResp, facturasResp] = await Promise.all([
-        apiClient.get(`/api/proveedores/${proveedorId}`),
-        apiClient.get(`/api/proveedores/${proveedorId}/facturas`)
-      ]);
-
-      setProveedorInfo(normalizeResponse(proveedorResp.data));
-      setFacturasProveedor(normalizeResponse(facturasResp.data) || []);
+      try {
+        const proveedorResp = await apiClient.get(`/api/proveedores/${proveedorId}`);
+        if (active) setProveedorInfo(normalizeResponse(proveedorResp.data));
+      } catch (_) {
+        if (active) setProveedorInfo(null);
+      }
     }
 
     loadProveedorData();
+    return () => {
+      active = false;
+    };
   }, [ordenActual?.orden?.proveedor_id]);
 
   const recepcionesCards = useMemo(() => {
-    const rows = recepciones?.recepciones || [];
+    return recepciones?.recepciones || [];
+  }, [recepciones]);
 
-    return rows.map((r, idx) => {
-      const factura = facturasProveedor.find((f) => f.numero_factura === r.factura_id);
-      const isLast = idx === 0;
-      const estado = ordenActual?.orden?.estado === 'COMPLETA' && isLast ? 'COMPLETA' : 'PARCIAL';
+  const estadoMeta = resolveCompraStatus(ordenActual?.orden?.estado, ordenActual?.orden?.estado_label);
+  const pendingLines = useMemo(
+    () => (ordenActual?.detalle || []).filter((line) => Number(line.cantidad_pendiente ?? (Number(line.cantidad) - Number(line.cantidad_recibida))) > 0).length,
+    [ordenActual?.detalle]
+  );
 
-      return {
-        ...r,
-        metodo_pago: factura?.metodo_pago || '-',
-        estado
-      };
-    });
-  }, [recepciones, facturasProveedor, ordenActual?.orden?.estado]);
+  const closeActionModal = () => {
+    setActionModal({ open: false, mode: null });
+    setActionObservation('');
+    setActionError('');
+    setActionLoading(false);
+  };
+
+  const onConfirmAction = async () => {
+    if (!ordenActual?.orden?.id || !actionModal.mode) return;
+    setActionLoading(true);
+    setActionError('');
+    try {
+      if (actionModal.mode === 'cancelar') {
+        await cancelarOrden(ordenActual.orden.id, { observacion: actionObservation || undefined });
+      } else {
+        await cerrarOrdenParcial(ordenActual.orden.id, { observacion: actionObservation || undefined });
+      }
+      await Promise.all([cargarOrden(ordenId), cargarRecepciones(ordenId)]);
+      closeActionModal();
+    } catch (nextError) {
+      setActionError(parseApiError(nextError));
+      setActionLoading(false);
+    }
+  };
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
-      <div className="space-y-5">
-        <div>
-          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => navigate('/compras')}>
-            Volver
-          </button>
-          <h2 className="mt-3 text-2xl font-semibold text-slate-800">Detalle orden de compra #{ordenId}</h2>
-          <p className="text-sm text-slate-500">Informacion de proveedor, recepciones e items</p>
-        </div>
-
-        {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-
-        {ordenActual?.orden && (
-          <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2">
-            <div className="space-y-2">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Proveedor</p>
-                <p className="font-semibold text-slate-800">{ordenActual.orden.proveedor_nombre || '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Telefono</p>
-                <p className="font-semibold text-slate-800">{proveedorInfo?.telefono || '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Credito / dias</p>
-                <p className="font-semibold text-slate-800">{proveedorInfo?.tiene_credito ? 'SI' : 'NO'} / {Number(proveedorInfo?.dias_pago || 0)}</p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Estado orden</p>
-                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(ordenActual.orden.estado)}`}>
-                  {ordenActual.orden.estado}
-                </span>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
-                <p className="font-semibold text-slate-800">{formatDateQuito(ordenActual.orden.fecha)}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Observacion</p>
-                <p className="font-semibold text-slate-800">{ordenActual.orden.observacion || '-'}</p>
-              </div>
-            </div>
+    <div className="space-y-5">
+      <PageHeader
+        title={`Detalle compra #${ordenId}`}
+        description="Emisión, pendientes por recibir y recepciones confirmadas de la compra."
+        actions={(
+          <div className="flex flex-wrap gap-2">
+            {!isReadOnly && ordenActual?.orden?.estado === 'ABIERTA' && (
+              <Button variant="danger" onClick={() => setActionModal({ open: true, mode: 'cancelar' })}>
+                Cancelar orden
+              </Button>
+            )}
+            {!isReadOnly && ordenActual?.orden?.estado === 'PARCIAL' && (
+              <Button variant="secondary" onClick={() => setActionModal({ open: true, mode: 'cerrar' })}>
+                Cerrar pendiente
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => navigate('/compras')}>
+              Volver
+            </Button>
           </div>
         )}
+      />
 
-        {recepcionesCards.length > 0 && (
-          <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="font-semibold text-slate-800">Recepciones</p>
+      {error && <Alert tone="error">{error}</Alert>}
+
+      {ordenActual?.orden && (
+        <Card className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Proveedor</p>
+                <p className="font-semibold text-[var(--color-text)]">{ordenActual.orden.proveedor_nombre || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Telefono</p>
+                <p className="font-semibold text-[var(--color-text)]">{proveedorInfo?.telefono || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Credito / dias</p>
+                <p className="font-semibold text-[var(--color-text)]">{proveedorInfo?.tiene_credito ? 'SI' : 'NO'} / {Number(proveedorInfo?.dias_pago || 0)}</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Estado orden</p>
+                <StatusBadge status={estadoMeta.badgeStatus}>
+                  {ordenActual.orden.estado_label || estadoMeta.label}
+                </StatusBadge>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Fecha emision</p>
+                <p className="font-semibold text-[var(--color-text)]">{formatDateQuito(ordenActual.orden.fecha_emision || ordenActual.orden.fecha)}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Observacion</p>
+                <p className="font-semibold text-[var(--color-text)]">{ordenActual.orden.observacion || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Pendiente residual</p>
+                <p className="font-semibold text-[var(--color-text)]">{pendingLines} línea(s) pendientes</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Usuario creador</p>
+                <p className="font-semibold text-[var(--color-text)]">{ordenActual.orden.usuario_creador_nombre || '-'}</p>
+              </div>
+            </div>
+        </Card>
+      )}
+
+      {recepcionesCards.length > 0 && (
+        <Card className="space-y-3 p-4">
+          <p className="font-semibold text-[var(--color-text)]">Recepciones</p>
             <div className="space-y-4">
               {recepcionesCards.map((r) => (
                 <div key={r.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-bold text-slate-800">Factura # {r.factura_id || '-'}</p>
-                  <div className="mt-2 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                  <p className="text-sm font-bold text-slate-800">Documento {r.documento_respaldo || '-'}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-3 xl:grid-cols-5">
                     <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">{formatDateQuito(r.fecha)}</p>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Fecha recepcion</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{formatDateQuito(r.fecha_recepcion || r.fecha)}</p>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white p-3">
                       <p className="text-xs uppercase tracking-wide text-slate-500">Metodo</p>
-                      <span className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(r.metodo_pago)}`}>
-                        {r.metodo_pago}
-                      </span>
+                      <div className="mt-1"><StatusBadge status={r.metodo_pago || '-'} /></div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
-                      <span className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(r.estado)}`}>
-                        {r.estado}
-                      </span>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Usuario receptor</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{r.usuario_receptor_nombre || '-'}</p>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white p-3">
                       <p className="text-xs uppercase tracking-wide text-slate-500">Monto</p>
                       <p className="mt-1 text-sm font-semibold text-slate-800">{formatMoney(r.total)}</p>
                     </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Observacion</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{r.observacion || '-'}</p>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+        </Card>
+      )}
 
-        <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <Card className="space-y-3 p-4">
           <div className="flex items-center justify-between">
-            <p className="font-semibold text-slate-800">Items orden</p>
-            {(ordenActual?.orden?.estado === 'ABIERTA' || ordenActual?.orden?.estado === 'PARCIAL') && (
-              <button className="rounded-xl bg-[#b41428] px-3 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={() => navigate(`/compras/ordenes/${ordenId}/cargar`)}>
-                Cargar recepcion
-              </button>
+            <p className="font-semibold text-[var(--color-text)]">Items orden</p>
+            {!isReadOnly && ordenActual?.orden?.recepcionable && (
+              <Button onClick={() => navigate(`/compras/ordenes/${ordenId}/cargar`)}>
+                Registrar recepcion
+              </Button>
             )}
           </div>
           <Tabla>
@@ -161,28 +222,66 @@ export default function CompraDetallePage() {
                 <TablaCelda as="th">Cantidad</TablaCelda>
                 <TablaCelda as="th">Recibida</TablaCelda>
                 <TablaCelda as="th">Pendiente</TablaCelda>
-                <TablaCelda as="th">Costo est.</TablaCelda>
               </tr>
             </TablaCabecera>
             <TablaCuerpo>
               {(ordenActual?.detalle || []).map((d) => {
                 const unidad = d.unidad_medida || d.unidad;
-                const pendiente = Number(d.cantidad) - Number(d.cantidad_recibida);
+                const pendiente = Number(d.cantidad_pendiente ?? (Number(d.cantidad) - Number(d.cantidad_recibida)));
                 return (
                   <TablaFila key={d.id}>
                     <TablaCelda>{d.producto_codigo} - {d.producto_nombre}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(d.cantidad, unidad, { fixedLB: true })}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(d.cantidad_recibida, unidad, { fixedLB: true })}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(pendiente, unidad, { fixedLB: true })}</TablaCelda>
-                    <TablaCelda>{formatMoney(d.costo_unit_est)}</TablaCelda>
                   </TablaFila>
                 );
               })}
             </TablaCuerpo>
           </Tabla>
           <Paginador paginaActual={1} totalPaginas={1} totalRegistros={ordenActual?.detalle?.length || 0} mostrarSiempre />
+      </Card>
+
+      <Modal open={!isReadOnly && actionModal.open} onClose={closeActionModal} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">
+              {actionModal.mode === 'cancelar' ? 'Cancelar orden' : 'Cerrar con pendiente residual'}
+            </h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              {actionModal.mode === 'cancelar'
+                ? 'La cancelación solo es válida si nunca hubo recepción.'
+                : 'Se conservará el historial recibido y se bloquearán recepciones futuras.'}
+            </p>
+          </div>
+
+          {actionError && <Alert tone="error">{actionError}</Alert>}
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
+            <p><strong>Orden:</strong> #{ordenActual?.orden?.id}</p>
+            <p><strong>Estado actual:</strong> {ordenActual?.orden?.estado_label || estadoMeta.label}</p>
+            <p><strong>Pendiente:</strong> {pendingLines} línea(s) con faltante residual</p>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Observación</label>
+            <Textarea
+              className="mt-2"
+              rows={3}
+              value={actionObservation}
+              onChange={(e) => setActionObservation(e.target.value)}
+              placeholder={actionModal.mode === 'cancelar' ? 'Motivo de cancelación (opcional)' : 'Motivo del cierre residual (opcional)'}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeActionModal}>Volver</Button>
+            <Button variant={actionModal.mode === 'cancelar' ? 'danger' : 'primary'} onClick={onConfirmAction} disabled={actionLoading}>
+              {actionLoading ? 'Procesando...' : actionModal.mode === 'cancelar' ? 'Confirmar cancelación' : 'Cerrar orden'}
+            </Button>
+          </div>
         </div>
-      </div>
+      </Modal>
     </div>
   );
 }

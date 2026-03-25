@@ -47,7 +47,7 @@ export const useClientesStore = create((set) => ({
     } catch (error) {
       const message = parseApiError(error);
       set({ loading: false, error: message });
-      return null;
+      throw new Error(message);
     }
   },
   creditoResumen: async (id) => {

@@ -56,7 +56,11 @@ function assertFileExists(filePath, message) {
 }
 
 function resolvePaths(args = {}) {
-  const dbFile = resolveDbFilePath({ dbFileEnv: args.dbFile, nodeEnv: process.env.NODE_ENV });
+  const resolveOptions = { nodeEnv: process.env.NODE_ENV };
+  if (Object.prototype.hasOwnProperty.call(args, 'dbFile') && args.dbFile !== undefined && args.dbFile !== null) {
+    resolveOptions.dbFileEnv = args.dbFile;
+  }
+  const dbFile = resolveDbFilePath(resolveOptions);
   const backupDir = args.outDir
     ? path.resolve(process.cwd(), args.outDir)
     : resolveDefaultBackupDir(dbFile);

@@ -1,155 +1,286 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PiCalendarBlank, PiCheckCircle, PiEye, PiMagnifyingGlass, PiPackage, PiPlus, PiTruck, PiX } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
-import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
-import Paginador from '../../components/ui/Paginador';
-import { getStatusClasses } from '../../components/ui/statusColors';
+import { Alert, Button, Card, IconButton, Input, MetricTile, Modal, PageHeader, Paginador, Select, StatusBadge, Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda, Textarea } from '../../ui';
+import { parseApiError } from '../../lib/apiClient';
 import { useComprasStore } from '../../stores/comprasStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
-import { formatMoney } from '../../lib/formatMoney';
+import { resolveCompraStatus } from './comprasStatus';
 
 const PAGE_SIZE = 10;
 
 export default function ComprasPage() {
-  const { ordenes, error, listarOrdenes } = useComprasStore();
+  const { ordenes, error, listarOrdenes, cancelarOrden, cerrarOrdenParcial } = useComprasStore();
   const navigate = useNavigate();
   const [pagina, setPagina] = useState(1);
-  const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', credito: 'TODOS' });
-
-  const refresh = () => {
-    listarOrdenes({
-      search: filtros.search || undefined,
-      estado: filtros.estado === 'TODOS' ? undefined : filtros.estado,
-      con_credito: filtros.credito === 'CON' ? 1 : undefined,
-      credito_parcial: filtros.credito === 'PARCIAL' ? 1 : undefined
-    });
-  };
+  const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', fecha: '' });
+  const [actionModal, setActionModal] = useState({ open: false, mode: null, orden: null });
+  const [actionObservation, setActionObservation] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(refresh, 250);
-    return () => clearTimeout(timer);
+    const timer = window.setTimeout(() => {
+      listarOrdenes({
+        search: filtros.search || undefined,
+        estado: filtros.estado === 'TODOS' ? undefined : filtros.estado
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
   }, [listarOrdenes, filtros]);
 
-  useEffect(() => {
-    setPagina(1);
-  }, [ordenes.length]);
+  const ordenesFiltradas = useMemo(() => {
+    return ordenes.filter((orden) => {
+      if (!filtros.fecha) return true;
+      return String(orden.fecha_emision || orden.fecha || '').startsWith(filtros.fecha);
+    });
+  }, [filtros.fecha, ordenes]);
 
+  const resumen = useMemo(() => ({
+    total: ordenesFiltradas.length,
+    emitidas: ordenesFiltradas.filter((orden) => orden.estado === 'ABIERTA').length,
+    parciales: ordenesFiltradas.filter((orden) => orden.estado === 'PARCIAL').length,
+      completas: ordenesFiltradas.filter((orden) => orden.estado === 'COMPLETA').length
+  }), [ordenesFiltradas]);
+
+  const totalPaginas = Math.max(1, Math.ceil(ordenesFiltradas.length / PAGE_SIZE));
   const ordenesPaginadas = useMemo(() => {
     const start = (pagina - 1) * PAGE_SIZE;
-    return ordenes.slice(start, start + PAGE_SIZE);
-  }, [pagina, ordenes]);
+    return ordenesFiltradas.slice(start, start + PAGE_SIZE);
+  }, [ordenesFiltradas, pagina]);
 
-  const totalPaginas = Math.max(1, Math.ceil(ordenes.length / PAGE_SIZE));
+  useEffect(() => {
+    if (pagina > totalPaginas) setPagina(totalPaginas);
+  }, [pagina, totalPaginas]);
+
+  const openActionModal = (mode, orden) => {
+    setActionModal({ open: true, mode, orden });
+    setActionObservation('');
+    setActionError('');
+  };
+
+  const closeActionModal = () => {
+    setActionModal({ open: false, mode: null, orden: null });
+    setActionObservation('');
+    setActionError('');
+    setActionLoading(false);
+  };
+
+  const onConfirmAction = async () => {
+    if (!actionModal.orden?.id || !actionModal.mode) return;
+    setActionError('');
+    setActionLoading(true);
+    try {
+      if (actionModal.mode === 'cancelar') {
+        await cancelarOrden(actionModal.orden.id, { observacion: actionObservation || undefined });
+      } else {
+        await cerrarOrdenParcial(actionModal.orden.id, { observacion: actionObservation || undefined });
+      }
+      await listarOrdenes({
+        search: filtros.search || undefined,
+        estado: filtros.estado === 'TODOS' ? undefined : filtros.estado
+      });
+      closeActionModal();
+    } catch (nextError) {
+      setActionError(parseApiError(nextError));
+      setActionLoading(false);
+    }
+  };
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-2xl font-semibold text-slate-800">Compras</h2>
-            <p className="text-sm text-slate-500">Ordenes de compra y recepciones</p>
-          </div>
-          <button
-            className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]"
-            onClick={() => navigate('/compras/nueva')}
-          >
-            Crear orden de compra
-          </button>
-        </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Órdenes de compra"
+        description="Crear orden no mueve stock. Solo la recepción confirmada ingresa inventario."
+        actions={(
+          <Button onClick={() => navigate('/compras/nueva')}>
+            <PiPlus className="text-base" />
+            Nueva orden
+          </Button>
+        )}
+      />
 
-        {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+      {error && <Alert tone="error">{error}</Alert>}
 
-        <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[1fr_180px_220px]">
+      <section className="ui-kpi-summary-shell">
+        <div className="mb-3">
           <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Buscar</label>
-            <input
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-              value={filtros.search}
-              onChange={(e) => setFiltros((s) => ({ ...s, search: e.target.value }))}
-              placeholder="Proveedor, id u observacion"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado</label>
-            <select
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-              value={filtros.estado}
-              onChange={(e) => setFiltros((s) => ({ ...s, estado: e.target.value }))}
-            >
-              <option value="TODOS">Todos</option>
-              <option value="ABIERTA">ABIERTA</option>
-              <option value="PARCIAL">PARCIAL</option>
-              <option value="COMPLETA">COMPLETA</option>
-              <option value="CANCELADA">CANCELADA</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Credito</label>
-            <select
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-              value={filtros.credito}
-              onChange={(e) => setFiltros((s) => ({ ...s, credito: e.target.value }))}
-            >
-              <option value="TODOS">Todos</option>
-              <option value="CON">Con credito pendiente</option>
-              <option value="PARCIAL">Credito parcial</option>
-            </select>
+            <p className="text-sm font-semibold text-[var(--color-text)]">Resumen de órdenes</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Mismo patrón visual del panel de ventas del turno.</p>
           </div>
         </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <MetricTile
+            icon={PiPackage}
+            value={resumen.total}
+            label="Total órdenes"
+            iconBg="color-mix(in oklab, #fecdd3 72%, white 28%)"
+          />
+          <MetricTile
+            icon={PiCalendarBlank}
+            value={resumen.emitidas}
+            label="Emitidas"
+            iconBg="color-mix(in oklab, #bfdbfe 72%, white 28%)"
+          />
+          <MetricTile
+            icon={PiPackage}
+            value={resumen.parciales}
+            label="Parciales"
+            iconBg="color-mix(in oklab, #a7f3d0 78%, white 22%)"
+          />
+          <MetricTile
+            icon={PiCheckCircle}
+            value={resumen.completas}
+            label="Completas"
+            iconBg="color-mix(in oklab, #ddd6fe 74%, white 26%)"
+          />
+        </div>
+      </section>
 
+      <Card className="grid gap-3 p-5 md:grid-cols-[minmax(0,1fr)_200px_180px]">
+        <div>
+          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Buscar</label>
+          <div className="relative mt-2">
+            <PiMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+            <Input className="pl-10" placeholder="Buscar proveedor, ID u observación" value={filtros.search} onChange={(e) => setFiltros((prev) => ({ ...prev, search: e.target.value }))} />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</label>
+          <Select className="mt-2" value={filtros.estado} onChange={(e) => setFiltros((prev) => ({ ...prev, estado: e.target.value }))}>
+            <option value="TODOS">Todos</option>
+            <option value="ABIERTA">Emitida</option>
+            <option value="PARCIAL">Parcial</option>
+            <option value="COMPLETA">Recibida</option>
+            <option value="CANCELADA">Cancelada</option>
+            <option value="CERRADA_PARCIAL">Cerrada parcial</option>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Fecha</label>
+          <Input className="mt-2" type="date" value={filtros.fecha} onChange={(e) => setFiltros((prev) => ({ ...prev, fecha: e.target.value }))} />
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden p-0">
         <Tabla>
           <TablaCabecera>
             <tr>
-              <TablaCelda as="th">ID</TablaCelda>
+              <TablaCelda as="th">#</TablaCelda>
               <TablaCelda as="th">Proveedor</TablaCelda>
-              <TablaCelda as="th">Estado</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
-              <TablaCelda as="th">Credito pendiente</TablaCelda>
-              <TablaCelda as="th">Acciones</TablaCelda>
+              <TablaCelda as="th">Estado</TablaCelda>
+              <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
           <TablaCuerpo>
-            {ordenesPaginadas.map((o) => (
-              <TablaFila key={o.id}>
-                <TablaCelda>#{o.id}</TablaCelda>
-                <TablaCelda>{o.proveedor_nombre || '-'}</TablaCelda>
-                <TablaCelda>
-                  <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(o.estado)}`}>
-                    {o.estado}
-                  </span>
-                </TablaCelda>
-                <TablaCelda>{formatDateQuito(o.fecha)}</TablaCelda>
-                <TablaCelda className={Number(o.credito_pendiente || 0) > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(o.credito_pendiente || 0)}</TablaCelda>
-                <TablaCelda>
-                  <div className="flex justify-end gap-2">
-                    {(o.estado === 'ABIERTA' || o.estado === 'PARCIAL') && (
-                      <button
-                        className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
-                        onClick={() => navigate(`/compras/ordenes/${o.id}/cargar`)}
+            {ordenesPaginadas.map((orden) => {
+              const estadoMeta = resolveCompraStatus(orden.estado, orden.estado_label);
+              return (
+                <TablaFila key={orden.id}>
+                  <TablaCelda className="font-semibold text-[var(--color-text)]">#{orden.id}</TablaCelda>
+                  <TablaCelda className="font-semibold text-[var(--color-text)]">{orden.proveedor_nombre || '-'}</TablaCelda>
+                  <TablaCelda>{formatDateQuito(orden.fecha_emision || orden.fecha)}</TablaCelda>
+                  <TablaCelda>
+                    <StatusBadge status={estadoMeta.badgeStatus}>{orden.estado_label || estadoMeta.label}</StatusBadge>
+                  </TablaCelda>
+                  <TablaCelda>
+                    <div className="flex justify-end gap-1">
+                      <IconButton
+                        variant="iconView"
+                        size="sm"
+                        aria-label={`Ver orden ${orden.id}`}
+                        title="Ver orden"
+                        onClick={() => navigate(`/compras/ordenes/${orden.id}`)}
                       >
-                        Cargar
-                      </button>
-                    )}
-                    <button
-                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white"
-                      onClick={() => navigate(`/compras/ordenes/${o.id}`)}
-                    >
-                      Ver
-                    </button>
-                  </div>
-                </TablaCelda>
-              </TablaFila>
-            ))}
+                        <PiEye className="text-lg" />
+                      </IconButton>
+                      {orden.recepcionable && (
+                        <IconButton
+                          variant="iconSecondary"
+                          size="sm"
+                          aria-label={`Recibir orden ${orden.id}`}
+                          title="Registrar recepción"
+                          onClick={() => navigate(`/compras/ordenes/${orden.id}/cargar`)}
+                        >
+                          <PiTruck className="text-lg" />
+                        </IconButton>
+                      )}
+                      {orden.estado === 'ABIERTA' && (
+                        <IconButton
+                          variant="iconDanger"
+                          size="sm"
+                          aria-label={`Cancelar orden ${orden.id}`}
+                          title="Cancelar orden"
+                          onClick={() => openActionModal('cancelar', orden)}
+                        >
+                          <PiX className="text-lg" />
+                        </IconButton>
+                      )}
+                      {orden.estado === 'PARCIAL' && (
+                        <IconButton
+                          variant="iconSuccess"
+                          size="sm"
+                          aria-label={`Cerrar orden ${orden.id}`}
+                          title="Cerrar pendiente"
+                          onClick={() => openActionModal('cerrar', orden)}
+                        >
+                          <PiCheckCircle className="text-lg" />
+                        </IconButton>
+                      )}
+                    </div>
+                  </TablaCelda>
+                </TablaFila>
+              );
+            })}
           </TablaCuerpo>
         </Tabla>
 
-        <Paginador
-          paginaActual={pagina}
-          totalPaginas={totalPaginas}
-          totalRegistros={ordenes.length}
-          mostrarSiempre
-          onPageChange={setPagina}
-        />
-      </div>
+        <div className="px-5 py-4">
+          <Paginador paginaActual={pagina} totalPaginas={totalPaginas} totalRegistros={ordenesFiltradas.length} mostrarSiempre onPageChange={setPagina} />
+        </div>
+      </Card>
+
+      <Modal open={actionModal.open} onClose={closeActionModal} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">
+              {actionModal.mode === 'cancelar' ? 'Cancelar orden' : 'Cerrar con pendiente residual'}
+            </h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              {actionModal.mode === 'cancelar'
+                ? 'Solo debes usar esta acción si la orden no tuvo ninguna recepción.'
+                : 'Esta acción bloquea futuras recepciones y conserva el faltante pendiente en la trazabilidad.'}
+            </p>
+          </div>
+
+          {actionError && <Alert tone="error">{actionError}</Alert>}
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
+            <p><strong>Orden:</strong> #{actionModal.orden?.id}</p>
+            <p><strong>Proveedor:</strong> {actionModal.orden?.proveedor_nombre || '-'}</p>
+            <p><strong>Estado actual:</strong> {actionModal.orden?.estado_label || resolveCompraStatus(actionModal.orden?.estado).label}</p>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Observación</label>
+            <Textarea
+              className="mt-2"
+              rows={3}
+              value={actionObservation}
+              onChange={(e) => setActionObservation(e.target.value)}
+              placeholder={actionModal.mode === 'cancelar' ? 'Motivo de cancelación (opcional)' : 'Motivo del cierre residual (opcional)'}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeActionModal}>Volver</Button>
+            <Button variant={actionModal.mode === 'cancelar' ? 'danger' : 'primary'} onClick={onConfirmAction} disabled={actionLoading}>
+              {actionLoading ? 'Procesando...' : actionModal.mode === 'cancelar' ? 'Confirmar cancelación' : 'Cerrar orden'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

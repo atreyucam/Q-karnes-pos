@@ -1,9 +1,12 @@
 import axios from 'axios';
-import apiErrorUtils from './apiError.cjs';
+import { normalizeApiError, toUiMessage } from './apiError.js';
 
-const { normalizeApiError, toUiMessage } = apiErrorUtils;
+const API_BASE_URL = (() => {
+  const envValue = import.meta?.env?.VITE_API_BASE_URL;
+  if (typeof envValue === 'string' && envValue.trim()) return envValue.trim();
+  return 'http://localhost:4100';
+})();
 
-const API_BASE_URL = 'http://localhost:4100';
 const TOKEN_KEY = 'qkarnes_token';
 let memoryToken = null;
 

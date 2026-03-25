@@ -2,13 +2,21 @@ const { z } = require('zod');
 const db = require('../../db/knex');
 const repository = require('./compras.repository');
 const auditoriaService = require('../auditoria/auditoria.service');
-const { resolveAdminAuthorizer } = require('../auth/adminAuthorization.service');
+const configuracionService = require('../configuracion/configuracion.service');
 const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
+const { addDays, toDateOnly } = require('../../helpers/credit');
+const { currentDateTimeInEcuador } = require('../../helpers/ecuadorTime');
+const { assertQuantityByUnit } = require('../../helpers/quantityRules');
+const { getProductoOperableById } = require('../../helpers/productValidation');
+const { toLineError, throwLineValidationError } = require('../../helpers/domainErrors');
+const { calculateWeightedAverageCost, resolveReceptionCost } = require('../../helpers/inventoryCosting');
+const { CASH_MOVEMENT_TYPES, buildCashMovementPayload } = require('../caja/cashMovement');
 
 const createOrderSchema = z.object({
-  proveedor_id: z.number().int().positive().nullable().optional(),
+  proveedor_id: z.number().int().positive(),
+  fecha_emision: z.string().trim().optional(),
   observacion: z.string().optional(),
   autorizacion: z.object({
     usuario: z.string().min(1),
@@ -17,64 +25,242 @@ const createOrderSchema = z.object({
   items: z.array(
     z.object({
       producto_id: z.number().int().positive(),
-      cantidad: z.number().positive(),
-      costo_unit_est: z.number().nonnegative().default(0)
-    })
+      cantidad: z.number().positive()
+    }).strict()
   ).min(1)
 });
 
+const receptionItemSchema = z.object({
+  orden_detalle_id: z.number().int().positive(),
+  cantidad: z.number().positive(),
+  costo_unit_real: z.number().nonnegative().optional(),
+  costo_total_real: z.number().nonnegative().optional()
+}).superRefine((data, ctx) => {
+  const hasUnitCost = data.costo_unit_real !== undefined;
+  const hasTotalCost = data.costo_total_real !== undefined;
+  if (!hasUnitCost && !hasTotalCost) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['costo_unit_real'],
+      message: 'Debe informar costo unitario o costo total'
+    });
+  }
+});
+
 const receptionSchema = z.object({
+  documento_respaldo: z.string().trim().min(1).optional(),
+  fecha_recepcion: z.string().trim().optional(),
+  observacion: z.string().optional(),
   factura: z.object({
-    numero_factura: z.string().min(1),
+    numero_factura: z.string().trim().min(1).optional(),
     metodo_pago: z.enum(['CONTADO', 'CREDITO'])
   }),
-  items: z.array(
-    z.object({
-      orden_detalle_id: z.number().int().positive(),
-      cantidad: z.number().positive(),
-      costo_unit_real: z.number().nonnegative()
-    })
-  ).min(1)
+  items: z.array(receptionItemSchema).min(1)
+}).superRefine((data, ctx) => {
+  if (!String(data.documento_respaldo || data.factura?.numero_factura || '').trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['documento_respaldo'],
+      message: 'Documento de respaldo es obligatorio'
+    });
+  }
+});
+
+const orderActionSchema = z.object({
+  observacion: z.string().trim().optional()
 });
 
 function n(v) {
   return Number(v || 0);
 }
 
+function isTruthy(value) {
+  return value === true || value === 1 || value === '1';
+}
+
+const ORDER_STATUS_META = {
+  ABIERTA: { flujo: 'emitida', label: 'Emitida', recepcionable: true },
+  PARCIAL: { flujo: 'parcialmente_recibida', label: 'Parcialmente recibida', recepcionable: true },
+  COMPLETA: { flujo: 'recibida', label: 'Recibida', recepcionable: false },
+  CANCELADA: { flujo: 'cancelada', label: 'Cancelada', recepcionable: false },
+  CERRADA_PARCIAL: { flujo: 'cerrada_parcial', label: 'Cerrada parcial', recepcionable: false }
+};
+
+function parseCompraDateTimeInput(value, field, fallback = null) {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]} 00:00:00`;
+
+  const localDateTimeMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (localDateTimeMatch) {
+    return `${localDateTimeMatch[1]}-${localDateTimeMatch[2]}-${localDateTimeMatch[3]} ${localDateTimeMatch[4]}:${localDateTimeMatch[5]}:${localDateTimeMatch[6] || '00'}`;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new AppError(400, `Campo inválido: ${field}`, { field, value: raw }, 'INVALID_DATETIME');
+  }
+
+  return currentDateTimeInEcuador(parsed);
+}
+
+function getEstadoMeta(estado) {
+  return ORDER_STATUS_META[String(estado || '').trim().toUpperCase()] || {
+    flujo: 'desconocido',
+    label: String(estado || '').trim() || 'Desconocido',
+    recepcionable: false
+  };
+}
+
+function decorateOrderRow(row) {
+  if (!row) return row;
+  const estadoMeta = getEstadoMeta(row.estado);
+  return {
+    ...row,
+    fecha_emision: row.fecha,
+    estado_flujo: estadoMeta.flujo,
+    estado_label: estadoMeta.label,
+    recepcionable: estadoMeta.recepcionable
+  };
+}
+
+function decorateOrderData(data) {
+  if (!data) return data;
+  const cantidadPendienteTotal = (data.detalle || []).reduce(
+    (acc, line) => acc + Number(line.cantidad_pendiente ?? (n(line.cantidad) - n(line.cantidad_recibida))),
+    0
+  );
+  return {
+    orden: decorateOrderRow(data.orden),
+    detalle: (data.detalle || []).map((line) => ({
+      ...line,
+      cantidad_pendiente: Number(line.cantidad_pendiente ?? (n(line.cantidad) - n(line.cantidad_recibida)))
+    })),
+    resumen: {
+      cantidad_pendiente_total: Number(cantidadPendienteTotal.toFixed(3))
+    }
+  };
+}
+
+function decorateRecepcionesData(data) {
+  return {
+    recepciones: (data.recepciones || []).map((row) => ({
+      ...row,
+      fecha_recepcion: row.fecha,
+      documento_respaldo: row.numero_factura || row.factura_id || null
+    })),
+    detalles: data.detalles || []
+  };
+}
+
+function assertProveedorValido(proveedor, options = {}) {
+  const { requireCredit = false } = options;
+
+  if (!proveedor) throw new AppError(404, 'Proveedor no encontrado');
+  if (!isTruthy(proveedor.activo)) throw new AppError(400, 'Proveedor inactivo');
+  if (requireCredit && !isTruthy(proveedor.tiene_credito)) {
+    throw new AppError(400, 'Proveedor no habilitado para compras a crédito');
+  }
+}
+
+function getOrderProgress(orderData) {
+  const detail = orderData?.detalle || [];
+  const totalItems = detail.length;
+  const totalRequested = detail.reduce((acc, line) => acc + n(line.cantidad), 0);
+  const totalReceived = detail.reduce((acc, line) => acc + n(line.cantidad_recibida), 0);
+  const totalPending = detail.reduce(
+    (acc, line) => acc + Number(line.cantidad_pendiente ?? (n(line.cantidad) - n(line.cantidad_recibida))),
+    0
+  );
+  const receivedLines = detail.filter((line) => n(line.cantidad_recibida) > 0).length;
+  const completedLines = detail.filter((line) => n(line.cantidad_recibida) >= n(line.cantidad)).length;
+
+  return {
+    totalItems,
+    totalRequested: Number(totalRequested.toFixed(3)),
+    totalReceived: Number(totalReceived.toFixed(3)),
+    totalPending: Number(totalPending.toFixed(3)),
+    receivedLines,
+    completedLines,
+    hasAnyReception: receivedLines > 0,
+    isFullyReceived: totalItems > 0 && completedLines === totalItems
+  };
+}
+
+function resolveOrderStatusFromProgress(progress) {
+  if (progress.isFullyReceived) return 'COMPLETA';
+  if (progress.hasAnyReception) return 'PARCIAL';
+  return 'ABIERTA';
+}
+
 async function createOrden(body, actorUser) {
   const parsed = createOrderSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
 
-  const authorizer = await resolveAdminAuthorizer({
-    actorUser,
-    authorization: parsed.data.autorizacion,
-    requireAlways: true,
-    reason: 'registrar compra',
-    auditContext: {
-      modulo: 'COMPRAS',
-      accion: 'COMPRA_REGISTRO_AUTH',
-      entidad: 'COMPRA_ORDEN',
-      referencia: 'ORDEN_NUEVA'
-    }
-  });
+  await repository.ensureLegacySchema();
 
   return db.transaction(async (trx) => {
-    const orden = await repository.createOrder(
-      {
-        proveedor_id: parsed.data.proveedor_id || null,
-        estado: 'ABIERTA',
-        observacion: parsed.data.observacion || null
-      },
-      trx
-    );
+    const fechaEmision = parseCompraDateTimeInput(parsed.data.fecha_emision, 'fecha_emision', currentDateTimeInEcuador());
+    const schemaSupport = await repository.resolveSchemaSupport(trx);
+    const proveedor = await repository.getProveedorById(parsed.data.proveedor_id, trx);
+    assertProveedorValido(proveedor);
+
+    const validatedItems = [];
+    const lineErrors = [];
+
+    for (const [index, item] of parsed.data.items.entries()) {
+      try {
+        const product = await getProductoOperableById(item.producto_id, {
+          trx,
+          getById: repository.getProductById
+        });
+
+        validatedItems.push({
+          producto_id: item.producto_id,
+          cantidad: assertQuantityByUnit(item.cantidad, product.unidad_operativa, {
+            field: 'cantidad',
+            requirePositive: true,
+            allowZero: false,
+            details: {
+              product_id: product.id,
+              codigo: product.codigo || null
+            }
+          })
+        });
+      } catch (error) {
+        lineErrors.push(
+          toLineError(error, index, {
+            product_id: item.producto_id,
+            field: 'cantidad'
+          })
+        );
+      }
+    }
+
+    throwLineValidationError(lineErrors);
+
+    const orderPayload = {
+      proveedor_id: parsed.data.proveedor_id,
+      estado: 'ABIERTA',
+      observacion: parsed.data.observacion || null,
+      fecha: fechaEmision
+    };
+
+    if (schemaSupport.hasUsuarioCreadorId) {
+      orderPayload.usuario_creador_id = actorUser?.id || null;
+    }
+
+    const orden = await repository.createOrder(orderPayload, trx);
 
     const detalle = await repository.insertOrderDetails(
-      parsed.data.items.map((item) => ({
+      validatedItems.map((item) => ({
         orden_id: orden.id,
         producto_id: item.producto_id,
         cantidad: item.cantidad,
         cantidad_recibida: 0,
-        costo_unit_est: item.costo_unit_est
+        costo_unit_est: 0
       })),
       trx
     );
@@ -87,10 +273,13 @@ async function createOrden(body, actorUser) {
         detalle: {
           modulo: 'COMPRAS',
           actor: actorUser,
-          autorizador: authorizer,
-          proveedor_id: parsed.data.proveedor_id || null,
+          proveedor_id: parsed.data.proveedor_id,
+          proveedor_nombre: proveedor.nombre,
           observacion: parsed.data.observacion || null,
-          items: parsed.data.items
+          items: validatedItems.map((item) => ({
+            producto_id: item.producto_id,
+            cantidad: item.cantidad
+          }))
         }
       },
       trx
@@ -99,14 +288,17 @@ async function createOrden(body, actorUser) {
     return {
       ok: true,
       data: {
-        orden,
-        detalle
+        ...decorateOrderData({
+          orden,
+          detalle
+        })
       }
     };
   });
 }
 
 async function listOrdenes(query = {}) {
+  await repository.ensureLegacySchema();
   const filters = {
     search: query.search ? String(query.search).trim() : undefined,
     estado: query.estado ? String(query.estado).trim().toUpperCase() : undefined,
@@ -115,24 +307,53 @@ async function listOrdenes(query = {}) {
   };
 
   const data = await repository.listOrders(filters);
-  return { ok: true, data };
+  const decorated = data.map((row) => decorateOrderRow(row));
+  return { ok: true, data: decorated };
 }
 
 async function getOrden(id) {
+  await repository.ensureLegacySchema();
   const data = await repository.getOrderById(id);
   if (!data) throw new AppError(404, 'Orden no encontrada');
-  return { ok: true, data };
+  return { ok: true, data: decorateOrderData(data) };
 }
 
 async function receiveOrden(ordenId, body, actorUser) {
   const parsed = receptionSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
 
+  await repository.ensureLegacySchema();
+
   return db.transaction(async (trx) => {
+    const numeroDocumento = String(parsed.data.documento_respaldo || parsed.data.factura.numero_factura || '').trim();
+    const fechaRecepcion = parseCompraDateTimeInput(parsed.data.fecha_recepcion, 'fecha_recepcion', currentDateTimeInEcuador());
+    const schemaSupport = await repository.resolveSchemaSupport(trx);
+    const config = await configuracionService.getRuntimeConfig(trx);
     const orderData = await repository.getOrderById(ordenId, trx);
     if (!orderData) throw new AppError(404, 'Orden no encontrada');
     if (!['ABIERTA', 'PARCIAL'].includes(orderData.orden.estado)) {
       throw new AppError(400, `Estado de orden no recepcionable: ${orderData.orden.estado}`);
+    }
+
+    const proveedorId = Number(orderData.orden.proveedor_id || 0);
+    if (!proveedorId) throw new AppError(400, 'La orden no tiene proveedor válido');
+
+    const proveedor = await repository.getProveedorById(proveedorId, trx);
+    assertProveedorValido(proveedor, {
+      requireCredit: parsed.data.factura.metodo_pago === 'CREDITO'
+    });
+
+    if (parsed.data.factura.metodo_pago === 'CREDITO' && !config.permitir_compras_credito) {
+      throw new AppError(400, 'Las compras a crédito están deshabilitadas en la configuración del sistema');
+    }
+
+    const facturaExistente = await repository.getFacturaByProveedorAndNumero(
+      proveedorId,
+      numeroDocumento,
+      trx
+    );
+    if (facturaExistente) {
+      throw new AppError(400, 'Ya existe una factura con ese número para este proveedor');
     }
 
     const repeated = new Set();
@@ -144,43 +365,106 @@ async function receiveOrden(ordenId, body, actorUser) {
     }
 
     const detailMap = new Map(orderData.detalle.map((d) => [d.id, d]));
+    const validatedReceptionItems = [];
+    const lineErrors = [];
+
+    for (const [index, item] of parsed.data.items.entries()) {
+      const detail = detailMap.get(item.orden_detalle_id);
+      if (!detail) {
+        lineErrors.push({
+          index,
+          code: 'LINE_NOT_FOUND',
+          message: `Detalle de orden inválido: ${item.orden_detalle_id}`,
+          details: {
+            orden_detalle_id: item.orden_detalle_id
+          }
+        });
+        continue;
+      }
+
+      try {
+        const product = await getProductoOperableById(detail.producto_id, {
+          trx,
+          getById: repository.getProductById
+        });
+        const cantidad = assertQuantityByUnit(item.cantidad, product.unidad_operativa, {
+          field: 'cantidad',
+          requirePositive: true,
+          allowZero: false,
+          details: {
+            orden_detalle_id: detail.id,
+            product_id: product.id,
+            codigo: product.codigo || null
+          }
+        });
+        const pendiente = n(detail.cantidad) - n(detail.cantidad_recibida);
+        if (cantidad > pendiente) {
+          lineErrors.push({
+            index,
+            code: 'INVALID_QUANTITY',
+            message: `Cantidad recibida excede pendiente para detalle ${detail.id}`,
+            details: {
+              orden_detalle_id: detail.id,
+              product_id: product.id,
+              codigo: product.codigo || null,
+              pendiente,
+              value: cantidad
+            }
+          });
+          continue;
+        }
+
+        validatedReceptionItems.push({
+          ...item,
+          cantidad,
+          costing: resolveReceptionCost({
+            quantity: cantidad,
+            unitCost: item.costo_unit_real,
+            totalCost: item.costo_total_real,
+            field: 'costo_unit_real'
+          }),
+          detail,
+          product
+        });
+      } catch (error) {
+        lineErrors.push(
+          toLineError(error, index, {
+            orden_detalle_id: detail.id,
+            product_id: detail.producto_id,
+            field: 'cantidad'
+          })
+        );
+      }
+    }
+
+    throwLineValidationError(lineErrors);
 
     let total = 0;
     const receptionDetails = [];
     const inventoryMoves = [];
     const supplierHistory = [];
 
-    for (const item of parsed.data.items) {
-      const detail = detailMap.get(item.orden_detalle_id);
-      if (!detail) {
-        throw new AppError(400, `Detalle de orden inválido: ${item.orden_detalle_id}`);
-      }
-
-      const pendiente = n(detail.cantidad) - n(detail.cantidad_recibida);
-      if (item.cantidad > pendiente) {
-        throw new AppError(400, `Cantidad recibida excede pendiente para detalle ${detail.id}`);
-      }
-
+    for (const item of validatedReceptionItems) {
+      const { detail, product } = item;
       const newRecibida = n(detail.cantidad_recibida) + item.cantidad;
       await repository.updateOrderDetailReceived(detail.id, newRecibida, trx);
-
-      const product = await repository.getProductById(detail.producto_id, trx);
-      if (!product) throw new AppError(400, `Producto no encontrado: ${detail.producto_id}`);
 
       const stockAnterior = n(product.stock_actual);
       const costoAnterior = n(product.costo_promedio);
       const cantidadRecibida = n(item.cantidad);
-      const costoReal = n(item.costo_unit_real);
+      const costoReal = n(item.costing.unitCost);
+      const costoTotalReal = n(item.costing.totalCost);
 
-      const nuevoStock = Number((stockAnterior + cantidadRecibida).toFixed(3));
-      const divisor = stockAnterior + cantidadRecibida;
-      const nuevoCosto = divisor > 0
-        ? moneyRound(((stockAnterior * costoAnterior) + (cantidadRecibida * costoReal)) / divisor)
-        : costoReal;
+      const weighted = calculateWeightedAverageCost({
+        currentStock: stockAnterior,
+        currentCost: costoAnterior,
+        incomingQty: cantidadRecibida,
+        incomingTotalCost: costoTotalReal
+      });
 
-      await repository.setProductStockAndCost(detail.producto_id, nuevoStock, nuevoCosto, trx);
+      await repository.setProductStockAndCost(detail.producto_id, weighted.nextStock, weighted.nextCost, trx);
 
-      const subtotal = moneyRound(cantidadRecibida * costoReal);
+      const subtotal = moneyRound(costoTotalReal);
       total = moneyRound(total + subtotal);
 
       receptionDetails.push({
@@ -194,69 +478,145 @@ async function receiveOrden(ordenId, body, actorUser) {
         tipo: 'COMPRA',
         producto_id: detail.producto_id,
         cantidad: cantidadRecibida,
-        referencia: `OC:${ordenId}`,
+        referencia: null,
         signo: 1
       });
 
-      if (orderData.orden.proveedor_id) {
-        supplierHistory.push({
-          proveedor_id: orderData.orden.proveedor_id,
-          producto_id: detail.producto_id,
-          costo_unit: costoReal
-        });
-      }
+      supplierHistory.push({
+        proveedor_id: proveedorId,
+        producto_id: detail.producto_id,
+        costo_unit: costoReal
+      });
     }
 
     const factura = await repository.createFactura(
       {
-        proveedor_id: orderData.orden.proveedor_id || null,
-        numero_factura: parsed.data.factura.numero_factura,
+        orden_id: ordenId,
+        proveedor_id: proveedorId,
+        numero_factura: numeroDocumento,
         metodo_pago: parsed.data.factura.metodo_pago,
-        total
+        total,
+        fecha: fechaRecepcion
+      },
+      trx
+    );
+
+    await auditoriaService.logEvent(
+      {
+        entidad: 'COMPRA_FACTURA',
+        entidad_id: factura.id,
+        accion: 'REGISTRAR',
+        descripcion: `Factura proveedor ${factura.numero_factura} registrada`,
+        detalle: {
+          modulo: 'COMPRAS',
+          actor: actorUser || null,
+          orden_id: ordenId,
+          proveedor_id: proveedorId,
+          proveedor_nombre: proveedor.nombre,
+          numero_factura: factura.numero_factura,
+          documento_respaldo: numeroDocumento,
+          metodo_pago: factura.metodo_pago,
+          total: factura.total
+        },
+        datos_nuevos: {
+          orden_id: ordenId,
+          proveedor_id: proveedorId,
+          numero_factura: factura.numero_factura,
+          documento_respaldo: numeroDocumento,
+          metodo_pago: factura.metodo_pago,
+          total: factura.total
+        }
       },
       trx
     );
 
     if (parsed.data.factura.metodo_pago === 'CONTADO') {
+      await configuracionService.assertPaymentMethodEnabled('EFECTIVO', trx);
       const shift = await repository.getOpenShift(trx);
       if (!shift) {
         throw new AppError(400, 'Factura CONTADO requiere turno abierto para salida de caja');
       }
 
       await repository.createCashMovement(
-        {
-          turno_id: shift.id,
-          tipo: 'COMPRA',
-          concepto: `Compra OC #${ordenId} Factura ${factura.numero_factura}`,
-          monto: total
-        },
+        buildCashMovementPayload({
+          turnoId: shift.id,
+          tipo: CASH_MOVEMENT_TYPES.COMPRA_CONTADO,
+          concepto: `Compra contado OC #${ordenId}`,
+          monto: total,
+          documentoOrigen: `FACTURA_COMPRA:${factura.id}`,
+          moduloOrigen: 'COMPRAS',
+          origenId: factura.id,
+          actorId: actorUser?.id || null,
+          observacion: parsed.data.observacion?.trim() || `Factura ${factura.numero_factura}`
+        }),
         trx
       );
     }
 
-    if (parsed.data.factura.metodo_pago === 'CREDITO' && orderData.orden.proveedor_id) {
-      await repository.createCxpMovement(
+    if (parsed.data.factura.metodo_pago === 'CREDITO') {
+      const deudaCxp = await repository.createCxpMovement(
         {
-          proveedor_id: orderData.orden.proveedor_id,
+          proveedor_id: proveedorId,
           factura_id: factura.id,
           tipo: 'CARGO',
           monto: total,
+          documento_origen: `FACTURA:${factura.numero_factura}`,
+          numero_documento: factura.numero_factura,
+          fecha_emision: toDateOnly(factura.fecha),
+          fecha_vencimiento: addDays(
+            factura.fecha,
+            Number(proveedor.dias_pago || config.dias_credito_proveedor_default || 0)
+          ),
+          estado: 'APLICADO',
           referencia: `FACTURA:${factura.numero_factura}`,
-          observacion: `Compra OC #${ordenId} a credito`
+          observacion: parsed.data.observacion?.trim() || `Compra OC #${ordenId} a credito`
+        },
+        trx
+      );
+
+      await auditoriaService.logEvent(
+        {
+          entidad: 'PROVEEDOR_CXP',
+          entidad_id: deudaCxp.id,
+          accion: 'CREAR_DEUDA',
+          descripcion: `Deuda proveedor generada por factura ${factura.numero_factura}`,
+          detalle: {
+            modulo: 'CXP',
+            actor: actorUser || null,
+            proveedor_id: proveedorId,
+            factura_id: factura.id,
+            monto: total,
+            numero_documento: deudaCxp.numero_documento
+          },
+          datos_nuevos: {
+            proveedor_id: proveedorId,
+            factura_id: factura.id,
+            monto: total,
+            numero_documento: deudaCxp.numero_documento,
+            fecha_vencimiento: deudaCxp.fecha_vencimiento
+          }
         },
         trx
       );
     }
 
-    const recepcion = await repository.createReception(
-      {
-        orden_id: ordenId,
-        total,
-        factura_id: factura.numero_factura,
-        factura_compra_id: factura.id
-      },
-      trx
-    );
+    const recepcionPayload = {
+      orden_id: ordenId,
+      total,
+      factura_id: factura.numero_factura,
+      factura_compra_id: factura.id,
+      fecha: fechaRecepcion
+    };
+
+    if (schemaSupport.hasRecepcionObservacion) {
+      recepcionPayload.observacion = parsed.data.observacion?.trim() || null;
+    }
+
+    if (schemaSupport.hasUsuarioReceptorId) {
+      recepcionPayload.usuario_receptor_id = actorUser?.id || null;
+    }
+
+    const recepcion = await repository.createReception(recepcionPayload, trx);
 
     await repository.insertReceptionDetails(
       receptionDetails.map((d) => ({ ...d, recepcion_id: recepcion.id })),
@@ -271,12 +631,7 @@ async function receiveOrden(ordenId, body, actorUser) {
     await repository.createSupplierCostHistory(supplierHistory, trx);
 
     const refreshedOrder = await repository.getOrderById(ordenId, trx);
-    const completadas = refreshedOrder.detalle.filter((d) => n(d.cantidad_recibida) >= n(d.cantidad)).length;
-    const totalItems = refreshedOrder.detalle.length;
-
-    let estado = 'ABIERTA';
-    if (completadas === totalItems) estado = 'COMPLETA';
-    else if (completadas > 0) estado = 'PARCIAL';
+    const estado = resolveOrderStatusFromProgress(getOrderProgress(refreshedOrder));
 
     await repository.updateOrderStatus(ordenId, estado, trx);
 
@@ -290,7 +645,14 @@ async function receiveOrden(ordenId, body, actorUser) {
           actor: actorUser || null,
           recepcion_id: recepcion.id,
           factura_id: factura.id,
-          factura: parsed.data.factura,
+          proveedor_id: proveedorId,
+          proveedor_nombre: proveedor.nombre,
+          factura: {
+            ...parsed.data.factura,
+            numero_factura: numeroDocumento
+          },
+          documento_respaldo: numeroDocumento,
+          observacion: parsed.data.observacion?.trim() || null,
           total,
           estado
         }
@@ -307,9 +669,139 @@ async function receiveOrden(ordenId, body, actorUser) {
   });
 }
 
+async function cancelOrden(ordenId, body, actorUser) {
+  const parsed = orderActionSchema.safeParse(body || {});
+  if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
+
+  await repository.ensureLegacySchema();
+
+  return db.transaction(async (trx) => {
+    const orderData = await repository.getOrderById(ordenId, trx);
+    if (!orderData) throw new AppError(404, 'Orden no encontrada');
+
+    const currentStatus = String(orderData.orden.estado || '').trim().toUpperCase();
+    const progress = getOrderProgress(orderData);
+
+    if (currentStatus === 'CANCELADA') {
+      throw new AppError(400, 'La orden ya está cancelada', { orden_id: ordenId, estado: currentStatus }, 'ORDER_ALREADY_CANCELLED');
+    }
+    if (currentStatus === 'COMPLETA') {
+      throw new AppError(400, 'No se puede cancelar una orden completa', { orden_id: ordenId, estado: currentStatus }, 'ORDER_ALREADY_COMPLETED');
+    }
+    if (currentStatus === 'CERRADA_PARCIAL') {
+      throw new AppError(400, 'La orden ya fue cerrada con pendiente residual', { orden_id: ordenId, estado: currentStatus }, 'ORDER_ALREADY_CLOSED_PARTIAL');
+    }
+    if (progress.hasAnyReception) {
+      throw new AppError(
+        400,
+        'No se puede cancelar una orden con recepciones previas; ciérrela con pendiente residual',
+        {
+          orden_id: ordenId,
+          estado: currentStatus,
+          cantidad_recibida_total: progress.totalReceived,
+          cantidad_pendiente_total: progress.totalPending
+        },
+        'ORDER_HAS_RECEPTIONS'
+      );
+    }
+
+    await repository.updateOrderStatus(ordenId, 'CANCELADA', trx);
+
+    await auditoriaService.logEvent(
+      {
+        entidad: 'COMPRA_ORDEN',
+        entidad_id: ordenId,
+        accion: 'CANCELAR',
+        detalle: {
+          modulo: 'COMPRAS',
+          actor: actorUser || null,
+          observacion: parsed.data.observacion || null,
+          cantidad_pendiente_total: progress.totalPending
+        }
+      },
+      trx
+    );
+
+    return {
+      ok: true,
+      data: decorateOrderData(await repository.getOrderById(ordenId, trx))
+    };
+  });
+}
+
+async function closeOrdenResidual(ordenId, body, actorUser) {
+  const parsed = orderActionSchema.safeParse(body || {});
+  if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
+
+  await repository.ensureLegacySchema();
+
+  return db.transaction(async (trx) => {
+    const orderData = await repository.getOrderById(ordenId, trx);
+    if (!orderData) throw new AppError(404, 'Orden no encontrada');
+
+    const currentStatus = String(orderData.orden.estado || '').trim().toUpperCase();
+    const progress = getOrderProgress(orderData);
+
+    if (currentStatus === 'CANCELADA') {
+      throw new AppError(400, 'No se puede cerrar parcialmente una orden cancelada', { orden_id: ordenId, estado: currentStatus }, 'ORDER_ALREADY_CANCELLED');
+    }
+    if (currentStatus === 'COMPLETA') {
+      throw new AppError(400, 'La orden ya está completa', { orden_id: ordenId, estado: currentStatus }, 'ORDER_ALREADY_COMPLETED');
+    }
+    if (currentStatus === 'CERRADA_PARCIAL') {
+      throw new AppError(400, 'La orden ya fue cerrada con pendiente residual', { orden_id: ordenId, estado: currentStatus }, 'ORDER_ALREADY_CLOSED_PARTIAL');
+    }
+    if (!progress.hasAnyReception) {
+      throw new AppError(
+        400,
+        'Solo una orden con recepción parcial puede cerrarse con pendiente residual',
+        { orden_id: ordenId, estado: currentStatus },
+        'ORDER_NOT_PARTIAL'
+      );
+    }
+    if (progress.totalPending <= 0) {
+      throw new AppError(400, 'La orden no tiene pendiente residual por cerrar', { orden_id: ordenId, estado: currentStatus }, 'ORDER_WITHOUT_PENDING');
+    }
+
+    await repository.updateOrderStatus(ordenId, 'CERRADA_PARCIAL', trx);
+
+    await auditoriaService.logEvent(
+      {
+        entidad: 'COMPRA_ORDEN',
+        entidad_id: ordenId,
+        accion: 'CERRAR_PARCIAL',
+        detalle: {
+          modulo: 'COMPRAS',
+          actor: actorUser || null,
+          observacion: parsed.data.observacion || null,
+          cantidad_solicitada_total: progress.totalRequested,
+          cantidad_recibida_total: progress.totalReceived,
+          cantidad_pendiente_total: progress.totalPending,
+          detalle_pendiente: (orderData.detalle || [])
+            .filter((line) => Number(line.cantidad_pendiente || 0) > 0)
+            .map((line) => ({
+              orden_detalle_id: line.id,
+              producto_id: line.producto_id,
+              producto_codigo: line.producto_codigo,
+              producto_nombre: line.producto_nombre,
+              cantidad_pendiente: Number(line.cantidad_pendiente)
+            }))
+        }
+      },
+      trx
+    );
+
+    return {
+      ok: true,
+      data: decorateOrderData(await repository.getOrderById(ordenId, trx))
+    };
+  });
+}
+
 async function listRecepciones(ordenId) {
+  await repository.ensureLegacySchema();
   const data = await repository.listReceptionsByOrder(ordenId);
-  return { ok: true, data };
+  return { ok: true, data: decorateRecepcionesData(data) };
 }
 
 module.exports = {
@@ -317,5 +809,7 @@ module.exports = {
   listOrdenes,
   getOrden,
   receiveOrden,
-  listRecepciones
+  listRecepciones,
+  cancelOrden,
+  closeOrdenResidual
 };

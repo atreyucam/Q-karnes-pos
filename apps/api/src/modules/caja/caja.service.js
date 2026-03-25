@@ -3,9 +3,32 @@ const db = require('../../db/knex');
 const repository = require('./caja.repository');
 const auditoriaService = require('../auditoria/auditoria.service');
 const { resolveAdminAuthorizer } = require('../auth/adminAuthorization.service');
+const configuracionService = require('../configuracion/configuracion.service');
 const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
+const { CASH_MOVEMENT_TYPES, buildCashMovementPayload, buildTurnoCashSnapshot } = require('./cashMovement');
+
+const movementFilterMap = {
+  VENTAS: new Set([
+    CASH_MOVEMENT_TYPES.VENTA_CONTADO,
+    CASH_MOVEMENT_TYPES.VENTA_TRANSFERENCIA,
+    CASH_MOVEMENT_TYPES.VENTA_CREDITO
+  ]),
+  INGRESOS: new Set([
+    CASH_MOVEMENT_TYPES.INGRESO_MANUAL,
+    CASH_MOVEMENT_TYPES.ABONO_CLIENTE,
+    CASH_MOVEMENT_TYPES.REVERSO_PAGO_PROVEEDOR
+  ]),
+  EGRESOS: new Set([
+    CASH_MOVEMENT_TYPES.EGRESO_MANUAL,
+    CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR,
+    CASH_MOVEMENT_TYPES.COMPRA_CONTADO,
+    CASH_MOVEMENT_TYPES.DEVOLUCION_EFECTIVO,
+    CASH_MOVEMENT_TYPES.ANULACION_VENTA_EFECTIVO,
+    CASH_MOVEMENT_TYPES.REVERSO_ABONO_CLIENTE
+  ])
+};
 
 const abrirSchema = z.object({
   fondo_inicial: z.number().nonnegative(),
@@ -15,7 +38,8 @@ const abrirSchema = z.object({
 const manualSchema = z.object({
   tipo: z.enum(['INGRESO', 'EGRESO']),
   concepto: z.string().min(1),
-  monto: z.number().positive()
+  monto: z.number().positive(),
+  observacion: z.string().trim().optional()
 });
 
 const corteZSchema = z.object({
@@ -26,59 +50,6 @@ const corteZSchema = z.object({
     password: z.string().min(1)
   }).optional()
 });
-
-function summarizeCashMovements(movimientos) {
-  return movimientos.reduce(
-    (acc, mov) => {
-      const monto = Number(mov.monto || 0);
-      const tipo = String(mov.tipo || '').toUpperCase();
-      if (tipo === 'INGRESO') acc.ingresos_manuales += monto;
-      else if (tipo === 'EGRESO') acc.egresos_manuales += monto;
-      else if (tipo === 'VENTA') acc.ventas_efectivo += monto;
-      else if (tipo === 'COMPRA') acc.compras_efectivo += monto;
-      else if (tipo === 'DEVOLUCION') acc.devoluciones_efectivo += monto;
-      else if (tipo === 'ANULACION_VENTA') acc.anulaciones_efectivo += monto;
-      else {
-        if (monto >= 0) acc.otros_ingresos += monto;
-        else acc.otros_egresos += Math.abs(monto);
-      }
-      return acc;
-    },
-    {
-      ingresos_manuales: 0,
-      egresos_manuales: 0,
-      ventas_efectivo: 0,
-      compras_efectivo: 0,
-      devoluciones_efectivo: 0,
-      anulaciones_efectivo: 0,
-      otros_ingresos: 0,
-      otros_egresos: 0
-    }
-  );
-}
-
-function buildTurnoCashSnapshot(turno, movimientos) {
-  const totals = summarizeCashMovements(movimientos);
-
-  const efectivoEsperado = moneyRound(
-    Number(turno.fondo_inicial || 0)
-    + Number(totals.ventas_efectivo || 0)
-    + Number(totals.ingresos_manuales || 0)
-    + Number(totals.otros_ingresos || 0)
-    - Number(totals.egresos_manuales || 0)
-    - Number(totals.compras_efectivo || 0)
-    - Number(totals.devoluciones_efectivo || 0)
-    - Number(totals.anulaciones_efectivo || 0)
-    - Number(totals.otros_egresos || 0)
-  );
-
-  return {
-    ...totals,
-    fondo_inicial: moneyRound(turno.fondo_inicial),
-    manual_neto: moneyRound(Number(totals.ingresos_manuales || 0) - Number(totals.egresos_manuales || 0)),
-    efectivo_esperado: efectivoEsperado
-  };
-}
 
 async function turnoActual() {
   return repository.findOpenShift();
@@ -126,6 +97,18 @@ async function corteX(user) {
 
   const resumen = {
     turno_id: turno.id,
+    resumen_caja: {
+      saldo_inicial: snapshot.fondo_inicial,
+      ingresos_efectivo: snapshot.ingresos_efectivo,
+      egresos_efectivo: snapshot.egresos_efectivo,
+      saldo_actual: snapshot.efectivo_esperado
+    },
+    resumen_ventas: {
+      efectivo: snapshot.ventas_efectivo,
+      transferencia: snapshot.ventas_transferencia,
+      credito: snapshot.ventas_credito,
+      total_ventas: snapshot.ventas_total_turno
+    },
     ...snapshot,
     movimientos
   };
@@ -150,6 +133,7 @@ async function movimientoManual(body, user) {
     throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
   }
 
+  await configuracionService.assertPaymentMethodEnabled('EFECTIVO');
   const turno = await repository.findOpenShift();
   if (!turno) throw new AppError(400, 'No hay turno abierto');
   if (Number(turno.usuario_id) !== Number(user.id) && user.rol?.nombre !== 'ADMIN') {
@@ -157,10 +141,16 @@ async function movimientoManual(body, user) {
   }
 
   const movimiento = await repository.createMovement({
-    turno_id: turno.id,
-    tipo: parsed.data.tipo,
-    concepto: parsed.data.concepto,
-    monto: moneyRound(parsed.data.monto)
+    ...buildCashMovementPayload({
+      turnoId: turno.id,
+      tipo: parsed.data.tipo === 'INGRESO' ? CASH_MOVEMENT_TYPES.INGRESO_MANUAL : CASH_MOVEMENT_TYPES.EGRESO_MANUAL,
+      concepto: parsed.data.concepto,
+      monto: moneyRound(parsed.data.monto),
+      documentoOrigen: `CAJA_MANUAL:${turno.id}`,
+      moduloOrigen: 'CAJA',
+      actorId: user.id,
+      observacion: parsed.data.observacion || parsed.data.concepto
+    })
   });
 
   await auditoriaService.logEvent({
@@ -246,9 +236,13 @@ async function corteZ(body, user) {
           ingresos_manuales: snapshot.ingresos_manuales,
           egresos_manuales: snapshot.egresos_manuales,
           ventas_efectivo: snapshot.ventas_efectivo,
+          cobranzas_clientes: snapshot.cobranzas_clientes,
           compras_efectivo: snapshot.compras_efectivo,
+          pagos_proveedores: snapshot.pagos_proveedores,
           devoluciones_efectivo: snapshot.devoluciones_efectivo,
           anulaciones_efectivo: snapshot.anulaciones_efectivo,
+          reversiones_abonos_clientes: snapshot.reversiones_abonos_clientes,
+          reversiones_pagos_proveedores: snapshot.reversiones_pagos_proveedores,
           otros_ingresos: snapshot.otros_ingresos,
           otros_egresos: snapshot.otros_egresos,
           observacion: parsed.data.observacion || null
@@ -279,6 +273,18 @@ async function resumenTurno(turnoId) {
   return {
     turno,
     movimientos,
+    resumen_caja: {
+      saldo_inicial: snapshot.fondo_inicial,
+      ingresos_efectivo: snapshot.ingresos_efectivo,
+      egresos_efectivo: snapshot.egresos_efectivo,
+      saldo_actual: snapshot.efectivo_esperado
+    },
+    resumen_ventas: {
+      efectivo: snapshot.ventas_efectivo,
+      transferencia: snapshot.ventas_transferencia,
+      credito: snapshot.ventas_credito,
+      total_ventas: snapshot.ventas_total_turno
+    },
     ...snapshot
   };
 }
@@ -296,17 +302,22 @@ async function movimientosTurno(turnoId, query = {}) {
 
   const parsedLimit = Number(query.limit);
   const parsedOffset = Number(query.offset);
+  const filter = String(query.filter || 'TODOS').trim().toUpperCase();
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20;
   const offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
 
   const rows = await repository.getMovementsByShift(turnoId);
+  const filteredRows = movementFilterMap[filter]
+    ? rows.filter((row) => movementFilterMap[filter].has(String(row.tipo || '').toUpperCase()))
+    : rows;
   return {
     ok: true,
-    data: rows.slice(offset, offset + limit),
+    data: filteredRows.slice(offset, offset + limit),
     meta: {
-      total: rows.length,
+      total: filteredRows.length,
       limit,
-      offset
+      offset,
+      filter
     }
   };
 }

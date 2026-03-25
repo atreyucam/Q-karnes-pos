@@ -7,6 +7,9 @@ const router = express.Router();
 
 router.use(authenticate, authorizeRoles('ADMIN', 'CAJERO'));
 router.get('/proveedores/:id/resumen', controller.resumenProveedor);
+router.get('/proveedores/:id/deudas', controller.deudasProveedor);
+router.get('/proveedores/:id/pagos', controller.historialPagosProveedor);
 router.post('/proveedores/:id/pagos', controller.pagarProveedor);
+router.post('/proveedores/:id/pagos/:movimientoId/revertir', controller.revertirPagoProveedor);
 
 module.exports = router;

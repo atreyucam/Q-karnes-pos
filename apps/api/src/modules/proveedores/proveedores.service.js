@@ -1,8 +1,10 @@
 const { z } = require('zod');
 const repository = require('./proveedores.repository');
+const configuracionService = require('../configuracion/configuracion.service');
 const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
+const { computeDebtStatus } = require('../../helpers/credit');
 
 const createSchema = z.object({
   nombre: z.string().min(1),
@@ -51,13 +53,14 @@ async function list(query = {}) {
 async function create(body) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
+  const config = await configuracionService.getRuntimeConfig();
   return repository.create({
     nombre: parsed.data.nombre,
     telefono: parsed.data.telefono || null,
     direccion: parsed.data.direccion || null,
     observacion: parsed.data.observacion || null,
     tiene_credito: parsed.data.tiene_credito ?? false,
-    dias_pago: parsed.data.dias_pago ?? 0,
+    dias_pago: parsed.data.dias_pago ?? (parsed.data.tiene_credito ? Number(config.dias_credito_proveedor_default || 0) : 0),
     activo: parsed.data.activo ?? true
   });
 }
@@ -98,7 +101,11 @@ async function facturas(id) {
       ...row,
       cargos: moneyRound(cargos),
       abonos: moneyRound(abonos),
-      pendiente: pendiente > 0 ? pendiente : 0
+      pendiente: pendiente > 0 ? pendiente : 0,
+      estado_deuda: computeDebtStatus({
+        saldo: pendiente,
+        fecha_vencimiento: row.fecha_vencimiento
+      })
     };
   });
 

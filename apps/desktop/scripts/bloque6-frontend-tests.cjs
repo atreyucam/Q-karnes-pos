@@ -117,11 +117,12 @@ function run() {
 
   try {
     const compraPage = read('apps/desktop/src/pages/compras/CompraNuevaPage.jsx');
-    assert(compraPage.includes('Autorización ADMIN requerida'), 'UI de compra no comunica autorización sensible');
-    assert(compraPage.includes('Registrar compra requiere autorización ADMIN'), 'Falta validación explícita de autorización admin en compra');
-    add(10, 'Flujo sensible de compra quedó más claro y usable', true);
+    assert(compraPage.includes('Guardar orden no ingresa stock'), 'UI de compra no comunica que la orden no mueve stock');
+    assert(compraPage.includes('Orden creada correctamente'), 'UI de compra no confirma creación exitosa');
+    assert(compraPage.includes('Recuerda que todavía no ingresa stock hasta la recepción'), 'Falta recordatorio de recepción posterior');
+    add(10, 'Flujo operativo de compra quedó más claro y usable', true);
   } catch (error) {
-    add(10, 'Flujo sensible de compra quedó más claro y usable', false, error.message);
+    add(10, 'Flujo operativo de compra quedó más claro y usable', false, error.message);
   }
 
   try {
@@ -142,9 +143,15 @@ function run() {
   }
 
   try {
-    const sidebar = read('apps/desktop/src/layout/Sidebar.jsx');
-    assert(sidebar.includes('/ventas') && sidebar.includes('Historial ventas'), 'Navegación crítica incompleta para ventas');
-    assert(sidebar.includes("roles: ['ADMIN', 'CAJERO']"), 'Sidebar no refleja roles operativos');
+    const sidebar = read('apps/desktop/src/app/layout/PosSidebar.jsx');
+    const navigation = read('apps/desktop/src/app/layout/posNavigation.js');
+    assert(navigation.includes("label: 'Inicio'"), 'Sidebar no refleja nombre visible Inicio');
+    assert(navigation.includes("label: 'Despiece'"), 'Sidebar no refleja módulo Despiece');
+    assert(navigation.includes('Historial y devoluciones'), 'Navegación de ventas no refleja historial y devoluciones');
+    assert(navigation.includes("label: 'Compras'") && navigation.includes("label: 'Órdenes'"), 'Agrupación de compras incompleta');
+    assert(navigation.includes("label: 'Reportes'"), 'Agrupación de reportes no está presente');
+    assert(navigation.includes("roles: ['ADMIN', 'CAJERO']"), 'Sidebar no refleja roles operativos');
+    assert(sidebar.includes('SidebarSection') && sidebar.includes('SidebarItem'), 'Shell POS no consume componentes compartidos de navegación');
     add(13, 'Sidebar/navegación refleja roles y módulos operativos', true);
   } catch (error) {
     add(13, 'Sidebar/navegación refleja roles y módulos operativos', false, error.message);
@@ -158,13 +165,13 @@ function run() {
   }
 
   try {
-    const testDocPath = path.resolve(__dirname, '../../../docs/testing-frontend-bloque6.md');
-    assert(fs.existsSync(testDocPath), 'No existe documentación de cobertura de pruebas frontend');
+    const testDocPath = path.resolve(__dirname, '../../../docs/auditoria-operacion-compras-despiece-inventario.md');
+    assert(fs.existsSync(testDocPath), 'No existe documentación operativa vigente');
     const testDoc = fs.readFileSync(testDocPath, 'utf-8');
-    assert(testDoc.includes('Cobertura') && testDoc.includes('No cubre todavía'), 'Documentación de cobertura incompleta');
-    add(15, 'Documentación indica qué cubren y qué no cubren las pruebas', true);
+    assert(testDoc.includes('Compras') && testDoc.includes('Despiece') && testDoc.includes('Inventario'), 'La documentación operativa quedó incompleta');
+    add(15, 'Documentación vigente describe módulos y cobertura operativa', true);
   } catch (error) {
-    add(15, 'Documentación indica qué cubren y qué no cubren las pruebas', false, error.message);
+    add(15, 'Documentación vigente describe módulos y cobertura operativa', false, error.message);
   }
 
   try {
@@ -179,18 +186,19 @@ function run() {
 
   try {
     const compraStore = read('apps/desktop/src/stores/comprasStore.js');
-    assert(compraStore.includes('throw new Error(message);'), 'Store de compras no propaga error para flujos UI refinados');
-    assert(compraStore.includes('parseApiError'), 'Store de compras no usa parser de errores consistente');
-    add(17, 'Base frontend mejor preparada para refactors futuros', true);
+    assert(compraStore.includes('parseApiErrorMeta'), 'Store de compras no conserva metadata de errores');
+    assert(compraStore.includes('nextError.meta = meta;'), 'Store de compras no propaga metadatos para la UI');
+    assert(compraStore.includes('throw nextError;'), 'Store de compras no propaga errores refinados');
+    add(17, 'Base frontend quedó preparada para validaciones de negocio más finas', true);
   } catch (error) {
-    add(17, 'Base frontend mejor preparada para refactors futuros', false, error.message);
+    add(17, 'Base frontend quedó preparada para validaciones de negocio más finas', false, error.message);
   }
 
   try {
-    const blockDocPath = path.resolve(__dirname, '../../../bloque-6-frontend-mantenibilidad-ux.md');
-    assert(fs.existsSync(blockDocPath), 'No existe documento principal de bloque 6');
+    const blockDocPath = path.resolve(__dirname, '../../../docs/reporte-modulos-ordenes-despiece-inventario.md');
+    assert(fs.existsSync(blockDocPath), 'No existe documento principal vigente de operación');
     const blockDoc = fs.readFileSync(blockDocPath, 'utf-8');
-    assert(blockDoc.includes('mantenibilidad') && blockDoc.includes('UX operativa'), 'Documento bloque 6 incompleto');
+    assert(blockDoc.includes('Inventario') && blockDoc.includes('Transformaciones') && blockDoc.includes('Compras'), 'Documento operativo vigente incompleto');
     add(18, 'Existe evidencia clara de mejora real sin reescritura masiva', true);
   } catch (error) {
     add(18, 'Existe evidencia clara de mejora real sin reescritura masiva', false, error.message);

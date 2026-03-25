@@ -8,10 +8,12 @@ const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
 
 function normalizeProduct(product) {
+  const precioVenta = Number(product.precio_venta || product.precio_referencia || 0);
   return {
     ...product,
     unidad_medida: product.unidad_medida || product.unidad || 'UND',
-    precio_referencia: Number(product.precio_referencia || product.precio_venta || 0),
+    precio_referencia: precioVenta,
+    precio_venta: precioVenta,
     stock_actual: Number(product.stock_actual || 0),
     stock_minimo: Number(product.stock_minimo || 0)
   };
@@ -23,10 +25,19 @@ const createSchema = z.object({
   categoria_id: z.number().int().positive().optional().nullable(),
   unidad_medida: z.enum(['LB', 'UND']),
   costo_promedio: z.number().nonnegative().optional(),
-  precio_referencia: z.number().nonnegative(),
+  precio_referencia: z.number().nonnegative().optional(),
+  precio_venta: z.number().nonnegative().optional(),
   stock_actual: z.number().nonnegative().optional(),
   stock_minimo: z.number().nonnegative().optional(),
   activo: z.boolean().optional()
+}).superRefine((data, ctx) => {
+  if (data.precio_referencia === undefined && data.precio_venta === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['precio_venta'],
+      message: 'Precio de venta es obligatorio'
+    });
+  }
 });
 
 const updateSchema = z.object({
@@ -34,6 +45,7 @@ const updateSchema = z.object({
   categoria_id: z.number().int().positive().nullable().optional(),
   unidad_medida: z.enum(['LB', 'UND']).optional(),
   precio_referencia: z.number().nonnegative().optional(),
+  precio_venta: z.number().nonnegative().optional(),
   stock_minimo: z.number().nonnegative().optional(),
   activo: z.boolean().optional()
 }).refine((data) => Object.keys(data).length > 0, {
@@ -53,7 +65,7 @@ async function list(query) {
   const filters = {
     categoria_id: query.categoria_id ? Number(query.categoria_id) : undefined,
     search: query.search,
-    activo: query.activo !== undefined ? query.activo === 'true' || query.activo === '1' : true
+    activo: query.activo !== undefined ? query.activo === 'true' || query.activo === '1' : undefined
   };
 
   const rows = await repository.list(filters);
@@ -72,6 +84,7 @@ async function create(body) {
     if (!categoria) throw new AppError(400, 'Categoría inválida');
   }
 
+  const precioVenta = parsed.data.precio_venta ?? parsed.data.precio_referencia;
   const data = {
     codigo: parsed.data.codigo,
     nombre: parsed.data.nombre,
@@ -79,8 +92,8 @@ async function create(body) {
     unidad: parsed.data.unidad_medida,
     unidad_medida: parsed.data.unidad_medida,
     costo_promedio: parsed.data.costo_promedio ?? 0,
-    precio_venta: parsed.data.precio_referencia,
-    precio_referencia: parsed.data.precio_referencia,
+    precio_venta: precioVenta,
+    precio_referencia: precioVenta,
     stock_actual: parsed.data.stock_actual ?? 0,
     stock_minimo: parsed.data.stock_minimo ?? 0,
     activo: parsed.data.activo ?? true
@@ -90,7 +103,7 @@ async function create(body) {
   return normalizeProduct(created);
 }
 
-async function update(id, body) {
+async function update(id, body, actorUser) {
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
 
@@ -104,10 +117,42 @@ async function update(id, body) {
 
   const payload = { ...parsed.data };
   if (parsed.data.unidad_medida) payload.unidad = parsed.data.unidad_medida;
-  if (parsed.data.precio_referencia !== undefined) payload.precio_venta = parsed.data.precio_referencia;
+  if (parsed.data.precio_venta !== undefined || parsed.data.precio_referencia !== undefined) {
+    const precioVenta = parsed.data.precio_venta ?? parsed.data.precio_referencia;
+    payload.precio_venta = precioVenta;
+    payload.precio_referencia = precioVenta;
+  }
 
-  const updated = await repository.update(id, payload);
-  return normalizeProduct(updated);
+  return db.transaction(async (trx) => {
+    const updated = await repository.update(id, payload, trx);
+
+    await auditoriaService.logEvent(
+      {
+        entidad: 'PRODUCTO',
+        entidad_id: id,
+        accion: 'MODIFICAR',
+        descripcion: `Producto ${product.codigo} actualizado`,
+        datos_anteriores: {
+          nombre: product.nombre,
+          categoria_id: product.categoria_id,
+          unidad_medida: product.unidad_medida || product.unidad || 'UND',
+          precio_referencia: Number(product.precio_referencia || product.precio_venta || 0),
+          stock_minimo: Number(product.stock_minimo || 0),
+          activo: Boolean(product.activo)
+        },
+        datos_nuevos: payload,
+        detalle: {
+          modulo: 'PRODUCTOS',
+          actor: actorUser || null,
+          codigo: product.codigo,
+          cambios: payload
+        }
+      },
+      trx
+    );
+
+    return normalizeProduct(updated);
+  });
 }
 
 async function getById(id) {

@@ -27,7 +27,7 @@ const auditoria = asyncHandler(async (req, res) => (
 ));
 
 const editar = asyncHandler(async (req, res) => (
-  successResponse(res, await service.editarVenta(Number(req.params.id), req.body))
+  successResponse(res, await service.editarVenta(Number(req.params.id), req.body, req.user))
 ));
 
 module.exports = {

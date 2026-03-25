@@ -1,0 +1,41 @@
+{
+  "generatedAt": "2026-03-16T03:55:15.696Z",
+  "dbFile": "C:\\Users\\alexc\\Proyectos\\Q-karnes-pos\\apps\\api\\data\\qkarnes.sqlite",
+  "fixResult": null,
+  "summary": {
+    "ordenesSinProveedor": 0,
+    "facturasSinProveedor": 0,
+    "facturasSinOrden": 0,
+    "creditoProveedorNoHabilitado": 1,
+    "recepcionesSinFacturaFk": 0,
+    "recepcionesInconsistentes": 0,
+    "detallesRecepcionInconsistentes": 0,
+    "cxpCargosInvalidos": 0,
+    "inventarioCompraInvalido": 0,
+    "repairable": {
+      "ordenesSinProveedor": 0,
+      "facturasSinProveedor": 0
+    }
+  },
+  "issues": {
+    "ordenesSinProveedor": [],
+    "facturasSinProveedor": [],
+    "facturasSinOrden": [],
+    "creditoProveedorNoHabilitado": [
+      {
+        "id": 6,
+        "numero_factura": "F-1006",
+        "proveedor_id": 3,
+        "nombre": "Lacteos Andinos",
+        "tiene_credito": 0,
+        "total": 105,
+        "fecha": "2026-03-16 03:02:11"
+      }
+    ],
+    "recepcionesSinFacturaFk": [],
+    "recepcionesInconsistentes": [],
+    "detallesRecepcionInconsistentes": [],
+    "cxpCargosInvalidos": [],
+    "inventarioCompraInvalido": []
+  }
+}

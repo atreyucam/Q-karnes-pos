@@ -4,6 +4,7 @@ import apiClient, { normalizeResponse, parseApiError } from '../lib/apiClient';
 export const useInventarioStore = create((set) => ({
   disponible: [],
   alertas: [],
+  conteos: [],
   mermas: [],
   movimientos: [],
   loading: false,
@@ -22,6 +23,15 @@ export const useInventarioStore = create((set) => ({
     try {
       const response = await apiClient.get('/api/inventario/alertas');
       set({ alertas: normalizeResponse(response.data), loading: false });
+    } catch (error) {
+      set({ loading: false, error: parseApiError(error) });
+    }
+  },
+  cargarConteos: async () => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.get('/api/inventario/conteos');
+      set({ conteos: normalizeResponse(response.data), loading: false });
     } catch (error) {
       set({ loading: false, error: parseApiError(error) });
     }

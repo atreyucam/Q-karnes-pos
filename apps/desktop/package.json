@@ -8,9 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "node electron/dev.cjs",
-    "electron": "electron .",
+    "electron:prod": "node electron/run-prod.cjs",
+    "electron": "npm run electron:prod",
     "test:bloque6": "node scripts/bloque6-frontend-tests.cjs",
-    "test:ux-regression": "npm run build && npm run test:bloque6"
+    "test:ux-regression": "npm run build && npm run test:bloque6",
+    "test:bloque9": "node scripts/bloque9-transformaciones-frontend-tests.cjs",
+    "test:productos": "node scripts/productos-pos-frontend-tests.cjs",
+    "test:sidebar:final": "node scripts/sidebar-final-tests.cjs",
+    "test:reportes": "node scripts/reportes-graficos-tests.cjs",
+    "test:ticket": "node scripts/ticket-print-tests.cjs"
   },
   "dependencies": {
     "apexcharts": "^5.4.0",

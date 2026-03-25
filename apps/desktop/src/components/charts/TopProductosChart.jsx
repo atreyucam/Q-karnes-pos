@@ -1,4 +1,5 @@
 import Chart from 'react-apexcharts';
+import { chartPalette } from '../../theme/tokens';
 
 export default function TopProductosChart({ data = [] }) {
   const categories = data.map((item) => item.nombre || item.codigo || '-');
@@ -14,7 +15,7 @@ export default function TopProductosChart({ data = [] }) {
         horizontal: true
       }
     },
-    colors: ['#f59e0b'],
+    colors: [chartPalette.warning],
     xaxis: {
       categories,
       labels: { style: { colors: '#64748b' } }
@@ -28,8 +29,8 @@ export default function TopProductosChart({ data = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="mb-2 text-sm font-semibold text-slate-700">Top productos</p>
+    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+      <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Top productos</p>
       <Chart type="bar" height={280} options={options} series={[{ name: 'Unidades', data: seriesData }]} />
     </div>
   );

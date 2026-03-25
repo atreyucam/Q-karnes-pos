@@ -1,64 +1,31 @@
 const service = require('./reportes.service');
+const { asyncHandler } = require('../../helpers/asyncHandler');
+const { successResponse } = require('../../helpers/apiResponse');
 
-async function dashboard(req, res, next) {
-  try {
-    const data = await service.dashboard();
-    return res.json(data);
-  } catch (error) {
-    return next(error);
-  }
-}
-
-async function ventasDiarias(req, res, next) {
-  try {
-    const data = await service.ventasDiarias(req.query);
-    return res.json(data);
-  } catch (error) {
-    return next(error);
-  }
-}
-
-async function ventas(req, res, next) {
-  try {
-    const data = await service.ventas();
-    return res.json(data);
-  } catch (error) {
-    return next(error);
-  }
-}
-
-async function topProductos(req, res, next) {
-  try {
-    const data = await service.topProductos();
-    return res.json(data);
-  } catch (error) {
-    return next(error);
-  }
-}
-
-async function caja(req, res, next) {
-  try {
-    const data = await service.caja();
-    return res.json(data);
-  } catch (error) {
-    return next(error);
-  }
-}
-
-async function inventarioMovimientos(req, res, next) {
-  try {
-    const data = await service.inventarioMovimientos();
-    return res.json(data);
-  } catch (error) {
-    return next(error);
-  }
-}
+const dashboard = asyncHandler(async (req, res) => successResponse(res, await service.dashboard()));
+const ventas = asyncHandler(async (req, res) => successResponse(res, await service.ventas(req.query)));
+const ventasDiarias = asyncHandler(async (req, res) => successResponse(res, await service.ventasDiarias(req.query)));
+const ventasProducto = asyncHandler(async (req, res) => successResponse(res, await service.ventasProducto(req.query)));
+const topProductos = asyncHandler(async (req, res) => successResponse(res, await service.topProductos(req.query)));
+const inventario = asyncHandler(async (req, res) => successResponse(res, await service.inventario()));
+const inventarioMovimientos = asyncHandler(async (req, res) => successResponse(res, await service.inventarioMovimientos()));
+const caja = asyncHandler(async (req, res) => successResponse(res, await service.caja(req.query)));
+const cxc = asyncHandler(async (req, res) => successResponse(res, await service.cxc()));
+const cxp = asyncHandler(async (req, res) => successResponse(res, await service.cxp()));
+const compras = asyncHandler(async (req, res) => successResponse(res, await service.compras(req.query)));
+const transformacionesResumen = asyncHandler(async (req, res) => successResponse(res, await service.transformacionesResumen()));
 
 module.exports = {
   dashboard,
-  ventasDiarias,
   ventas,
+  ventasDiarias,
+  ventasProducto,
   topProductos,
+  inventario,
+  inventarioMovimientos,
   caja,
-  inventarioMovimientos
+  cxc,
+  cxp,
+  compras,
+  transformacionesResumen
 };

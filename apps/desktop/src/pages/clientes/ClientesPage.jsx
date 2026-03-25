@@ -1,9 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PiCheck, PiCurrencyDollar, PiEye, PiPencilSimple, PiPlus, PiX } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
-import { Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda } from '../../components/ui/Tabla';
-import Paginador from '../../components/ui/Paginador';
-import Modal from '../../components/ui/Modal';
-import { getStatusClasses } from '../../components/ui/statusColors';
+import {
+  Alert,
+  Button,
+  Card,
+  DeactivateEntityDialogs,
+  IconButton,
+  Input,
+  LoadingState,
+  Modal,
+  PageHeader,
+  Paginador,
+  Select,
+  StatusBadge,
+  Tabla,
+  TablaCabecera,
+  TablaCuerpo,
+  TablaFila,
+  TablaCelda,
+  Textarea
+} from '../../ui';
 import { useClientesStore } from '../../stores/clientesStore';
 import { formatMoney } from '../../lib/formatMoney';
 
@@ -28,6 +45,9 @@ export default function ClientesPage() {
   const [clienteForm, setClienteForm] = useState(emptyClienteForm);
   const [abonoModal, setAbonoModal] = useState(null);
   const [abonoForm, setAbonoForm] = useState({ monto: '', referencia: '', observacion: '' });
+  const [deactivateTarget, setDeactivateTarget] = useState(null);
+  const [deactivateError, setDeactivateError] = useState('');
+  const [deactivateLoading, setDeactivateLoading] = useState(false);
 
   const refreshList = () => {
     listar({
@@ -95,14 +115,18 @@ export default function ClientesPage() {
       activo: clienteForm.activo
     };
 
-    if (clienteModal.mode === 'edit' && clienteForm.id) {
-      await actualizar(clienteForm.id, payload);
-    } else {
-      await crear(payload);
-    }
+    try {
+      if (clienteModal.mode === 'edit' && clienteForm.id) {
+        await actualizar(clienteForm.id, payload);
+      } else {
+        await crear(payload);
+      }
 
-    closeClienteModal();
-    refreshList();
+      closeClienteModal();
+      refreshList();
+    } catch (_) {
+      // store error already exposed in page alert
+    }
   };
 
   const onRegistrarAbono = async () => {
@@ -118,69 +142,107 @@ export default function ClientesPage() {
     refreshList();
   };
 
+  const onToggleCliente = async (cliente) => {
+    if (cliente.activo) {
+      setDeactivateTarget(cliente);
+      return;
+    }
+
+    try {
+      await actualizar(cliente.id, { activo: true });
+      refreshList();
+    } catch (_) {
+      // store error already exposed in page alert
+    }
+  };
+
+  const onConfirmDeactivate = async () => {
+    if (!deactivateTarget) return;
+
+    setDeactivateLoading(true);
+    try {
+      await actualizar(deactivateTarget.id, { activo: false });
+      setDeactivateTarget(null);
+      refreshList();
+    } catch (error) {
+      setDeactivateTarget(null);
+      setDeactivateError(error.message || 'El sistema no permitio desactivar este cliente.');
+    } finally {
+      setDeactivateLoading(false);
+    }
+  };
+
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
-      <div className="space-y-5">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-800">Clientes y credito</h2>
-          <p className="text-sm text-slate-500">Gestion de clientes, estado y cartera</p>
-        </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Clientes y credito"
+        description="Gestion de clientes, estado y cartera."
+        actions={(
+          <Button onClick={openCreateModal}>
+            <PiPlus className="text-base" />
+            Nuevo cliente
+          </Button>
+        )}
+      />
 
-        {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+      {error && <Alert tone="error">{error}</Alert>}
 
-        <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[1fr_180px_180px_auto]">
+      <Card className="p-5">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_190px_190px] xl:grid-cols-[minmax(0,1fr)_190px_190px_180px]">
           <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Buscar</label>
-            <input
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Buscar</label>
+            <Input
+              className="mt-2"
               value={filtros.search}
               onChange={(e) => onChangeFiltro('search', e.target.value)}
-              placeholder="Nombre, telefono, direccion"
+              placeholder="Nombre, telefono o direccion"
             />
           </div>
 
           <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Estado</label>
-            <select
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</label>
+            <Select
+              className="mt-2"
               value={filtros.estado}
               onChange={(e) => onChangeFiltro('estado', e.target.value)}
             >
               <option value="TODOS">Todos</option>
               <option value="1">Activo</option>
               <option value="0">Inactivo</option>
-            </select>
+            </Select>
           </div>
 
           <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Credito</label>
-            <select
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Credito</label>
+            <Select
+              className="mt-2"
               value={filtros.credito}
               onChange={(e) => onChangeFiltro('credito', e.target.value)}
             >
               <option value="TODOS">Todos</option>
               <option value="CON">Con credito</option>
               <option value="SIN">Sin credito</option>
-            </select>
+            </Select>
           </div>
 
-          <div className="flex items-end">
-            <button className="w-full rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={openCreateModal}>
-              Nuevo cliente
-            </button>
+          <div className="flex items-end xl:justify-end">
+            <Button variant="secondary" className="w-full xl:w-auto" onClick={() => setFiltros({ search: '', estado: 'TODOS', credito: 'TODOS' })}>
+              Limpiar filtros
+            </Button>
           </div>
         </div>
+      </Card>
 
+      <Card className="overflow-hidden p-0">
         <Tabla>
           <TablaCabecera>
             <tr>
               <TablaCelda as="th">ID</TablaCelda>
-              <TablaCelda as="th">Nombre</TablaCelda>
+              <TablaCelda as="th">Cliente</TablaCelda>
               <TablaCelda as="th">Telefono</TablaCelda>
               <TablaCelda as="th">Estado</TablaCelda>
-              <TablaCelda as="th">Credito pendiente</TablaCelda>
-              <TablaCelda as="th">Acciones</TablaCelda>
+              <TablaCelda as="th" className="text-right">Credito pendiente</TablaCelda>
+              <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
           <TablaCuerpo>
@@ -189,43 +251,59 @@ export default function ClientesPage() {
               const sinSaldo = saldoCredito <= 0;
               return (
                 <TablaFila key={c.id}>
-                  <TablaCelda>#{c.id}</TablaCelda>
-                  <TablaCelda>{c.nombre}</TablaCelda>
+                  <TablaCelda className="font-semibold text-[var(--color-text)]">#{c.id}</TablaCelda>
+                  <TablaCelda>
+                    <p className="text-[var(--color-text)]">{c.nombre}</p>
+                  </TablaCelda>
                   <TablaCelda>{c.telefono || '-'}</TablaCelda>
                   <TablaCelda>
-                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1 ${getStatusClasses(c.activo ? 'ACTIVO' : 'INACTIVO')}`}>
-                      {c.activo ? 'ACTIVO' : 'INACTIVO'}
-                    </span>
+                    <StatusBadge status={c.activo ? 'ACTIVO' : 'INACTIVO'} />
                   </TablaCelda>
-                  <TablaCelda className={saldoCredito > 0 ? 'font-bold text-[#b41428]' : ''}>{formatMoney(saldoCredito)}</TablaCelda>
+                  <TablaCelda className={`text-right font-semibold ${saldoCredito > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
+                    {formatMoney(saldoCredito)}
+                  </TablaCelda>
                   <TablaCelda>
-                    <div className="flex justify-end gap-2">
-                      <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white" onClick={() => navigate(`/clientes/${c.id}`)}>
-                        Ver
-                      </button>
-                      <button
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                        disabled={sinSaldo}
+                    <div className="flex justify-end gap-1">
+                      <IconButton
+                        variant="iconView"
+                        size="sm"
+                        aria-label="Ver cliente"
+                        title="Ver cliente"
+                        onClick={() => navigate(`/clientes/${c.id}`)}
+                      >
+                        <PiEye className="text-lg" />
+                      </IconButton>
+                      <IconButton
+                        variant="iconSecondary"
+                        size="sm"
+                        aria-label="Registrar abono"
                         title={sinSaldo ? 'Sin saldo pendiente' : 'Registrar abono'}
+                        disabled={sinSaldo}
                         onClick={() => {
                           setAbonoModal(c);
                           setAbonoForm({ monto: '', referencia: '', observacion: '' });
                         }}
                       >
-                        Registrar abono
-                      </button>
-                      <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs" onClick={() => openEditModal(c)}>
-                        Editar
-                      </button>
-                      <button
-                        className="rounded-lg bg-[#b41428] px-3 py-1.5 text-xs text-white hover:bg-[#8f1020]"
-                        onClick={async () => {
-                          await actualizar(c.id, { activo: !c.activo });
-                          refreshList();
-                        }}
+                        <PiCurrencyDollar className="text-lg" />
+                      </IconButton>
+                      <IconButton
+                        variant="iconEdit"
+                        size="sm"
+                        aria-label="Editar cliente"
+                        title="Editar cliente"
+                        onClick={() => openEditModal(c)}
                       >
-                        {c.activo ? 'Desactivar' : 'Activar'}
-                      </button>
+                        <PiPencilSimple className="text-lg" />
+                      </IconButton>
+                      <IconButton
+                        variant={c.activo ? 'iconDanger' : 'iconSuccess'}
+                        size="sm"
+                        aria-label={c.activo ? 'Desactivar cliente' : 'Activar cliente'}
+                        title={c.activo ? 'Desactivar cliente' : 'Activar cliente'}
+                        onClick={() => onToggleCliente(c)}
+                      >
+                        {c.activo ? <PiX className="text-lg" /> : <PiCheck className="text-lg" />}
+                      </IconButton>
                     </div>
                   </TablaCelda>
                 </TablaFila>
@@ -233,76 +311,62 @@ export default function ClientesPage() {
             })}
           </TablaCuerpo>
         </Tabla>
+      </Card>
 
-        <Paginador
-          paginaActual={pagina}
-          totalPaginas={totalPaginas}
-          totalRegistros={totalRegistros}
-          mostrarSiempre
-          onPageChange={setPagina}
-        />
+      <Paginador
+        paginaActual={pagina}
+        totalPaginas={totalPaginas}
+        totalRegistros={totalRegistros}
+        mostrarSiempre
+        onPageChange={setPagina}
+      />
 
-        {loading && <p className="text-xs text-slate-500">Cargando...</p>}
-      </div>
+      {loading && <LoadingState label="Cargando clientes..." />}
 
-      <Modal open={clienteModal.open} onClose={closeClienteModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
+      <Modal open={clienteModal.open} onClose={closeClienteModal} maxWidthClass="max-w-4xl" panelClassName="p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800">{clienteModal.mode === 'edit' ? 'Editar cliente' : 'Nuevo cliente'}</h3>
-            <p className="text-sm text-slate-500">Registra o actualiza clientes para ventas y credito.</p>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">{clienteModal.mode === 'edit' ? 'Editar cliente' : 'Nuevo cliente'}</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Registra o actualiza clientes para ventas y credito.</p>
           </div>
-          <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={closeClienteModal}>
+          <Button type="button" variant="ghost" size="sm" onClick={closeClienteModal}>
             X
-          </button>
+          </Button>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1.3fr_1fr_1.3fr_auto]">
           <div>
-            <label className="text-sm font-medium text-slate-700">Nombre</label>
-            <input
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            <label className="text-sm font-medium text-[var(--color-text)]">Nombre</label>
+            <Input
+              className="mt-2"
               value={clienteForm.nombre}
               onChange={(e) => setClienteForm((s) => ({ ...s, nombre: e.target.value }))}
               placeholder="Ej: Restaurante El Buen Sabor"
             />
-            <p className="mt-1 text-xs text-slate-500">Nombre comercial o de la persona.</p>
           </div>
 
           <div>
-            <label className="text-sm font-medium text-slate-700">Telefono</label>
-            <input
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            <label className="text-sm font-medium text-[var(--color-text)]">Telefono</label>
+            <Input
+              className="mt-2"
               value={clienteForm.telefono}
               onChange={(e) => setClienteForm((s) => ({ ...s, telefono: e.target.value }))}
               placeholder="0990000000"
             />
-            <p className="mt-1 text-xs text-slate-500">Contacto para seguimiento de facturas y credito.</p>
           </div>
 
           <div>
-            <label className="text-sm font-medium text-slate-700">Direccion</label>
-            <input
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            <label className="text-sm font-medium text-[var(--color-text)]">Direccion</label>
+            <Input
+              className="mt-2"
               value={clienteForm.direccion}
               onChange={(e) => setClienteForm((s) => ({ ...s, direccion: e.target.value }))}
               placeholder="Sector / calle"
             />
-            <p className="mt-1 text-xs text-slate-500">Direccion de referencia para entregas o cobranza.</p>
           </div>
 
-          <div>
-            <label className="text-sm font-medium text-slate-700">Observacion</label>
-            <textarea
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-              value={clienteForm.observacion}
-              onChange={(e) => setClienteForm((s) => ({ ...s, observacion: e.target.value }))}
-              placeholder="Notas del cliente"
-            />
-            <p className="mt-1 text-xs text-slate-500">Notas internas sobre condiciones o seguimiento.</p>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+          <div className="flex items-end">
+            <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 text-sm font-medium text-[var(--color-text)]">
               <input
                 type="checkbox"
                 checked={clienteForm.activo}
@@ -310,44 +374,64 @@ export default function ClientesPage() {
               />
               Cliente activo
             </label>
-            <p className="mt-1 text-xs text-slate-500">Si esta inactivo no podra ser usado para ventas a credito.</p>
+          </div>
+
+          <div className="lg:col-span-4">
+            <label className="text-sm font-medium text-[var(--color-text)]">Observacion</label>
+            <Textarea
+              className="mt-2"
+              value={clienteForm.observacion}
+              onChange={(e) => setClienteForm((s) => ({ ...s, observacion: e.target.value }))}
+              placeholder="Notas del cliente"
+            />
           </div>
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={closeClienteModal}>
+          <Button variant="secondary" onClick={closeClienteModal}>
             Cancelar
-          </button>
-          <button className="rounded-xl bg-[#b41428] px-4 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onSaveCliente}>
+          </Button>
+          <Button onClick={onSaveCliente}>
             {clienteModal.mode === 'edit' ? 'Guardar cambios' : 'Guardar cliente'}
-          </button>
+          </Button>
         </div>
       </Modal>
+
+      <DeactivateEntityDialogs
+        confirmOpen={Boolean(deactivateTarget)}
+        entityLabel={deactivateTarget ? `al cliente ${deactivateTarget.nombre}` : 'este cliente'}
+        onCloseConfirm={() => setDeactivateTarget(null)}
+        onConfirm={onConfirmDeactivate}
+        confirmLoading={deactivateLoading}
+        blockedOpen={Boolean(deactivateError)}
+        blockedMessage={deactivateError}
+        onCloseBlocked={() => setDeactivateError('')}
+      />
 
       <Modal open={Boolean(abonoModal)} onClose={() => setAbonoModal(null)} maxWidthClass="max-w-md" panelClassName="p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800">Registrar abono</h3>
-            <p className="text-sm text-slate-500">Cliente: {abonoModal?.nombre}</p>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Registrar abono</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Cliente: {abonoModal?.nombre}</p>
           </div>
-          <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm" onClick={() => setAbonoModal(null)}>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setAbonoModal(null)}>
             X
-          </button>
+          </Button>
         </div>
 
-        <p className="mt-1 text-sm text-slate-600">Saldo actual: {formatMoney(abonoModal?.saldo_credito)}</p>
+        <p className="mt-2 text-sm text-[var(--color-text-muted)]">Saldo actual: <span className="font-semibold text-[var(--color-text)]">{formatMoney(abonoModal?.saldo_credito)}</span></p>
         <div className="mt-3 space-y-2">
-          <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Monto" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
-          <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Referencia" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
-          <input className="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Observacion" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
+          <Input placeholder="Monto" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
+          <Input placeholder="Referencia" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
+          <Textarea placeholder="Observacion" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
         </div>
         <div className="mt-3 flex justify-end gap-2">
-          <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm" onClick={() => setAbonoModal(null)}>
+          <Button variant="secondary" onClick={() => setAbonoModal(null)}>
             Cancelar
-          </button>
-          <button className="rounded-xl bg-[#b41428] px-3 py-2 text-sm font-medium text-white hover:bg-[#8f1020]" onClick={onRegistrarAbono}>
+          </Button>
+          <Button onClick={onRegistrarAbono}>
             Guardar
-          </button>
+          </Button>
         </div>
       </Modal>
     </div>

@@ -16,10 +16,20 @@ const recepciones = asyncHandler(async (req, res) => (
   successResponse(res, await service.listRecepciones(Number(req.params.id)))
 ));
 
+const cancelar = asyncHandler(async (req, res) => (
+  successResponse(res, await service.cancelOrden(Number(req.params.id), req.body, req.user))
+));
+
+const cerrarParcial = asyncHandler(async (req, res) => (
+  successResponse(res, await service.closeOrdenResidual(Number(req.params.id), req.body, req.user))
+));
+
 module.exports = {
   createOrden,
   listOrdenes,
   getOrden,
   recepcionar,
-  recepciones
+  recepciones,
+  cancelar,
+  cerrarParcial
 };

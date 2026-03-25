@@ -1,8 +1,82 @@
 const db = require('../../db/knex');
 
+let schemaSupportPromise = null;
+let legacySchemaEnsurePromise = null;
+
+async function ensureColumn(client, tableName, columnName, ddl) {
+  const columns = await client.raw(`PRAGMA table_info('${tableName}')`);
+  const columnNames = new Set((Array.isArray(columns) ? columns : []).map((column) => column.name));
+  if (!columnNames.has(columnName)) {
+    await client.raw(ddl);
+  }
+}
+
+async function ensureLegacySchema() {
+  if (!legacySchemaEnsurePromise) {
+    legacySchemaEnsurePromise = (async () => {
+      const hasComprasOrdenes = await db.schema.hasTable('compras_ordenes');
+      const hasComprasRecepciones = await db.schema.hasTable('compras_recepciones');
+
+      if (hasComprasOrdenes) {
+        await ensureColumn(db, 'compras_ordenes', 'usuario_creador_id', 'ALTER TABLE compras_ordenes ADD COLUMN usuario_creador_id INTEGER');
+        await db.raw('CREATE INDEX IF NOT EXISTS idx_compras_ordenes_usuario_creador ON compras_ordenes(usuario_creador_id)');
+      }
+
+      if (hasComprasRecepciones) {
+        await ensureColumn(db, 'compras_recepciones', 'usuario_receptor_id', 'ALTER TABLE compras_recepciones ADD COLUMN usuario_receptor_id INTEGER');
+        await ensureColumn(db, 'compras_recepciones', 'observacion', 'ALTER TABLE compras_recepciones ADD COLUMN observacion TEXT');
+        await db.raw('CREATE INDEX IF NOT EXISTS idx_compras_recepciones_usuario_receptor ON compras_recepciones(usuario_receptor_id)');
+      }
+
+      schemaSupportPromise = null;
+      return true;
+    })().catch((error) => {
+      legacySchemaEnsurePromise = null;
+      throw error;
+    });
+  }
+
+  return legacySchemaEnsurePromise;
+}
+
+async function readSchemaSupport(schemaApi) {
+  const client = schemaApi.client || db;
+  const hasComprasOrdenes = await schemaApi.hasTable('compras_ordenes');
+  const hasComprasRecepciones = await schemaApi.hasTable('compras_recepciones');
+  const ordenColumns = hasComprasOrdenes ? await client.raw("PRAGMA table_info('compras_ordenes')") : [];
+  const recepcionColumns = hasComprasRecepciones ? await client.raw("PRAGMA table_info('compras_recepciones')") : [];
+  const ordenColumnNames = new Set((Array.isArray(ordenColumns) ? ordenColumns : []).map((column) => column.name));
+  const recepcionColumnNames = new Set((Array.isArray(recepcionColumns) ? recepcionColumns : []).map((column) => column.name));
+
+  return {
+    hasUsuarioCreadorId: ordenColumnNames.has('usuario_creador_id'),
+    hasUsuarioReceptorId: recepcionColumnNames.has('usuario_receptor_id'),
+    hasRecepcionObservacion: recepcionColumnNames.has('observacion')
+  };
+}
+
+async function resolveSchemaSupport(trx = db) {
+  if (trx !== db) {
+    return readSchemaSupport(trx.schema);
+  }
+
+  if (!schemaSupportPromise) {
+    schemaSupportPromise = readSchemaSupport(db.schema).catch((error) => {
+      schemaSupportPromise = null;
+      throw error;
+    });
+  }
+
+  return schemaSupportPromise;
+}
+
 async function createOrder(data, trx = db) {
   const [id] = await trx('compras_ordenes').insert(data);
   return trx('compras_ordenes').where({ id }).first();
+}
+
+async function getProveedorById(id, trx = db) {
+  return trx('proveedores').where({ id }).first();
 }
 
 async function insertOrderDetails(rows, trx = db) {
@@ -11,6 +85,28 @@ async function insertOrderDetails(rows, trx = db) {
 }
 
 async function listOrders(filters = {}, trx = db) {
+  const schemaSupport = await resolveSchemaSupport(trx);
+  const cantidadTotalExpr = `COALESCE((
+    SELECT SUM(CAST(d.cantidad AS REAL))
+    FROM compras_orden_detalle d
+    WHERE d.orden_id = o.id
+  ), 0)`;
+
+  const cantidadRecibidaExpr = `COALESCE((
+    SELECT SUM(CAST(d.cantidad_recibida AS REAL))
+    FROM compras_orden_detalle d
+    WHERE d.orden_id = o.id
+  ), 0)`;
+
+  const cantidadPendienteExpr = `(${cantidadTotalExpr} - ${cantidadRecibidaExpr})`;
+
+  const totalRecibidoRealExpr = `COALESCE((
+    SELECT SUM(CAST(rd.subtotal AS REAL))
+    FROM compras_recepcion_detalle rd
+    JOIN compras_recepciones rr ON rr.id = rd.recepcion_id
+    WHERE rr.orden_id = o.id
+  ), 0)`;
+
   const creditoTotalExpr = `COALESCE((
     SELECT SUM(
       COALESCE((SELECT SUM(cm.monto) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'), 0)
@@ -31,15 +127,33 @@ async function listOrders(filters = {}, trx = db) {
 
   const creditoPendienteExpr = `(${creditoTotalExpr} - ${abonosTotalExpr})`;
 
+  const selectColumns = [
+    'o.*',
+    'p.nombre as proveedor_nombre',
+    trx.raw(`${cantidadTotalExpr} as cantidad_total`),
+    trx.raw(`${cantidadRecibidaExpr} as cantidad_recibida_total`),
+    trx.raw(`${cantidadPendienteExpr} as cantidad_pendiente_total`),
+    trx.raw('NULL as total_estimado'),
+    trx.raw('NULL as total_recibido_estimado'),
+    trx.raw('NULL as total_pendiente_estimado'),
+    trx.raw(`${totalRecibidoRealExpr} as total_recibido_real`),
+    trx.raw(`${creditoTotalExpr} as credito_total`),
+    trx.raw(`${abonosTotalExpr} as abonos_credito`),
+    trx.raw(`${creditoPendienteExpr} as credito_pendiente`)
+  ];
+
+  if (schemaSupport.hasUsuarioCreadorId) {
+    selectColumns.push('uc.nombre as usuario_creador_nombre');
+  }
+
   const query = trx('compras_ordenes as o')
     .leftJoin('proveedores as p', 'o.proveedor_id', 'p.id')
-    .select(
-      'o.*',
-      'p.nombre as proveedor_nombre',
-      trx.raw(`${creditoTotalExpr} as credito_total`),
-      trx.raw(`${abonosTotalExpr} as abonos_credito`),
-      trx.raw(`${creditoPendienteExpr} as credito_pendiente`)
-    )
+    .modify((qb) => {
+      if (schemaSupport.hasUsuarioCreadorId) {
+        qb.leftJoin('usuarios as uc', 'o.usuario_creador_id', 'uc.id');
+      }
+    })
+    .select(...selectColumns)
     .modify((qb) => {
       if (filters.estado) qb.where('o.estado', filters.estado);
 
@@ -64,9 +178,27 @@ async function listOrders(filters = {}, trx = db) {
 }
 
 async function getOrderById(id, trx = db) {
+  const schemaSupport = await resolveSchemaSupport(trx);
+  const selectColumns = [
+    'o.*',
+    'p.nombre as proveedor_nombre',
+    'p.activo as proveedor_activo',
+    'p.tiene_credito as proveedor_tiene_credito',
+    'p.dias_pago as proveedor_dias_pago'
+  ];
+
+  if (schemaSupport.hasUsuarioCreadorId) {
+    selectColumns.push('uc.nombre as usuario_creador_nombre');
+  }
+
   const orden = await trx('compras_ordenes as o')
     .leftJoin('proveedores as p', 'o.proveedor_id', 'p.id')
-    .select('o.*', 'p.nombre as proveedor_nombre')
+    .modify((qb) => {
+      if (schemaSupport.hasUsuarioCreadorId) {
+        qb.leftJoin('usuarios as uc', 'o.usuario_creador_id', 'uc.id');
+      }
+    })
+    .select(...selectColumns)
     .where('o.id', id)
     .first();
 
@@ -79,7 +211,8 @@ async function getOrderById(id, trx = db) {
       'pr.codigo as producto_codigo',
       'pr.nombre as producto_nombre',
       'pr.unidad',
-      'pr.unidad_medida'
+      'pr.unidad_medida',
+      trx.raw('(CAST(d.cantidad AS REAL) - CAST(d.cantidad_recibida AS REAL)) as cantidad_pendiente')
     )
     .where('d.orden_id', id)
     .orderBy('d.id', 'asc');
@@ -110,6 +243,11 @@ async function updateOrderStatus(id, estado, trx = db) {
   return trx('compras_ordenes').where({ id }).first();
 }
 
+async function updateOrderFields(id, payload, trx = db) {
+  await trx('compras_ordenes').where({ id }).update(payload);
+  return trx('compras_ordenes').where({ id }).first();
+}
+
 async function getProductById(id, trx = db) {
   return trx('productos').where({ id }).first();
 }
@@ -133,6 +271,15 @@ async function createFactura(data, trx = db) {
   return trx('compras_facturas').where({ id }).first();
 }
 
+async function getFacturaByProveedorAndNumero(proveedorId, numeroFactura, trx = db) {
+  return trx('compras_facturas')
+    .where({
+      proveedor_id: proveedorId,
+      numero_factura: numeroFactura
+    })
+    .first();
+}
+
 async function getOpenShift(trx = db) {
   return trx('caja_turnos').where({ estado: 'ABIERTO' }).orderBy('id', 'desc').first();
 }
@@ -148,9 +295,28 @@ async function createCxpMovement(data, trx = db) {
 }
 
 async function listReceptionsByOrder(orderId, trx = db) {
-  const recepciones = await trx('compras_recepciones')
-    .where({ orden_id: orderId })
-    .orderBy('id', 'desc');
+  const schemaSupport = await resolveSchemaSupport(trx);
+  const selectColumns = [
+    'r.*',
+    'f.numero_factura',
+    'f.metodo_pago',
+    'f.fecha as factura_fecha'
+  ];
+
+  if (schemaSupport.hasUsuarioReceptorId) {
+    selectColumns.push('ur.nombre as usuario_receptor_nombre');
+  }
+
+  const recepciones = await trx('compras_recepciones as r')
+    .leftJoin('compras_facturas as f', 'r.factura_compra_id', 'f.id')
+    .modify((qb) => {
+      if (schemaSupport.hasUsuarioReceptorId) {
+        qb.leftJoin('usuarios as ur', 'r.usuario_receptor_id', 'ur.id');
+      }
+    })
+    .select(...selectColumns)
+    .where({ 'r.orden_id': orderId })
+    .orderBy('r.id', 'desc');
 
   const detalles = await trx('compras_recepcion_detalle as d')
     .join('compras_recepciones as r', 'd.recepcion_id', 'r.id')
@@ -160,7 +326,9 @@ async function listReceptionsByOrder(orderId, trx = db) {
       'd.*',
       'r.orden_id',
       'p.codigo as producto_codigo',
-      'p.nombre as producto_nombre'
+      'p.nombre as producto_nombre',
+      'p.unidad',
+      'p.unidad_medida'
     )
     .where('r.orden_id', orderId)
     .orderBy('d.id', 'asc');
@@ -170,6 +338,7 @@ async function listReceptionsByOrder(orderId, trx = db) {
 
 module.exports = {
   createOrder,
+  getProveedorById,
   insertOrderDetails,
   listOrders,
   getOrderById,
@@ -178,13 +347,17 @@ module.exports = {
   createReception,
   insertReceptionDetails,
   updateOrderStatus,
+  updateOrderFields,
   getProductById,
   setProductStockAndCost,
   createInventoryMovements,
   createSupplierCostHistory,
   createFactura,
+  getFacturaByProveedorAndNumero,
   getOpenShift,
   createCashMovement,
   createCxpMovement,
-  listReceptionsByOrder
+  listReceptionsByOrder,
+  resolveSchemaSupport,
+  ensureLegacySchema
 };

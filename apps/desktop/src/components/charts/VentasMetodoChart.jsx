@@ -1,4 +1,5 @@
 import Chart from 'react-apexcharts';
+import { chartPalette } from '../../theme/tokens';
 
 export default function VentasMetodoChart({ ventas = [] }) {
   const contado = ventas
@@ -14,7 +15,7 @@ export default function VentasMetodoChart({ ventas = [] }) {
       toolbar: { show: false }
     },
     labels: ['Contado', 'Credito'],
-    colors: ['#16a34a', '#b41428'],
+    colors: [chartPalette.success, chartPalette.primary],
     legend: {
       position: 'bottom'
     },
@@ -29,8 +30,8 @@ export default function VentasMetodoChart({ ventas = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="mb-2 text-sm font-semibold text-slate-700">Ventas contado vs credito</p>
+    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+      <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Ventas contado vs credito</p>
       <Chart type="donut" height={280} options={options} series={[contado, credito]} />
     </div>
   );

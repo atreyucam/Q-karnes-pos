@@ -8,6 +8,9 @@ const {
   runIntegrityCheck,
   assertFileExists
 } = require('./sqlite-utils');
+const { createLogger } = require('../src/helpers/logger');
+
+const logger = createLogger({ channel: 'api-support' });
 
 function copyFileAtomic(source, target) {
   const temp = `${target}.restore.tmp`;
@@ -26,6 +29,13 @@ function restoreBackup(options = {}) {
 
   const { dbFile, backupDir } = resolvePaths({ dbFile: dbFileOpt, outDir });
   const restoreFile = file ? path.resolve(process.cwd(), file) : null;
+  logger.warn('restore_start', 'Intento de restore SQLite', {
+    restoreFile,
+    dbFile,
+    backupDir,
+    force: Boolean(force),
+    confirm: Boolean(confirm)
+  });
 
   if (!restoreFile) {
     throw new Error('Debe indicar --file <ruta_backup.sqlite>');
@@ -44,6 +54,7 @@ function restoreBackup(options = {}) {
   const shmFile = `${dbFile}-shm`;
   const hasActiveWal = fs.existsSync(walFile) && fs.statSync(walFile).size > 0;
   if (hasActiveWal && !force) {
+    logger.warn('restore_blocked_wal', 'Restore bloqueado por WAL activo', { dbFile, walFile });
     throw new Error('Restore bloqueado: se detectó WAL activo. Detenga API/app o use --force bajo su responsabilidad.');
   }
 
@@ -62,8 +73,15 @@ function restoreBackup(options = {}) {
 
   const postIntegrity = runIntegrityCheck(dbFile);
   if (!postIntegrity.ok) {
+    logger.error('restore_fail_integrity', 'Restore aplicado pero sin integridad válida', { dbFile });
     throw new Error('Restore aplicado pero integrity_check falló en base destino');
   }
+
+  logger.critical('restore_success', 'Restore SQLite completado', {
+    restoredFrom: restoreFile,
+    dbFile: path.resolve(dbFile),
+    safeguardBackup: safeguard ? path.resolve(safeguard) : null
+  });
 
   return {
     ok: true,
@@ -85,6 +103,7 @@ function cli() {
     });
     console.log(JSON.stringify(payload, null, 2));
   } catch (error) {
+    logger.error('restore_fail', 'Fallo ejecutando restore SQLite', { error: error.message });
     console.error('Fallo en sqlite-restore:', error.message);
     process.exit(1);
   }

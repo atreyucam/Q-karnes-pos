@@ -17,6 +17,10 @@ function resolveDefaultDbFile(nodeEnv) {
     return path.join(resolveAppDataBase(), 'QKarnesPOS', 'data', 'qkarnes.sqlite');
   }
   if (nodeEnv === 'test') {
+    const testRunId = process.env.TEST_RUN_ID;
+    if (testRunId) {
+      return path.resolve(process.cwd(), 'data', 'test-runs', `qkarnes.${testRunId}.sqlite`);
+    }
     return path.resolve(process.cwd(), 'data', 'qkarnes.test.sqlite');
   }
   return path.resolve(process.cwd(), 'data', 'qkarnes.sqlite');
@@ -24,7 +28,8 @@ function resolveDefaultDbFile(nodeEnv) {
 
 function resolveDbFilePath(options = {}) {
   const nodeEnv = options.nodeEnv || process.env.NODE_ENV || 'development';
-  const dbFileEnv = options.dbFileEnv || process.env.DB_FILE;
+  const hasExplicitDbFileEnv = Object.prototype.hasOwnProperty.call(options, 'dbFileEnv');
+  const dbFileEnv = hasExplicitDbFileEnv ? options.dbFileEnv : process.env.DB_FILE;
 
   if (dbFileEnv && String(dbFileEnv).trim()) {
     return path.isAbsolute(dbFileEnv) ? dbFileEnv : path.resolve(process.cwd(), dbFileEnv);

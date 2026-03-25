@@ -20,7 +20,7 @@ async function create(req, res, next) {
 
 async function update(req, res, next) {
   try {
-    const data = await service.update(Number(req.params.id), req.body);
+    const data = await service.update(Number(req.params.id), req.body, req.user);
     return res.json(data);
   } catch (error) {
     return next(error);

@@ -38,7 +38,21 @@ async function creditoResumen(req, res, next) {
 
 async function abono(req, res, next) {
   try {
-    const data = await service.abono(Number(req.params.id), req.body);
+    const data = await service.abono(Number(req.params.id), req.body, req.user);
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function revertirAbono(req, res, next) {
+  try {
+    const data = await service.revertirAbono(
+      Number(req.params.id),
+      Number(req.params.abonoId),
+      req.body,
+      req.user
+    );
     return res.json(data);
   } catch (error) {
     return next(error);
@@ -63,12 +77,33 @@ async function facturas(req, res, next) {
   }
 }
 
+async function deudas(req, res, next) {
+  try {
+    const data = await service.deudas(Number(req.params.id), req.query);
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function historialAbonos(req, res, next) {
+  try {
+    const data = await service.historialAbonos(Number(req.params.id));
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   list,
   create,
   update,
   creditoResumen,
   abono,
+  revertirAbono,
   getById,
-  facturas
+  facturas,
+  deudas,
+  historialAbonos
 };

@@ -1,7 +1,14 @@
 node_modules/
 *.log
 apps/api/data/*.sqlite
+apps/api/data/*.sqlite-*
+apps/api/data/logs/
+apps/api/data/support/
+apps/api/data/backups/*.sqlite
+apps/desktop/logs/
 apps/desktop/dist/
 apps/desktop/dist-electron/
 apps/desktop/.vite/
 .env
+docs/
+apps/api/data/test-runs/

@@ -11,6 +11,7 @@ async function list(filters = {}, trx = db) {
       'c.nombre as categoria_nombre',
       'p.unidad_medida',
       'p.unidad',
+      'p.costo_promedio',
       'p.precio_referencia',
       'p.precio_venta',
       'p.stock_actual',

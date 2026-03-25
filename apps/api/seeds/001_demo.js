@@ -1,9 +1,24 @@
 const bcrypt = require('bcryptjs');
+const {
+  buildPaymentMethodsRows,
+  buildSystemConfigRow
+} = require('../src/modules/configuracion/configuracion.defaults');
+
+function toDateOnly(value = new Date()) {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function addDays(baseDate, days = 0) {
+  const date = new Date(`${toDateOnly(baseDate)}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return toDateOnly(date);
+}
 
 /**
  * @param { import('knex').Knex } knex
  */
 exports.seed = async function seed(knex) {
+  const today = toDateOnly();
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== 'true') {
     throw new Error('Seed demo bloqueado en producción. Defina ALLOW_DEMO_SEED=true solo si es intencional.');
   }
@@ -11,6 +26,10 @@ exports.seed = async function seed(knex) {
   const tables = [
     'inventario_conteo_detalle',
     'inventario_conteos',
+    'transformacion_mermas',
+    'transformacion_resultados',
+    'transformacion_insumos',
+    'transformaciones',
     'auditoria_eventos',
     'ventas_anulaciones',
     'cxp_movimientos',
@@ -22,9 +41,9 @@ exports.seed = async function seed(knex) {
     'ventas',
     'compras_recepcion_detalle',
     'compras_recepciones',
+    'compras_facturas',
     'compras_orden_detalle',
     'compras_ordenes',
-    'compras_facturas',
     'proveedor_precios_historial',
     'caja_movimientos',
     'caja_turnos',
@@ -34,6 +53,8 @@ exports.seed = async function seed(knex) {
     'categorias',
     'proveedores',
     'clientes',
+    'metodos_pago',
+    'configuracion_sistema',
     'usuarios',
     'roles'
   ];
@@ -48,6 +69,9 @@ exports.seed = async function seed(knex) {
     { id: 1, nombre: 'ADMIN' },
     { id: 2, nombre: 'CAJERO' }
   ]);
+
+  await knex('configuracion_sistema').insert(buildSystemConfigRow());
+  await knex('metodos_pago').insert(buildPaymentMethodsRows());
 
   await knex('usuarios').insert([
     {
@@ -71,7 +95,7 @@ exports.seed = async function seed(knex) {
   await knex('proveedores').insert([
     { id: 1, nombre: 'Pronaca', telefono: '0991110001', direccion: 'Av. Eloy Alfaro y 10 de Agosto', observacion: 'Proveedor principal de pollo', tiene_credito: 1, dias_pago: 15, activo: 1 },
     { id: 2, nombre: 'AgroCarnes Ecuador', telefono: '0991110002', direccion: 'Parque Industrial Norte', observacion: 'Entrega diaria bajo pedido', tiene_credito: 1, dias_pago: 12, activo: 1 },
-    { id: 3, nombre: 'Lacteos Andinos', telefono: '0991110003', direccion: 'Sangolqui centro', observacion: 'Despachos martes y viernes', tiene_credito: 0, dias_pago: 0, activo: 1 },
+    { id: 3, nombre: 'Lacteos Andinos', telefono: '0991110003', direccion: 'Sangolqui centro', observacion: 'Despachos martes y viernes con credito semanal', tiene_credito: 1, dias_pago: 7, activo: 1 },
     { id: 4, nombre: 'Descartables Express', telefono: '0991110004', direccion: 'Av. Maldonado Km 3', observacion: 'Pago contado en entrega', tiene_credito: 0, dias_pago: 0, activo: 1 },
     { id: 5, nombre: 'Embutidos Don Pepe', telefono: '0991110005', direccion: 'Calderon, lote 22', observacion: 'Linea premium de embutidos', tiene_credito: 1, dias_pago: 7, activo: 1 },
     { id: 6, nombre: 'Mercado Mayorista Central', telefono: '0991110006', direccion: 'Sector mayorista sur', observacion: 'Facturacion consolidada mensual', tiene_credito: 1, dias_pago: 30, activo: 1 }
@@ -143,23 +167,23 @@ exports.seed = async function seed(knex) {
   );
 
   await knex('clientes').insert([
-    { id: 1, nombre: 'Cliente credito demo', telefono: '0980000001', direccion: 'Quito norte', observacion: 'Cliente frecuente', activo: 1 },
-    { id: 2, nombre: 'Restaurante El Buen Sabor', telefono: '0980000002', direccion: 'La Floresta', observacion: 'Compra semanal a credito', activo: 1 },
-    { id: 3, nombre: 'Dona Maria', telefono: '0980000003', direccion: 'Comite del pueblo', observacion: 'Preferencia por pago mixto', activo: 1 },
-    { id: 4, nombre: 'Panaderia San Juan', telefono: '0980000004', direccion: 'Centro historico', observacion: null, activo: 1 },
-    { id: 5, nombre: 'Cafeteria Central', telefono: '0980000005', direccion: 'La Carolina', observacion: null, activo: 1 },
-    { id: 6, nombre: 'Comedor Mi Tierra', telefono: '0980000006', direccion: 'Sur de Quito', observacion: null, activo: 1 },
-    { id: 7, nombre: 'Hotel Los Andes', telefono: '0980000007', direccion: 'Av. Amazonas', observacion: null, activo: 1 },
-    { id: 8, nombre: 'Mercado Las Flores', telefono: '0980000008', direccion: 'Mercado central', observacion: null, activo: 1 },
-    { id: 9, nombre: 'Asadero Don Pepe', telefono: '0980000009', direccion: 'Cotocollao', observacion: null, activo: 1 },
-    { id: 10, nombre: 'Delicias de Casa', telefono: '0980000010', direccion: 'Tumbaco', observacion: null, activo: 1 },
-    { id: 11, nombre: 'Bistro Colonial', telefono: '0980000011', direccion: 'Centro norte', observacion: null, activo: 1 },
-    { id: 12, nombre: 'Fonda La Abuela', telefono: '0980000012', direccion: 'Calderon', observacion: null, activo: 1 },
-    { id: 13, nombre: 'Cocina Express', telefono: '0980000013', direccion: 'Carcelen', observacion: null, activo: 1 },
-    { id: 14, nombre: 'Parrilladas El Patio', telefono: '0980000014', direccion: 'Conocoto', observacion: null, activo: 1 },
-    { id: 15, nombre: 'Mini Market Norte', telefono: '0980000015', direccion: 'Ponceano', observacion: null, activo: 1 },
-    { id: 16, nombre: 'Cliente Inactivo Uno', telefono: '0980000016', direccion: 'Llano grande', observacion: 'No usar para credito', activo: 0 },
-    { id: 17, nombre: 'Cliente Inactivo Dos', telefono: '0980000017', direccion: 'Solanda', observacion: 'Cuenta suspendida', activo: 0 }
+    { id: 1, nombre: 'Cliente credito demo', telefono: '0980000001', direccion: 'Quito norte', observacion: 'Cliente frecuente', dias_credito: 7, activo: 1 },
+    { id: 2, nombre: 'Restaurante El Buen Sabor', telefono: '0980000002', direccion: 'La Floresta', observacion: 'Compra semanal a credito', dias_credito: 14, activo: 1 },
+    { id: 3, nombre: 'Dona Maria', telefono: '0980000003', direccion: 'Comite del pueblo', observacion: 'Preferencia por pago mixto', dias_credito: 7, activo: 1 },
+    { id: 4, nombre: 'Panaderia San Juan', telefono: '0980000004', direccion: 'Centro historico', observacion: null, dias_credito: 10, activo: 1 },
+    { id: 5, nombre: 'Cafeteria Central', telefono: '0980000005', direccion: 'La Carolina', observacion: null, dias_credito: 7, activo: 1 },
+    { id: 6, nombre: 'Comedor Mi Tierra', telefono: '0980000006', direccion: 'Sur de Quito', observacion: null, dias_credito: 12, activo: 1 },
+    { id: 7, nombre: 'Hotel Los Andes', telefono: '0980000007', direccion: 'Av. Amazonas', observacion: null, dias_credito: 15, activo: 1 },
+    { id: 8, nombre: 'Mercado Las Flores', telefono: '0980000008', direccion: 'Mercado central', observacion: null, dias_credito: 7, activo: 1 },
+    { id: 9, nombre: 'Asadero Don Pepe', telefono: '0980000009', direccion: 'Cotocollao', observacion: null, dias_credito: 14, activo: 1 },
+    { id: 10, nombre: 'Delicias de Casa', telefono: '0980000010', direccion: 'Tumbaco', observacion: null, dias_credito: 10, activo: 1 },
+    { id: 11, nombre: 'Bistro Colonial', telefono: '0980000011', direccion: 'Centro norte', observacion: null, dias_credito: 12, activo: 1 },
+    { id: 12, nombre: 'Fonda La Abuela', telefono: '0980000012', direccion: 'Calderon', observacion: null, dias_credito: 7, activo: 1 },
+    { id: 13, nombre: 'Cocina Express', telefono: '0980000013', direccion: 'Carcelen', observacion: null, dias_credito: 10, activo: 1 },
+    { id: 14, nombre: 'Parrilladas El Patio', telefono: '0980000014', direccion: 'Conocoto', observacion: null, dias_credito: 15, activo: 1 },
+    { id: 15, nombre: 'Mini Market Norte', telefono: '0980000015', direccion: 'Ponceano', observacion: null, dias_credito: 7, activo: 1 },
+    { id: 16, nombre: 'Cliente Inactivo Uno', telefono: '0980000016', direccion: 'Llano grande', observacion: 'No usar para credito', dias_credito: 0, activo: 0 },
+    { id: 17, nombre: 'Cliente Inactivo Dos', telefono: '0980000017', direccion: 'Solanda', observacion: 'Cuenta suspendida', dias_credito: 0, activo: 0 }
   ]);
 
   await knex('caja_turnos').insert([
@@ -209,12 +233,12 @@ exports.seed = async function seed(knex) {
   ]);
 
   await knex('compras_facturas').insert([
-    { id: 1, proveedor_id: 1, numero_factura: 'F-1001', metodo_pago: 'CONTADO', total: 103 },
-    { id: 2, proveedor_id: 2, numero_factura: 'F-1002', metodo_pago: 'CREDITO', total: 147 },
-    { id: 3, proveedor_id: 5, numero_factura: 'F-1003', metodo_pago: 'CREDITO', total: 257.5 },
-    { id: 4, proveedor_id: 6, numero_factura: 'F-1004', metodo_pago: 'CONTADO', total: 62 },
-    { id: 5, proveedor_id: 2, numero_factura: 'F-1005', metodo_pago: 'CONTADO', total: 218.3 },
-    { id: 6, proveedor_id: 3, numero_factura: 'F-1006', metodo_pago: 'CREDITO', total: 105 }
+    { id: 1, orden_id: 1, proveedor_id: 1, numero_factura: 'F-1001', metodo_pago: 'CONTADO', total: 103 },
+    { id: 2, orden_id: 2, proveedor_id: 2, numero_factura: 'F-1002', metodo_pago: 'CREDITO', total: 147 },
+    { id: 3, orden_id: 5, proveedor_id: 5, numero_factura: 'F-1003', metodo_pago: 'CREDITO', total: 257.5 },
+    { id: 4, orden_id: 6, proveedor_id: 6, numero_factura: 'F-1004', metodo_pago: 'CONTADO', total: 62 },
+    { id: 5, orden_id: 8, proveedor_id: 2, numero_factura: 'F-1005', metodo_pago: 'CONTADO', total: 218.3 },
+    { id: 6, orden_id: 9, proveedor_id: 3, numero_factura: 'F-1006', metodo_pago: 'CREDITO', total: 105 }
   ]);
 
   await knex('compras_recepciones').insert([
@@ -257,11 +281,11 @@ exports.seed = async function seed(knex) {
   ]);
 
   await knex('cxp_movimientos').insert([
-    { id: 1, proveedor_id: 2, factura_id: 2, tipo: 'CARGO', monto: 147, referencia: 'FACTURA:F-1002', observacion: 'Compra a credito' },
-    { id: 2, proveedor_id: 5, factura_id: 3, tipo: 'CARGO', monto: 257.5, referencia: 'FACTURA:F-1003', observacion: 'Compra a credito' },
-    { id: 3, proveedor_id: 3, factura_id: 6, tipo: 'CARGO', monto: 105, referencia: 'FACTURA:F-1006', observacion: 'Compra a credito' },
-    { id: 4, proveedor_id: 2, factura_id: 2, tipo: 'ABONO', monto: 47, referencia: 'PAGO-001', observacion: 'Pago parcial' },
-    { id: 5, proveedor_id: 5, factura_id: 3, tipo: 'ABONO', monto: 257.5, referencia: 'PAGO-002', observacion: 'Pago total' }
+    { id: 1, proveedor_id: 2, factura_id: 2, tipo: 'CARGO', monto: 147, documento_origen: 'FACTURA:F-1002', numero_documento: 'F-1002', fecha_emision: today, fecha_vencimiento: addDays(today, 12), estado: 'APLICADO', referencia: 'FACTURA:F-1002', observacion: 'Compra a credito' },
+    { id: 2, proveedor_id: 5, factura_id: 3, tipo: 'CARGO', monto: 257.5, documento_origen: 'FACTURA:F-1003', numero_documento: 'F-1003', fecha_emision: today, fecha_vencimiento: addDays(today, 7), estado: 'APLICADO', referencia: 'FACTURA:F-1003', observacion: 'Compra a credito' },
+    { id: 3, proveedor_id: 3, factura_id: 6, tipo: 'CARGO', monto: 105, documento_origen: 'FACTURA:F-1006', numero_documento: 'F-1006', fecha_emision: today, fecha_vencimiento: addDays(today, 7), estado: 'APLICADO', referencia: 'FACTURA:F-1006', observacion: 'Compra a credito' },
+    { id: 4, proveedor_id: 2, factura_id: 2, tipo: 'ABONO', monto: 47, documento_origen: 'FACTURA:F-1002', numero_documento: 'F-1002', fecha_emision: today, fecha_vencimiento: addDays(today, 12), estado: 'APLICADO', referencia: 'PAGO-001', observacion: 'Pago parcial' },
+    { id: 5, proveedor_id: 5, factura_id: 3, tipo: 'ABONO', monto: 257.5, documento_origen: 'FACTURA:F-1003', numero_documento: 'F-1003', fecha_emision: today, fecha_vencimiento: addDays(today, 7), estado: 'APLICADO', referencia: 'PAGO-002', observacion: 'Pago total' }
   ]);
 
   await knex('inventario_movimientos').insert([
@@ -280,12 +304,63 @@ exports.seed = async function seed(knex) {
   ]);
 
   await knex('caja_movimientos').insert([
-    { id: 1, turno_id: 1, tipo: 'INGRESO', concepto: 'Ingreso manual inicial', monto: 20 },
-    { id: 2, turno_id: 1, tipo: 'COMPRA', concepto: 'Compra Factura F-1001', monto: 103 },
-    { id: 3, turno_id: 1, tipo: 'COMPRA', concepto: 'Compra Factura F-1004', monto: 62 },
-    { id: 4, turno_id: 1, tipo: 'COMPRA', concepto: 'Compra Factura F-1005', monto: 218.3 },
-    { id: 5, turno_id: 1, tipo: 'VENTA', concepto: 'Venta #1', monto: 25 },
-    { id: 6, turno_id: 1, tipo: 'VENTA', concepto: 'Venta #3', monto: 20 }
+    {
+      id: 1,
+      turno_id: 1,
+      tipo: 'INGRESO_MANUAL',
+      sentido: 'INGRESO',
+      concepto: 'Ingreso manual inicial',
+      monto: 20,
+      metodo_pago: 'EFECTIVO',
+      documento_origen: 'CAJA_MANUAL:1',
+      modulo_origen: 'CAJA',
+      origen_id: null,
+      usuario_id: 2,
+      observacion: 'Ingreso manual inicial'
+    },
+    {
+      id: 2,
+      turno_id: 1,
+      turno_id: 1,
+      tipo: 'VENTA_CONTADO',
+      sentido: 'INGRESO',
+      concepto: 'Venta #1',
+      monto: 25,
+      metodo_pago: 'EFECTIVO',
+      documento_origen: 'VENTA:1',
+      modulo_origen: 'VENTAS',
+      origen_id: 1,
+      usuario_id: 2,
+      observacion: 'Cobro contado venta #1'
+    },
+    {
+      id: 3,
+      turno_id: 1,
+      tipo: 'VENTA_CREDITO',
+      sentido: 'INGRESO',
+      concepto: 'Venta crédito #2',
+      monto: 60,
+      metodo_pago: 'CREDITO_CLIENTE',
+      documento_origen: 'VENTA:2',
+      modulo_origen: 'VENTAS',
+      origen_id: 2,
+      usuario_id: 2,
+      observacion: 'Venta crédito demo'
+    },
+    {
+      id: 4,
+      turno_id: 1,
+      tipo: 'VENTA_TRANSFERENCIA',
+      sentido: 'INGRESO',
+      concepto: 'Venta #3',
+      monto: 40,
+      metodo_pago: 'TRANSFERENCIA',
+      documento_origen: 'VENTA:3',
+      modulo_origen: 'VENTAS',
+      origen_id: 3,
+      usuario_id: 2,
+      observacion: 'Venta transferencia demo'
+    }
   ]);
 
   await knex('ventas').insert([
@@ -311,7 +386,7 @@ exports.seed = async function seed(knex) {
       subtotal: 60,
       descuento_total: 0,
       total: 60,
-      observacion: 'Venta demo credito'
+      observacion: '[MP:CREDITO_CLIENTE] Venta demo credito'
     },
     {
       id: 3,
@@ -323,7 +398,7 @@ exports.seed = async function seed(knex) {
       subtotal: 40,
       descuento_total: 0,
       total: 40,
-      observacion: 'Venta demo mixta'
+      observacion: '[MP:TRANSFERENCIA] Venta demo transferencia'
     }
   ]);
 
@@ -340,8 +415,7 @@ exports.seed = async function seed(knex) {
   await knex('venta_pagos').insert([
     { venta_id: 1, tipo: 'CONTADO', monto: 25 },
     { venta_id: 2, tipo: 'CREDITO', monto: 60 },
-    { venta_id: 3, tipo: 'CONTADO', monto: 20 },
-    { venta_id: 3, tipo: 'CREDITO', monto: 20 }
+    { venta_id: 3, tipo: 'CONTADO', monto: 40 }
   ]);
 
   await knex('inventario_movimientos').insert([
@@ -355,9 +429,8 @@ exports.seed = async function seed(knex) {
   ]);
 
   await knex('cxc_movimientos').insert([
-    { id: 1, cliente_id: 2, venta_id: 2, tipo: 'CARGO', monto: 60, referencia: 'VENTA:2', observacion: 'Venta a credito' },
-    { id: 2, cliente_id: 3, venta_id: 3, tipo: 'CARGO', monto: 20, referencia: 'VENTA:3', observacion: 'Parte credito venta mixta' },
-    { id: 3, cliente_id: 2, venta_id: 2, tipo: 'ABONO', monto: 10, referencia: 'ABONO-SEED', observacion: 'Abono inicial demo aplicado a factura #2' }
+    { id: 1, cliente_id: 2, venta_id: 2, tipo: 'CARGO', monto: 60, numero_documento: 'VENTA:2', fecha_emision: today, fecha_vencimiento: addDays(today, 14), referencia: 'VENTA:2', observacion: 'Venta a credito' },
+    { id: 2, cliente_id: 2, venta_id: 2, tipo: 'ABONO', monto: 10, numero_documento: 'VENTA:2', fecha_emision: today, fecha_vencimiento: addDays(today, 14), referencia: 'ABONO-SEED', observacion: 'Abono inicial demo aplicado a factura #2' }
   ]);
 
   await knex('auditoria_eventos').insert([
@@ -374,4 +447,28 @@ exports.seed = async function seed(knex) {
       })
     }
   ]);
+
+  const stockRows = await knex('productos').select('id', 'stock_actual');
+  const movementRows = await knex('inventario_movimientos')
+    .select('producto_id')
+    .select(knex.raw('SUM(CAST(cantidad AS REAL) * CAST(signo AS REAL)) as stock_movimientos'))
+    .groupBy('producto_id');
+  const movementMap = new Map(movementRows.map((row) => [Number(row.producto_id), Number(row.stock_movimientos || 0)]));
+  const ajustesIniciales = stockRows
+    .map((row) => {
+      const diferencia = Number(row.stock_actual || 0) - Number(movementMap.get(Number(row.id)) || 0);
+      if (Math.abs(diferencia) < 0.0001) return null;
+      return {
+        tipo: 'AJUSTE_SEED_INICIAL',
+        producto_id: row.id,
+        cantidad: Math.abs(diferencia),
+        referencia: 'SEED:STOCK_INICIAL',
+        signo: diferencia >= 0 ? 1 : -1
+      };
+    })
+    .filter(Boolean);
+
+  if (ajustesIniciales.length > 0) {
+    await knex('inventario_movimientos').insert(ajustesIniciales);
+  }
 };
