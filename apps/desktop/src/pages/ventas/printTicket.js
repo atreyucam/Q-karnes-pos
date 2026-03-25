@@ -24,13 +24,13 @@ export function printSaleTicketDocument(ticket, options = {}) {
   const rows = (ticket.detalle || [])
     .map((row) => `
       <tr>
-        <td style="padding:6px 8px 6px 0; vertical-align:top;">
-          <div style="font-weight:700; color:#171717;">${escapeHtml(row.producto_nombre)}</div>
-          <div style="font-size:10px; color:#737373; text-transform:uppercase; letter-spacing:.08em;">${escapeHtml(row.producto_codigo)}</div>
+        <td style="padding:4px 6px 4px 0; vertical-align:top;">
+          <div class="detail-name">${escapeHtml(row.producto_nombre)}</div>
+          <div class="detail-code">${escapeHtml(row.producto_codigo)}</div>
         </td>
-        <td style="padding:6px 8px; text-align:right; white-space:nowrap;">${escapeHtml(formatTicketQty(row.cantidad, row.unidad_medida || 'UND'))}</td>
-        <td style="padding:6px 8px; text-align:right; white-space:nowrap;">${escapeHtml(formatMoney(row.precio_unit))}</td>
-        <td style="padding:6px 0 6px 8px; text-align:right; white-space:nowrap;">${escapeHtml(formatMoney(row.total_linea))}</td>
+        <td style="padding:4px 6px 4px 0; text-align:right; vertical-align:top; white-space:nowrap;">${escapeHtml(formatTicketQty(row.cantidad, row.unidad_medida || 'UND'))}</td>
+        <td style="padding:4px 6px 4px 0; text-align:right; vertical-align:top; white-space:nowrap;">${escapeHtml(formatMoney(row.precio_unit))}</td>
+        <td style="padding:4px 0 4px 0; text-align:right; vertical-align:top; white-space:nowrap;">${escapeHtml(formatMoney(row.total_linea))}</td>
       </tr>
     `)
     .join('');
@@ -52,62 +52,117 @@ export function printSaleTicketDocument(ticket, options = {}) {
         <meta charset="utf-8" />
         <title>Ticket ${escapeHtml(ticket.ticket_config?.numero || ticket.venta?.ticket_numero || '')}</title>
         <style>
-          body {
-            margin: 0;
-            padding: 20px;
-            font-family: Inter, "Segoe UI", Arial, sans-serif;
-            color: #171717;
+          @page {
+            size: 80mm auto;
+            margin: 4mm 3mm;
+          }
+          html {
             background: #ffffff;
           }
-          .ticket {
-            max-width: 360px;
-            margin: 0 auto;
-            border: 1px solid #e5e5e5;
-            border-radius: 18px;
-            padding: 18px;
+          body {
+            margin: 0;
+            padding: 0;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+            color: #000000;
+            background: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            font-weight: 800;
           }
-          .muted { color: #737373; }
-          .divider { border-top: 1px dashed #d4d4d4; margin: 12px 0; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          .ticket {
+            width: 72mm;
+            margin: 0 auto;
+            padding: 0;
+          }
+          .muted { color: #000000; }
+          .divider { border-top: 1.5px dashed #000000; margin: 8px 0; }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 11px;
+          }
           th {
             text-align: left;
-            color: #737373;
+            color: #000000;
             text-transform: uppercase;
-            letter-spacing: .08em;
+            letter-spacing: .04em;
             font-size: 10px;
-            padding-bottom: 6px;
+            font-weight: 800;
+            padding-bottom: 4px;
           }
           .summary-row, .pay-row {
             display:flex;
             justify-content:space-between;
             gap:12px;
-            font-size:12px;
-            margin-bottom:4px;
+            font-size:13px;
+            margin-bottom:2px;
+            font-weight: 800;
           }
           .total {
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 800;
-            color: #171717;
+            color: #000000;
+          }
+          .center { text-align: center; }
+          .meta-row {
+            margin: 0 0 2px;
+            font-size: 12px;
+            font-weight: 800;
+          }
+          .detail-name {
+            font-weight: 800;
+            color: #000000;
+            word-break: break-word;
+            font-size: 11px;
+          }
+          .detail-code {
+            font-size: 10px;
+            color: #000000;
+            text-transform: uppercase;
+            letter-spacing: .03em;
+            font-weight: 800;
+          }
+          .text-right { text-align: right; }
+          .footer-note {
+            text-align: center;
+            font-size: 11px;
+            line-height: 1.4;
+          }
+          strong {
+            font-weight: 800;
+            color: #000000;
+          }
+          td, th, span, div, p {
+            font-weight: 800;
+            color: #000000;
+          }
+          @media print {
+            body {
+              width: 80mm;
+            }
           }
         </style>
       </head>
       <body>
         <div class="ticket">
-          <div style="text-align:center;">
-            <div style="font-size:18px; font-weight:800;">${escapeHtml(ticket.negocio?.nombre || 'QKarnes POS')}</div>
-            <div class="muted" style="font-size:10px; text-transform:uppercase; letter-spacing:.12em;">Comprobante de venta</div>
-            ${ticket.ticket_config?.numero ? `<div class="muted" style="font-size:11px; margin-top:4px;">${escapeHtml(ticket.ticket_config.numero)}</div>` : ''}
+          <div class="center">
+            <div style="font-size:19px; font-weight:800;">${escapeHtml(ticket.negocio?.nombre || 'QKarnes POS')}</div>
+            <div class="muted" style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.08em;">Comprobante de venta</div>
+            ${ticket.ticket_config?.numero ? `<div class="muted" style="font-size:12px; font-weight:700; margin-top:2px;">${escapeHtml(ticket.ticket_config.numero)}</div>` : ''}
           </div>
 
           <div class="divider"></div>
 
-          <div style="font-size:12px; line-height:1.65;">
-            <div><strong>Venta:</strong> #${escapeHtml(ticket.venta?.id || '-')}</div>
-            <div><strong>Fecha:</strong> ${escapeHtml(ticketFecha)}</div>
-            <div><strong>Cliente:</strong> ${escapeHtml(ticket.cliente?.nombre || 'Consumidor final')}</div>
-            <div><strong>Cajero:</strong> ${escapeHtml(ticket.usuario?.nombre || '-')}</div>
-            <div><strong>Metodo:</strong> ${escapeHtml(metodoPago)}</div>
-            <div><strong>Referencia:</strong> ${escapeHtml(ticket.venta?.referencia || '-')}</div>
+          <div style="font-size:12px; font-weight:800;">
+            <div class="meta-row"><strong>Venta:</strong> #${escapeHtml(ticket.venta?.id || '-')}</div>
+            <div class="meta-row"><strong>Fecha:</strong> ${escapeHtml(ticketFecha)}</div>
+            <div class="meta-row"><strong>Cliente:</strong> ${escapeHtml(ticket.cliente?.nombre || 'Consumidor final')}</div>
+            <div class="meta-row"><strong>Cajero:</strong> ${escapeHtml(ticket.usuario?.nombre || '-')}</div>
+            <div class="meta-row"><strong>Metodo:</strong> ${escapeHtml(metodoPago)}</div>
+            <div class="meta-row"><strong>Referencia:</strong> ${escapeHtml(ticket.venta?.referencia || '-')}</div>
           </div>
 
           <div class="divider"></div>
@@ -115,10 +170,10 @@ export function printSaleTicketDocument(ticket, options = {}) {
           <table>
             <thead>
               <tr>
-                <th>Detalle</th>
-                <th style="text-align:right;">Cant</th>
-                <th style="text-align:right;">P. Unit</th>
-                <th style="text-align:right;">Total</th>
+                <th style="width:48%;">Detalle</th>
+                <th class="text-right" style="width:16%;">Cant</th>
+                <th class="text-right" style="width:18%;">P. Unit</th>
+                <th class="text-right" style="width:18%;">Total</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -126,39 +181,74 @@ export function printSaleTicketDocument(ticket, options = {}) {
 
           <div class="divider"></div>
 
-          <div class="summary-row muted"><span>Subtotal</span><span>${escapeHtml(formatMoney(ticket.venta?.subtotal))}</span></div>
-          <div class="summary-row muted"><span>Descuento</span><span>${escapeHtml(formatMoney(ticket.venta?.descuento_total))}</span></div>
+          <div class="summary-row muted"><span>Subtotal</span><span><strong>${escapeHtml(formatMoney(ticket.venta?.subtotal))}</strong></span></div>
+          <div class="summary-row muted"><span>Descuento</span><span><strong>${escapeHtml(formatMoney(ticket.venta?.descuento_total))}</strong></span></div>
           <div class="summary-row total"><span>Total</span><span>${escapeHtml(formatMoney(ticket.venta?.total))}</span></div>
-          ${saldoCredito > 0 ? `<div class="summary-row" style="margin-top:6px; font-weight:700; color:#b91c1c;"><span>Saldo pendiente</span><span>${escapeHtml(formatMoney(saldoCredito))}</span></div>` : ''}
+          ${saldoCredito > 0 ? `<div class="summary-row" style="margin-top:6px; font-weight:700; color:#000000;"><span>Saldo pendiente</span><span>${escapeHtml(formatMoney(saldoCredito))}</span></div>` : ''}
 
           <div class="divider"></div>
 
-          <div style="font-size:12px;">
-            <div class="muted" style="margin-bottom:6px; text-transform:uppercase; letter-spacing:.08em;">Formas de pago</div>
+          <div style="font-size:12px; font-weight:800;">
+            <div class="muted" style="margin-bottom:6px; text-transform:uppercase; letter-spacing:.08em; font-weight:800;">Formas de pago</div>
             ${pagos || '<div class="muted">Sin pagos registrados</div>'}
           </div>
 
           <div class="divider"></div>
 
-          <div class="muted" style="text-align:center; font-size:11px; line-height:1.5;">
+          <div class="muted footer-note">
             <div>${escapeHtml(ticket.ticket_config?.mensaje || 'Gracias por su compra')}</div>
             <div>Impresion simulada de ticket (offline desktop)</div>
           </div>
         </div>
-        <script>
-          window.onload = () => {
-            window.print();
-            setTimeout(() => window.close(), 250);
-          };
-        </script>
       </body>
     </html>
   `;
 
-  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=420,height=760');
-  if (!printWindow) return false;
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.style.visibility = 'hidden';
+
+  const cleanup = () => {
+    window.setTimeout(() => {
+      iframe.remove();
+    }, 150);
+  };
+
+  iframe.onload = () => {
+    const frameWindow = iframe.contentWindow;
+    if (!frameWindow) {
+      cleanup();
+      return;
+    }
+
+    const onAfterPrint = () => {
+      frameWindow.removeEventListener('afterprint', onAfterPrint);
+      cleanup();
+    };
+
+    frameWindow.addEventListener('afterprint', onAfterPrint);
+    window.setTimeout(() => {
+      frameWindow.focus();
+      frameWindow.print();
+      window.setTimeout(cleanup, 1500);
+    }, 80);
+  };
+
+  document.body.appendChild(iframe);
+  const frameDocument = iframe.contentDocument;
+  if (!frameDocument) {
+    cleanup();
+    return false;
+  }
+
+  frameDocument.open();
+  frameDocument.write(html);
+  frameDocument.close();
   return true;
 }

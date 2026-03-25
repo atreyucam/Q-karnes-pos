@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiArrowsClockwise, PiEye, PiPrinter, PiReceipt } from 'react-icons/pi';
+import { PiArrowsClockwise, PiEye, PiReceipt } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -9,18 +9,15 @@ import {
   Input,
   PageHeader,
   Paginador,
-  Select,
   StatusBadge,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
-  TablaCelda,
-  Textarea
+  TablaCelda
 } from '../../ui';
 import { useVentasStore } from '../../stores/ventasStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
-import { formatMoney } from '../../lib/formatMoney';
 import { getUnidad, formatQtyByUnit } from '../../lib/formatQty';
 import { printSaleTicketDocument } from './printTicket';
 
@@ -33,7 +30,7 @@ function formatQtyWithUnit(value, unidad) {
 
 export default function VentasListPage() {
   const navigate = useNavigate();
-  const { ventas, ventaDetalle, ticket, devoluciones, error, listar, detalle, cargarTicket, cargarDevoluciones, crearDevolucion } = useVentasStore();
+  const { ventas, ventaDetalle, devoluciones, error, listar, detalle, cargarTicket, cargarDevoluciones, crearDevolucion } = useVentasStore();
   const [selected, setSelected] = useState(null);
   const [motivo, setMotivo] = useState('Cliente no conforme');
   const [contado, setContado] = useState('');
@@ -41,6 +38,7 @@ export default function VentasListPage() {
   const [authAdmin, setAuthAdmin] = useState({ usuario: '', password: '' });
   const [qtyByDetail, setQtyByDetail] = useState({});
   const [pagina, setPagina] = useState(1);
+  const [printingSaleId, setPrintingSaleId] = useState(null);
 
   useEffect(() => {
     listar();
@@ -69,12 +67,16 @@ export default function VentasListPage() {
       .filter((d) => d.cantidad > 0);
   }, [ventaDetalle, qtyByDetail]);
 
-  const ticketDetalle = ticket?.detalle || [];
-  const ticketPagos = ticket?.pagos || [];
-  const ticketMetodo = String(ticket?.metodo_pago || '-');
-  const ticketFecha = ticket?.venta?.fecha ? formatDateQuito(ticket.venta.fecha) : '-';
-  const printTicket = () => {
-    printSaleTicketDocument(ticket);
+  const handlePrintTicket = async (saleId) => {
+    try {
+      setPrintingSaleId(saleId);
+      const ticketData = await cargarTicket(saleId);
+      printSaleTicketDocument(ticketData);
+    } catch (_) {
+      // El store ya deja el mensaje de error disponible para la vista.
+    } finally {
+      setPrintingSaleId(null);
+    }
   };
 
   const submitDevolucion = async () => {
@@ -147,9 +149,10 @@ export default function VentasListPage() {
                   <IconButton
                     variant="iconSecondary"
                     size="sm"
-                    aria-label={`Ver ticket venta ${v.id}`}
-                    title="Ver ticket"
-                    onClick={() => cargarTicket(v.id)}
+                    aria-label={`Ver recibo venta ${v.id}`}
+                    title="Ver recibo"
+                    disabled={printingSaleId === v.id}
+                    onClick={() => handlePrintTicket(v.id)}
                   >
                     <PiReceipt className="text-lg" />
                   </IconButton>
@@ -264,101 +267,6 @@ export default function VentasListPage() {
         </Card>
       )}
 
-      {ticket && (
-        <Card className="space-y-3 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-semibold text-[var(--color-text)]">Ticket de venta #{ticket.venta?.id}</h3>
-            <div className="ticket-print-actions flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={printTicket}>
-                <PiPrinter />
-                Imprimir ticket
-              </Button>
-            </div>
-          </div>
-
-          <div className="ticket-print-root rounded-xl border border-[var(--color-border)] bg-white p-4 text-sm text-[var(--color-text)] shadow-sm">
-            <header className="space-y-0.5 border-b border-dashed border-[var(--color-border)] pb-3 text-center">
-              <p className="m-0 text-base font-extrabold tracking-wide">{ticket.negocio?.nombre || 'QKarnes POS'}</p>
-              <p className="m-0 text-xs uppercase tracking-widest text-[var(--color-text-muted)]">Comprobante de venta</p>
-              {ticket.ticket_config?.numero && <p className="m-0 text-xs text-[var(--color-text-muted)]">{ticket.ticket_config.numero}</p>}
-            </header>
-
-            <section className="grid gap-1 py-3 text-xs text-[var(--color-text-muted)] md:grid-cols-2">
-              <p className="m-0"><span className="font-semibold text-[var(--color-text)]">Venta:</span> #{ticket.venta?.id}</p>
-              <p className="m-0"><span className="font-semibold text-[var(--color-text)]">Fecha:</span> {ticketFecha}</p>
-              <p className="m-0"><span className="font-semibold text-[var(--color-text)]">Cliente:</span> {ticket.cliente?.nombre || 'Consumidor final'}</p>
-              <p className="m-0"><span className="font-semibold text-[var(--color-text)]">Cajero:</span> {ticket.usuario?.nombre || '-'}</p>
-              <p className="m-0"><span className="font-semibold text-[var(--color-text)]">Metodo:</span> {ticketMetodo}</p>
-              <p className="m-0"><span className="font-semibold text-[var(--color-text)]">Referencia:</span> {ticket.venta?.referencia || '-'}</p>
-              {ticket.negocio?.ruc && <p className="m-0"><span className="font-semibold text-[var(--color-text)]">RUC:</span> {ticket.negocio.ruc}</p>}
-              {ticket.negocio?.direccion && <p className="m-0"><span className="font-semibold text-[var(--color-text)]">Direccion:</span> {ticket.negocio.direccion}</p>}
-            </section>
-
-            <section className="border-y border-dashed border-[var(--color-border)] py-3">
-              <table className="w-full border-collapse text-xs">
-                <thead>
-                  <tr className="text-left uppercase tracking-wide text-[var(--color-text-muted)]">
-                    <th className="pb-1 pr-2">Detalle</th>
-                    <th className="pb-1 pr-2 text-right">Cant</th>
-                    <th className="pb-1 pr-2 text-right">P. Unit</th>
-                    <th className="pb-1 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ticketDetalle.map((row) => (
-                    <tr key={row.id} className="align-top">
-                      <td className="py-1 pr-2">
-                        <p className="m-0 font-semibold text-[var(--color-text)]">{row.producto_nombre}</p>
-                        <p className="m-0 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">{row.producto_codigo}</p>
-                      </td>
-                      <td className="py-1 pr-2 text-right">{formatQtyWithUnit(row.cantidad, row.unidad_medida || 'UND')}</td>
-                      <td className="py-1 pr-2 text-right">{formatMoney(row.precio_unit)}</td>
-                      <td className="py-1 text-right">{formatMoney(row.total_linea)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-
-            <section className="space-y-1 py-3 text-xs">
-              <div className="flex items-center justify-between text-[var(--color-text-muted)]">
-                <span>Subtotal</span>
-                <span>{formatMoney(ticket.venta?.subtotal)}</span>
-              </div>
-              <div className="flex items-center justify-between text-[var(--color-text-muted)]">
-                <span>Descuento</span>
-                <span>{formatMoney(ticket.venta?.descuento_total)}</span>
-              </div>
-              <div className="flex items-center justify-between border-t border-dashed border-[var(--color-border)] pt-2 text-sm font-bold text-[var(--color-text)]">
-                <span>Total</span>
-                <span>{formatMoney(ticket.venta?.total)}</span>
-              </div>
-              {Number(ticket.ticket_config?.impuesto_porcentaje || 0) > 0 && (
-                <div className="flex items-center justify-between text-[var(--color-text-muted)]">
-                  <span>Impuesto estimado ({Number(ticket.ticket_config?.impuesto_porcentaje || 0)}%)</span>
-                  <span>{formatMoney(ticket.totales?.impuesto_estimado)}</span>
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-1 border-t border-dashed border-[var(--color-border)] pt-3 text-xs text-[var(--color-text-muted)]">
-              <p className="m-0 font-semibold uppercase tracking-wide text-[var(--color-text)]">Formas de pago</p>
-              {ticketPagos.length === 0 && <p className="m-0">Sin pagos registrados</p>}
-              {ticketPagos.map((pago) => (
-                <div key={pago.id} className="flex items-center justify-between">
-                  <span>{String(pago.tipo || '-').toUpperCase()}</span>
-                  <span>{formatMoney(pago.monto)}</span>
-                </div>
-              ))}
-            </section>
-
-            <footer className="pt-3 text-center text-[11px] text-[var(--color-text-muted)]">
-              <p className="m-0">{ticket.ticket_config?.mensaje || 'Gracias por su compra'}</p>
-              <p className="m-0">Impresion simulada de ticket (offline desktop)</p>
-            </footer>
-          </div>
-        </Card>
-      )}
     </div>
   );
 }

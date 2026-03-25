@@ -13,7 +13,6 @@ import DashboardAlertsCard from './DashboardAlertsCard';
 import DashboardKpiCard from './DashboardKpiCard';
 import DashboardLatestSalesTable from './DashboardLatestSalesTable';
 import DashboardQuickActions from './DashboardQuickActions';
-import DashboardSalesChart from './DashboardSalesChart';
 import {
   formatDashboardCount,
   formatDashboardDate,
@@ -102,15 +101,11 @@ export default function DashboardPage() {
         <>
           <section className="ui-kpi-summary-shell">
             <div className="ui-kpi-summary-grid grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {kpiCards.map((card) => (
-                <DashboardKpiCard key={card.key} {...card} />
+              {kpiCards.map(({ key, ...card }) => (
+                <DashboardKpiCard key={key} {...card} />
               ))}
             </div>
           </section>
-
-          <div className="grid gap-4">
-            <DashboardSalesChart data={dashboardData.ventas_por_hora} />
-          </div>
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <DashboardQuickActions />

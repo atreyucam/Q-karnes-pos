@@ -43,9 +43,13 @@ export const useVentasStore = create((set) => ({
     set({ loading: true, error: null });
     try {
       const response = await apiClient.get(`/api/ventas/${id}/ticket`);
-      set({ ticket: normalizeResponse(response.data), loading: false });
+      const data = normalizeResponse(response.data);
+      set({ ticket: data, loading: false });
+      return data;
     } catch (error) {
-      set({ loading: false, error: parseApiError(error) });
+      const message = parseApiError(error);
+      set({ loading: false, error: message });
+      throw new Error(message);
     }
   },
   crearDevolucion: async (id, payload) => {

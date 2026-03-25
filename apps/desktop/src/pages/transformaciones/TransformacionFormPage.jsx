@@ -30,6 +30,10 @@ function nowLocalDateInput() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function qtyRound(value) {
+  return Number(Number(value || 0).toFixed(3));
+}
+
 function parseQtyByUnit(raw, unidad) {
   const unit = getUnidad(unidad);
   if (unit === 'UND') {
@@ -48,48 +52,94 @@ function summarize(parentQty, resultados, mermas) {
   return { entrada, salida, merma, diff };
 }
 
-function AdminAuthModal({ open, auth, setAuth, onClose, onConfirm, loading }) {
+function ApplyConfirmModal({
+  open,
+  auth,
+  setAuth,
+  onClose,
+  onConfirm,
+  loading,
+  needsAuth,
+  parentName,
+  parentQty,
+  parentUnit,
+  remainingQty,
+  mermaQty
+}) {
   if (!open) return null;
+  const safeRemainingQty = qtyRound(Math.max(Number(remainingQty || 0), 0));
+  const safeMermaQty = qtyRound(Math.max(Number(mermaQty || 0), 0));
+  const usesAllParent = safeRemainingQty <= BALANCE_TOLERANCE;
 
   return (
-    <Modal open={open} onClose={onClose} maxWidthClass="max-w-lg" panelClassName="p-6">
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+    <Modal open={open} onClose={onClose} maxWidthClass="max-w-2xl" panelClassName="p-0">
+      <div className="border-b border-slate-200 px-6 py-4">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900">Aplicar despiece</h3>
-            <p className="text-sm text-slate-500">Confirma con autorización ADMIN para registrar movimientos reales.</p>
+            <h3 className="text-lg font-semibold text-slate-900">Confirmar aplicación de despiece</h3>
+            <p className="text-sm text-slate-500">
+              Revisa el impacto operativo antes de registrar movimientos reales en inventario.
+            </p>
           </div>
           <button type="button" className="text-sm text-slate-500" onClick={onClose}>
             Cerrar
           </button>
         </div>
+      </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Usuario admin</label>
-            <Input
-              value={auth.usuario}
-              onChange={(e) => setAuth((s) => ({ ...s, usuario: e.target.value }))}
-              placeholder="Ingresa usuario autorizado"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Clave admin</label>
-            <Input
-              type="password"
-              value={auth.password}
-              onChange={(e) => setAuth((s) => ({ ...s, password: e.target.value }))}
-              placeholder="Ingresa clave autorizada"
-            />
+      <div className="space-y-4">
+        <div className="px-6 pt-5">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+            <p className="text-sm text-slate-700">
+              {`Se procesarán ${formatQtyByUnit(parentQty, parentUnit, { fixedLB: true })} ${parentUnit} de "${parentName}".`}
+            </p>
+            <p className="mt-2 text-sm text-slate-700">
+              {usesAllParent
+                ? 'Se utilizará la totalidad del producto padre.'
+                : `Quedarán ${formatQtyByUnit(safeRemainingQty, parentUnit, { fixedLB: true })} ${parentUnit} disponibles en inventario como producto padre.`}
+            </p>
+            <p className="mt-2 text-sm text-slate-700">
+              {`Merma registrada: ${formatQtyByUnit(safeMermaQty, parentUnit, { fixedLB: true })} ${parentUnit}.`}
+            </p>
           </div>
         </div>
 
-        <div className="flex justify-end gap-3">
+        {needsAuth && (
+          <div className="px-6">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-sm font-semibold text-amber-900">Autorización ADMIN</p>
+              <p className="mt-1 text-sm text-amber-800">
+                Ingresa credenciales de administrador para continuar con la aplicación del despiece.
+              </p>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Usuario admin</label>
+                <Input
+                  value={auth.usuario}
+                  onChange={(e) => setAuth((s) => ({ ...s, usuario: e.target.value }))}
+                  placeholder="Ingresa usuario autorizado"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Clave admin</label>
+                <Input
+                  type="password"
+                  value={auth.password}
+                  onChange={(e) => setAuth((s) => ({ ...s, password: e.target.value }))}
+                  placeholder="Ingresa clave autorizada"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
           <Button variant="secondary" onClick={onClose} disabled={loading}>
             Cancelar
           </Button>
           <Button onClick={onConfirm} disabled={loading}>
-            {loading ? 'Aplicando...' : 'Aplicar despiece'}
+            {loading ? 'Aplicando...' : 'Confirmar y aplicar'}
           </Button>
         </div>
       </div>
@@ -320,6 +370,18 @@ export default function TransformacionFormPage() {
   const parentUnit = getUnidad(parentProduct?.unidad_medida || parentProduct?.unidad || 'LB');
   const parentQty = parseQtyByUnit(parent.cantidadInput, parentUnit);
   const isEditableDraft = !isReadOnlyMode && (!isEdit || actual?.estado === 'BORRADOR');
+  const parentAvailableStock = qtyRound(
+    isEdit
+      ? Number(actual?.insumo?.stock_disponible_snapshot || parentProduct?.stock_actual || 0)
+      : Number(parentProduct?.stock_actual || 0)
+  );
+  const parentRemainingEstimate = Number.isFinite(parentQty)
+    ? qtyRound(parentAvailableStock - parentQty)
+    : qtyRound(
+      isEdit
+        ? Number(actual?.insumo?.stock_restante_snapshot || parentAvailableStock)
+        : parentAvailableStock
+    );
 
   function formatSummaryValue(value, unit) {
     return `${formatQtyByUnit(value, unit, { fixedLB: true })} ${unit}`;
@@ -349,15 +411,16 @@ export default function TransformacionFormPage() {
       qty
     };
   }, [merma, parentUnit, productsMap]);
+  const effectiveMermaQty = Number.isFinite(mermaView.qty) && mermaView.qty >= 0 ? qtyRound(mermaView.qty) : 0;
 
   const summary = useMemo(
     () =>
       summarize(
         Number.isFinite(parentQty) ? parentQty : 0,
         resultadosView,
-        Number.isFinite(mermaView.qty) && mermaView.qty > 0 ? [mermaView] : []
+        effectiveMermaQty > 0 ? [{ ...mermaView, qty: effectiveMermaQty }] : []
       ),
-    [mermaView, parentQty, resultadosView]
+    [effectiveMermaQty, mermaView, parentQty, resultadosView]
   );
 
   const baseCandidates = useMemo(() => {
@@ -413,7 +476,10 @@ export default function TransformacionFormPage() {
     if (parentCategoryId && String(parentProduct?.categoria_id || '') !== parentCategoryId) {
       return 'El producto base debe pertenecer a la categoría Producto padre.';
     }
-    if (!Number.isFinite(parentQty) || parentQty <= 0) return 'La entrada base debe tener una cantidad válida.';
+    if (!Number.isFinite(parentQty) || parentQty <= 0) return 'La cantidad a despiezar debe ser válida.';
+    if (parentQty > parentAvailableStock) {
+      return `La cantidad a despiezar no puede superar el stock disponible (${formatQtyByUnit(parentAvailableStock, parentUnit, { fixedLB: true })} ${parentUnit}).`;
+    }
 
     for (const row of resultadosView) {
       if (!row.producto_id) return 'Cada hijo debe tener producto seleccionado.';
@@ -426,16 +492,17 @@ export default function TransformacionFormPage() {
     }
 
     if (merma.cantidadInput !== '' || merma.producto_id) {
-      if (!merma.producto_id) return 'Selecciona el producto de merma.';
-      if (!Number.isFinite(mermaView.qty) || mermaView.qty <= 0) return 'La cantidad de merma debe ser válida.';
+      if (!Number.isFinite(mermaView.qty)) return 'La cantidad de merma debe ser válida.';
+      if (mermaView.qty < 0) return 'La cantidad de merma no puede ser negativa.';
+      if (mermaView.qty > 0 && !merma.producto_id) return 'Selecciona el producto de merma.';
     }
 
-    if (!resultadosView.length && !(Number.isFinite(mermaView.qty) && mermaView.qty > 0)) {
+    if (!resultadosView.length && effectiveMermaQty <= 0) {
       return 'Agrega al menos un producto hijo o una merma.';
     }
 
     if (strictBalance && !balanceOk) {
-      return `Para aplicar el despiece el saldo debe quedar en 0. Diferencia actual: ${formatQtyByUnit(summary.diff, 'LB', { fixedLB: true })}.`;
+      return `Para aplicar el despiece, la suma de hijos + merma debe igualar la cantidad a despiezar. Diferencia actual: ${formatQtyByUnit(summary.diff, parentUnit, { fixedLB: true })} ${parentUnit}.`;
     }
 
     return '';
@@ -453,10 +520,10 @@ export default function TransformacionFormPage() {
       producto_id: Number(row.producto_id),
       cantidad: Number(row.qty)
     })),
-    mermas: Number.isFinite(mermaView.qty) && mermaView.qty > 0 ? [{
+    mermas: effectiveMermaQty > 0 ? [{
       tipo_merma: 'RECORTE',
       producto_id: merma.producto_id ? Number(merma.producto_id) : null,
-      cantidad: Number(mermaView.qty),
+      cantidad: Number(effectiveMermaQty),
       motivo: (merma.motivo || 'Merma de despiece').trim()
     }] : []
   });
@@ -464,7 +531,7 @@ export default function TransformacionFormPage() {
   const handleSelectBase = (product) => {
     setParent({
       producto_id: String(product.id),
-      cantidadInput: String(Number(product.stock_actual || 0).toFixed(2))
+      cantidadInput: ''
     });
     setShowBaseModal(false);
   };
@@ -506,11 +573,6 @@ export default function TransformacionFormPage() {
     const targetId = isEdit ? editId : savedInfo?.id;
     if (!targetId) {
       setLocalError('Primero guarda el borrador antes de aplicar el despiece.');
-      return;
-    }
-
-    if (isAdminUser) {
-      void handleApply();
       return;
     }
 
@@ -577,7 +639,7 @@ export default function TransformacionFormPage() {
                 : 'Nuevo despiece'}
           </h1>
           <p className="text-base text-[var(--color-text-muted)]">
-            Selecciona el producto base, define los hijos, registra la merma y revisa el balance del proceso.
+            Selecciona el producto base, define la cantidad a despiezar, registra hijos y merma. El resto del stock quedará en inventario para futuros despieces.
           </p>
         </div>
 
@@ -592,7 +654,7 @@ export default function TransformacionFormPage() {
         <div className="mt-6 space-y-5">
           <div className="space-y-5 rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm sm:p-7 lg:p-8">
             <div className="space-y-4 border-b border-[var(--color-border)] pb-6">
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Producto base</label>
                   <div className="mt-2 flex gap-2">
@@ -616,10 +678,30 @@ export default function TransformacionFormPage() {
                   </div>
                   <p className="mt-2 text-sm text-[var(--color-text-muted)]">
                     {parentProduct
-                      ? `Stock disponible: ${formatQtyByUnit(parentProduct.stock_actual || 0, parentUnit, { fixedLB: true })} ${parentUnit}`
+                      ? `Stock disponible: ${formatQtyByUnit(parentAvailableStock, parentUnit, { fixedLB: true })} ${parentUnit}. El resto quedará en inventario para futuros despieces.`
                       : parentCategoryId
                         ? 'Selecciona un producto base activo de la categoría Producto padre.'
                         : 'Selecciona un producto base activo para el despiece.'}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cantidad a despiezar</label>
+                  <Input
+                    className="mt-2"
+                    value={parent.cantidadInput}
+                    onChange={(e) => setParent((current) => ({
+                      ...current,
+                      cantidadInput: sanitizeQtyInput(e.target.value, parentUnit)
+                    }))}
+                    disabled={!isEditableDraft || !parent.producto_id}
+                    placeholder="0.00"
+                  />
+                  <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                    Solo esta cantidad se consumirá del producto padre.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Puedes hacer un despiece parcial. No es obligatorio procesar todo el stock disponible.
                   </p>
                 </div>
 
@@ -649,7 +731,7 @@ export default function TransformacionFormPage() {
 
             <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-5">
               <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Entrada base</h3>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="mt-4 grid gap-4 xl:grid-cols-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Producto base</p>
                   <p className="mt-2 text-lg font-semibold text-slate-900">{parentProduct?.nombre || 'Sin seleccionar'}</p>
@@ -658,9 +740,23 @@ export default function TransformacionFormPage() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Stock disponible</p>
                   <p className="mt-2 text-lg font-semibold text-slate-900">
-                    {formatQtyByUnit(parentProduct?.stock_actual || 0, parentUnit, { fixedLB: true })}
+                    {formatQtyByUnit(parentAvailableStock, parentUnit, { fixedLB: true })} {parentUnit}
                   </p>
-                  <p className="text-sm text-slate-500">Entrada base usada en el proceso: {formatQtyByUnit(parentQty || 0, parentUnit, { fixedLB: true })}</p>
+                  <p className="text-sm text-slate-500">Cantidad total actualmente disponible antes del proceso.</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cantidad a despiezar</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">
+                    {Number.isFinite(parentQty) ? `${formatQtyByUnit(parentQty, parentUnit, { fixedLB: true })} ${parentUnit}` : `0.00 ${parentUnit}`}
+                  </p>
+                  <p className="text-sm text-slate-500">Cantidad base que se procesará en esta operación.</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Stock restante estimado</p>
+                  <p className={`mt-2 text-lg font-semibold ${parentRemainingEstimate < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                    {formatQtyByUnit(Math.max(parentRemainingEstimate, 0), parentUnit, { fixedLB: true })} {parentUnit}
+                  </p>
+                  <p className="text-sm text-slate-500">Saldo del padre que quedará disponible tras el despiece.</p>
                 </div>
               </div>
             </div>
@@ -771,7 +867,7 @@ export default function TransformacionFormPage() {
                       placeholder="0.00"
                       disabled={!isEditableDraft}
                     />
-                    <p className="mt-1 text-xs text-slate-500">Unidad: {parentUnit}</p>
+                    <p className="mt-1 text-xs text-slate-500">Unidad: {parentUnit}. Puede ser 0.00.</p>
                   </div>
                 </div>
               </div>
@@ -789,7 +885,13 @@ export default function TransformacionFormPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Merma</span>
-                    <strong className="text-slate-900">{formatSummaryValue(summary.merma, parentUnit)}</strong>
+                    <strong className="text-slate-900">{formatSummaryValue(effectiveMermaQty, parentUnit)}</strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Stock restante estimado</span>
+                    <strong className={parentRemainingEstimate < 0 ? 'text-rose-600' : 'text-slate-900'}>
+                      {formatSummaryValue(Math.max(parentRemainingEstimate, 0), parentUnit)}
+                    </strong>
                   </div>
                   <div className="border-t border-slate-200 pt-3">
                     <div className="flex items-center justify-between">
@@ -798,8 +900,14 @@ export default function TransformacionFormPage() {
                         {formatSummaryValue(summary.diff, parentUnit)}
                       </strong>
                     </div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="font-semibold text-slate-700">Balance</span>
+                      <strong className={balanceOk ? 'text-emerald-600' : 'text-amber-600'}>
+                        {balanceOk ? 'OK' : 'Revisar'}
+                      </strong>
+                    </div>
                     <p className="mt-2 text-xs text-slate-500">
-                      Para aplicar el despiece, el saldo debe quedar dentro de la tolerancia {BALANCE_TOLERANCE}.
+                      Para aplicar el despiece, hijos + merma deben cerrar contra la cantidad a despiezar, con tolerancia {BALANCE_TOLERANCE}.
                     </p>
                   </div>
                 </div>
@@ -881,13 +989,19 @@ export default function TransformacionFormPage() {
         getStockLabel={(row) => formatQtyByUnit(row.stock_actual || 0, row.unidad_medida || row.unidad, { fixedLB: true })}
       />
 
-      <AdminAuthModal
-        open={showApplyModal && !isAdminUser}
+      <ApplyConfirmModal
+        open={showApplyModal}
         auth={auth}
         setAuth={setAuth}
         onClose={() => setShowApplyModal(false)}
         onConfirm={handleApply}
         loading={saving}
+        needsAuth={!isAdminUser}
+        parentName={parentProduct?.nombre || 'Producto padre'}
+        parentQty={Number.isFinite(parentQty) ? parentQty : 0}
+        parentUnit={parentUnit}
+        remainingQty={parentRemainingEstimate}
+        mermaQty={effectiveMermaQty}
       />
     </div>
   );

@@ -25,7 +25,7 @@ const itemSchema = z.object({
 const mermaSchema = z.object({
   tipo_merma: z.string().trim().min(1),
   producto_id: z.number().int().positive().optional().nullable(),
-  cantidad: z.number().positive(),
+  cantidad: z.number(),
   motivo: z.string().trim().min(1)
 });
 
@@ -40,12 +40,12 @@ const saveDraftSchema = z.object({
 });
 
 const applySchema = z.object({
-  autorizacion: adminAuthSchema
+  autorizacion: adminAuthSchema.optional().nullable()
 });
 
 const cancelSchema = z.object({
   novedad: z.string().trim().min(1),
-  autorizacion: adminAuthSchema
+  autorizacion: adminAuthSchema.optional().nullable()
 });
 
 const listSchema = z.object({
@@ -178,6 +178,14 @@ function validateAndNormalizeDraftPayload(payload, productsMap) {
   ensureTransformacionLbOnly(parentUnit, `el producto padre ${parent.codigo}`);
   const parentQty = qtyRound(payload.insumo.cantidad);
   ensureValidUnitAndQuantity(parentUnit, parentQty, `producto padre ${parent.codigo}`);
+  const parentAvailableStock = qtyRound(parent.stock_actual);
+  const parentRemainingStock = qtyRound(parentAvailableStock - parentQty);
+  if (parentRemainingStock < 0) {
+    throw new AppError(
+      400,
+      `Stock insuficiente para el padre ${parent.codigo}: la cantidad a despiezar (${parentQty} ${parentUnit}) excede el stock disponible (${parentAvailableStock} ${parentUnit})`
+    );
+  }
 
   const normalizedResultadosMap = new Map();
   for (const row of payload.resultados || []) {
@@ -226,7 +234,15 @@ function validateAndNormalizeDraftPayload(payload, productsMap) {
     }
 
     const qty = qtyRound(row.cantidad);
-    ensureValidUnitAndQuantity(mermaUnit, qty, `merma ${row.tipo_merma}`);
+    if (!Number.isFinite(qty)) {
+      throw new AppError(400, `Cantidad inválida para merma ${row.tipo_merma}`);
+    }
+    if (qty < 0) {
+      throw new AppError(400, 'La cantidad de merma no puede ser negativa');
+    }
+    if (qty === 0) {
+      return null;
+    }
 
     return {
       tipo_merma: row.tipo_merma.trim(),
@@ -235,7 +251,7 @@ function validateAndNormalizeDraftPayload(payload, productsMap) {
       unidad_medida: mermaUnit,
       motivo: row.motivo.trim()
     };
-  });
+  }).filter(Boolean);
 
   return {
     fecha: parseFechaOrNow(payload.fecha),
@@ -246,6 +262,8 @@ function validateAndNormalizeDraftPayload(payload, productsMap) {
       producto_id: parent.id,
       unidad_medida: parentUnit,
       cantidad: parentQty,
+      stock_disponible_snapshot: parentAvailableStock,
+      stock_restante_snapshot: parentRemainingStock,
       costo_unitario_snapshot: costRound(parent.costo_promedio),
       subtotal_costo: moneyRound(parentQty * Number(parent.costo_promedio || 0))
     },
@@ -294,6 +312,10 @@ function normalizeDetalle(transformacion, resultados, mermas, movimientos) {
       producto_nombre: transformacion.insumo_producto_nombre,
       cantidad: Number(transformacion.insumo_cantidad || 0),
       unidad_medida: transformacion.insumo_unidad_medida,
+      stock_disponible_snapshot: Number(transformacion.insumo_stock_disponible_snapshot || 0),
+      stock_restante_snapshot: Number(transformacion.insumo_stock_restante_snapshot || 0),
+      stock_actual: Number(transformacion.insumo_producto_stock_actual || 0),
+      costo_promedio_actual: Number(transformacion.insumo_producto_costo_promedio_actual || 0),
       costo_unitario_snapshot: Number(transformacion.insumo_costo_unitario_snapshot || 0),
       subtotal_costo: Number(transformacion.insumo_subtotal_costo || 0)
     } : null,
@@ -318,6 +340,11 @@ function normalizeDetalle(transformacion, resultados, mermas, movimientos) {
       motivo: row.motivo
     })),
     resumen: summary,
+    stock: {
+      padre_disponible_snapshot: Number(transformacion.insumo_stock_disponible_snapshot || 0),
+      padre_restante_snapshot: Number(transformacion.insumo_stock_restante_snapshot || 0),
+      padre_stock_actual: Number(transformacion.insumo_producto_stock_actual || 0)
+    },
     balance: {
       tolerancia: BALANCE_TOLERANCE,
       en_rango: Math.abs(Number(summary.diferencia_balance || 0)) <= BALANCE_TOLERANCE
@@ -382,6 +409,8 @@ async function createBorrador(body, actorUser) {
         producto_id: draft.insumo.producto_id,
         cantidad: draft.insumo.cantidad,
         unidad_medida: draft.insumo.unidad_medida,
+        stock_disponible_snapshot: draft.insumo.stock_disponible_snapshot,
+        stock_restante_snapshot: draft.insumo.stock_restante_snapshot,
         costo_unitario_snapshot: draft.insumo.costo_unitario_snapshot,
         subtotal_costo: draft.insumo.subtotal_costo
       },
@@ -475,6 +504,8 @@ async function updateBorrador(id, body, actorUser) {
         producto_id: draft.insumo.producto_id,
         cantidad: draft.insumo.cantidad,
         unidad_medida: draft.insumo.unidad_medida,
+        stock_disponible_snapshot: draft.insumo.stock_disponible_snapshot,
+        stock_restante_snapshot: draft.insumo.stock_restante_snapshot,
         costo_unitario_snapshot: draft.insumo.costo_unitario_snapshot,
         subtotal_costo: draft.insumo.subtotal_costo
       },
@@ -585,7 +616,7 @@ async function aplicarTransformacion(id, body, actorUser) {
   const authorizer = await resolveAdminAuthorizer({
     actorUser,
     authorization: parsed.data.autorizacion,
-    requireAlways: true,
+    requireAlways: false,
     reason: 'aplicar transformación',
     auditContext: {
       modulo: 'TRANSFORMACIONES',
@@ -673,11 +704,15 @@ async function aplicarTransformacion(id, body, actorUser) {
 
     const costoSnapshot = costRound(Number(parentProduct.costo_promedio || 0));
     const costoTotalProceso = moneyRound(costoSnapshot * Number(normalized.insumo.cantidad || 0));
+    const stockDisponibleSnapshot = qtyRound(Number(parentProduct.stock_actual || 0));
+    const stockRestanteSnapshot = qtyRound(stockDisponibleSnapshot - Number(normalized.insumo.cantidad || 0));
     await repository.updateInsumoSnapshot(
       id,
       {
         costo_unitario_snapshot: costoSnapshot,
-        subtotal_costo: costoTotalProceso
+        subtotal_costo: costoTotalProceso,
+        stock_disponible_snapshot: stockDisponibleSnapshot,
+        stock_restante_snapshot: stockRestanteSnapshot
       },
       trx
     );
@@ -789,7 +824,7 @@ async function anularTransformacion(id, body, actorUser) {
   const authorizer = await resolveAdminAuthorizer({
     actorUser,
     authorization: parsed.data.autorizacion,
-    requireAlways: true,
+    requireAlways: false,
     reason: 'anular transformación',
     auditContext: {
       modulo: 'TRANSFORMACIONES',

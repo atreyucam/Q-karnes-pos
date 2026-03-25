@@ -27,9 +27,11 @@ function formatNow(date) {
   const ecuadorDate = new Date(date.getTime() + ECUADOR_UTC_OFFSET_MS);
   const day = pad2(ecuadorDate.getUTCDate());
   const month = ECUADOR_MONTHS[ecuadorDate.getUTCMonth()] || '';
-  const hour = pad2(ecuadorDate.getUTCHours());
+  const hour24 = ecuadorDate.getUTCHours();
+  const hour = pad2(hour24);
   const minute = pad2(ecuadorDate.getUTCMinutes());
-  return `${day}-${month}, ${hour}:${minute}`;
+  const meridiem = hour24 >= 12 ? 'PM' : 'AM';
+  return `${day}-${month}, ${hour}:${minute} ${meridiem}`;
 }
 
 function formatNowDate(date) {

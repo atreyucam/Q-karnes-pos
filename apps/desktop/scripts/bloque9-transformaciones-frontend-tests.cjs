@@ -38,7 +38,7 @@ function run() {
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     assert(formPage.includes("'Nuevo despiece'"), 'No renderiza vista de formulario');
-    assert(formPage.includes('Producto base') && formPage.includes('Productos hijo') && formPage.includes('Merma'), 'Formulario incompleto');
+    assert(formPage.includes('Producto base') && formPage.includes('Cantidad a despiezar') && formPage.includes('Productos hijo') && formPage.includes('Merma'), 'Formulario incompleto');
     add(2, 'Render del formulario', true);
   } catch (error) {
     add(2, 'Render del formulario', false, error.message);
@@ -54,7 +54,7 @@ function run() {
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
-    assert(formPage.includes('La entrada base debe tener una cantidad válida.'), 'Falta validación de cantidad base obligatoria');
+    assert(formPage.includes('La cantidad a despiezar debe ser válida.'), 'Falta validación de cantidad base obligatoria');
     add(4, 'Validación de cantidad/peso obligatorio', true);
   } catch (error) {
     add(4, 'Validación de cantidad/peso obligatorio', false, error.message);
@@ -73,6 +73,7 @@ function run() {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     assert(formPage.includes('Producto merma'), 'No existe selector de producto merma');
     assert(formPage.includes('Cantidad merma'), 'No existe captura de cantidad de merma');
+    assert(formPage.includes('Puede ser 0.00.'), 'No comunica que la merma puede ser 0');
     add(6, 'Captura de merma disponible en formulario', true);
   } catch (error) {
     add(6, 'Captura de merma disponible en formulario', false, error.message);
@@ -80,7 +81,7 @@ function run() {
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
-    assert(formPage.includes('Entrada base') && formPage.includes('Salida hijos') && formPage.includes('Merma') && formPage.includes('Saldo'), 'Resumen técnico no visible');
+    assert(formPage.includes('Entrada base') && formPage.includes('Salida hijos') && formPage.includes('Merma') && formPage.includes('Saldo') && formPage.includes('Stock restante estimado'), 'Resumen técnico no visible');
     add(7, 'Cálculo/resumen visible', true);
   } catch (error) {
     add(7, 'Cálculo/resumen visible', false, error.message);
@@ -89,11 +90,11 @@ function run() {
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     const listPage = read('apps/desktop/src/pages/transformaciones/TransformacionesListPage.jsx');
-    assert(formPage.includes('Debes ingresar autorización ADMIN para aplicar.'), 'No maneja error de autorización admin en formulario');
-    assert(listPage.includes('Debes ingresar usuario y clave ADMIN para continuar'), 'No maneja error de autorización admin en listado');
-    add(8, 'Manejo de error de autorización admin', true);
+    assert(formPage.includes('isAdminUser'), 'Formulario no contempla bypass para sesión admin');
+    assert(listPage.includes('isAdminUser'), 'Listado no contempla bypass para sesión admin');
+    add(8, 'Sesión admin evita autorización redundante', true);
   } catch (error) {
-    add(8, 'Manejo de error de autorización admin', false, error.message);
+    add(8, 'Sesión admin evita autorización redundante', false, error.message);
   }
 
   try {
@@ -108,20 +109,21 @@ function run() {
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     const listPage = read('apps/desktop/src/pages/transformaciones/TransformacionesListPage.jsx');
-    assert(formPage.includes('Aplicar despiece') && formPage.includes('setShowApplyModal(true)'), 'No existe flujo de aplicar desde formulario');
-    assert(listPage.includes('Confirma aplicar') && listPage.includes('Autorización ADMIN'), 'No existe confirmación/autorización en listado');
+    assert(formPage.includes('Aplicar despiece') && formPage.includes('handleOpenApply'), 'No existe flujo de aplicar desde formulario');
+    assert(listPage.includes('Confirma aplicar') && listPage.includes('requiresAuth'), 'No existe confirmación/autorización condicional en listado');
     add(10, 'Flujo de aplicar con confirmación/autorización', true);
   } catch (error) {
     add(10, 'Flujo de aplicar con confirmación/autorización', false, error.message);
   }
 
   try {
-    const detailPage = read('apps/desktop/src/pages/transformaciones/TransformacionDetallePage.jsx');
-    assert(detailPage.includes('Detalle despiece'), 'No renderiza cabecera de detalle');
-    assert(detailPage.includes('Movimientos asociados') && detailPage.includes('Anular transformación'), 'Detalle no muestra datos/acciones esperadas');
-    add(11, 'Detalle muestra datos esperados', true);
+    const routes = read('apps/desktop/src/router/routes.jsx');
+    const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
+    assert(routes.includes("{ path: '/transformaciones/:id', element: <TransformacionFormPage /> }"), 'La vista de detalle no reutiliza el formulario');
+    assert(formPage.includes('Detalle despiece'), 'El formulario no contempla modo detalle');
+    add(11, 'Detalle reutiliza la misma pantalla del formulario', true);
   } catch (error) {
-    add(11, 'Detalle muestra datos esperados', false, error.message);
+    add(11, 'Detalle reutiliza la misma pantalla del formulario', false, error.message);
   }
 
   try {
@@ -140,20 +142,32 @@ function run() {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     assert(formPage.includes('const lbProducts = useMemo'), 'No existe filtro de productos LB en formulario');
     assert(formPage.includes('return lbProducts.filter'), 'Selector de padre no está limitado a LB');
-    assert(formPage.includes('return lbProducts.filter((product)'), 'Selector de hijos no está limitado a LB');
-    add(13, 'Selectores padre/hijo limitados a productos LB', true);
+    assert(formPage.includes('Producto padre') && formPage.includes('no pueden registrarse como hijos'), 'No existe regla de categoría Producto padre');
+    add(13, 'Selectores padre/hijo limitados a LB y categoría Producto padre', true);
   } catch (error) {
-    add(13, 'Selectores padre/hijo limitados a productos LB', false, error.message);
+    add(13, 'Selectores padre/hijo limitados a LB y categoría Producto padre', false, error.message);
   }
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     assert(formPage.includes('El producto base debe manejarse en LB.'), 'Falta validación LB-only para padre');
     assert(formPage.includes('debe manejarse en LB.'), 'Falta validación LB-only para hijos');
-    assert(formPage.includes('Para aplicar el despiece, el saldo debe quedar dentro de la tolerancia'), 'Falta validación clara de balance del proceso');
+    assert(formPage.includes('El resto quedará en inventario para futuros despieces.'), 'No comunica que el despiece puede ser parcial');
+    assert(formPage.includes('Para aplicar el despiece, la suma de hijos + merma debe igualar la cantidad a despiezar.') || formPage.includes('Para aplicar el despiece, hijos + merma deben cerrar contra la cantidad a despiezar'), 'Falta validación clara de balance del proceso');
     add(14, 'Validaciones de formulario LB-only y balance con error claro', true);
   } catch (error) {
     add(14, 'Validaciones de formulario LB-only y balance con error claro', false, error.message);
+  }
+
+  try {
+    const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
+    assert(formPage.includes('Confirmar aplicación de despiece'), 'Falta modal de confirmación al aplicar');
+    assert(formPage.includes('Quedarán ${formatQtyByUnit') || formPage.includes('Quedarán '), 'Falta mensaje de sobrante en modal');
+    assert(formPage.includes('Se utilizará la totalidad del producto padre.'), 'Falta mensaje de uso total en modal');
+    assert(formPage.includes('Merma registrada:'), 'Falta resumen de merma en modal');
+    add(15, 'Modal de confirmación muestra sobrante o uso total al aplicar', true);
+  } catch (error) {
+    add(15, 'Modal de confirmación muestra sobrante o uso total al aplicar', false, error.message);
   }
 
   print(results);

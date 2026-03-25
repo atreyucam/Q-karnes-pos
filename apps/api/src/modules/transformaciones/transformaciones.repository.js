@@ -37,8 +37,12 @@ async function getTransformacionById(id, trx = db) {
       'i.unidad_medida as insumo_unidad_medida',
       'i.costo_unitario_snapshot as insumo_costo_unitario_snapshot',
       'i.subtotal_costo as insumo_subtotal_costo',
+      'i.stock_disponible_snapshot as insumo_stock_disponible_snapshot',
+      'i.stock_restante_snapshot as insumo_stock_restante_snapshot',
       'p.codigo as insumo_producto_codigo',
       'p.nombre as insumo_producto_nombre',
+      'p.stock_actual as insumo_producto_stock_actual',
+      'p.costo_promedio as insumo_producto_costo_promedio_actual',
       'ua.id as actor_id',
       'ua.nombre as actor_nombre',
       'ua.usuario as actor_usuario',
@@ -229,6 +233,8 @@ async function updateInsumoSnapshot(transformacionId, payload, trx = db) {
     .update({
       costo_unitario_snapshot: payload.costo_unitario_snapshot,
       subtotal_costo: payload.subtotal_costo,
+      stock_disponible_snapshot: payload.stock_disponible_snapshot,
+      stock_restante_snapshot: payload.stock_restante_snapshot,
       updated_at: trx.fn.now()
     });
 }
