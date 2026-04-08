@@ -25,6 +25,18 @@ export async function fetchProductos(params = {}) {
   return normalizeResponse(response.data) || [];
 }
 
-export async function fetchProductosActivos() {
-  return fetchProductos({ activo: 1 });
+export async function fetchProductosActivos(params = {}) {
+  return fetchProductos({ activo: 1, ...params });
+}
+
+export async function fetchProductosVendiblesActivos() {
+  return fetchProductosActivos({ es_vendible: 1 });
+}
+
+export async function fetchProductosTransformablesActivos() {
+  return fetchProductosActivos({ es_transformable: 1 });
+}
+
+export async function fetchProductosMermaActivos() {
+  return fetchProductosActivos({ es_merma: 1 });
 }

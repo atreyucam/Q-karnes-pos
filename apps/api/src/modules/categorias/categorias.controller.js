@@ -27,8 +27,18 @@ async function update(req, res, next) {
   }
 }
 
+async function remove(req, res, next) {
+  try {
+    const data = await service.remove(Number(req.params.id));
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   list,
   create,
-  update
+  update,
+  remove
 };

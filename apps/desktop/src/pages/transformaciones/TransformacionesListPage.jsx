@@ -43,10 +43,10 @@ function AuthActionModal({
     <Modal open={open} onClose={onClose} maxWidthClass="max-w-lg" panelClassName="p-5">
       <div className="space-y-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-800">
+          <h3 className="text-lg font-semibold text-text">
             {isApply ? 'Aplicar transformación' : 'Anular transformación'}
           </h3>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-text-muted">
             {isApply
               ? requiresAuth
                 ? `Confirma aplicar ${item.numero}. Esta acción requiere autorización ADMIN.`
@@ -59,7 +59,7 @@ function AuthActionModal({
 
         {!isApply && (
           <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Novedad de anulación</label>
+            <label className="text-xs font-medium uppercase tracking-wide text-text-muted">Novedad de anulación</label>
             <Textarea
               className="mt-1"
               rows={3}
@@ -71,18 +71,18 @@ function AuthActionModal({
         )}
 
         {requiresAuth && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm font-semibold text-amber-800">Autorización ADMIN</p>
+          <div className="rounded-xl border border-warning bg-warning-soft p-3">
+            <p className="text-sm font-semibold text-warning">Autorización ADMIN</p>
             <div className="mt-2 grid gap-2 md:grid-cols-2">
               <Input
-                className="border-amber-300"
+                className="border-warning"
                 placeholder="Usuario admin"
                 value={auth.usuario}
                 onChange={(e) => setAuth((s) => ({ ...s, usuario: e.target.value }))}
               />
               <Input
                 type="password"
-                className="border-amber-300"
+                className="border-warning"
                 placeholder="Clave admin"
                 value={auth.password}
                 onChange={(e) => setAuth((s) => ({ ...s, password: e.target.value }))}
@@ -185,11 +185,11 @@ export default function TransformacionesListPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Despiece"
-        description="Listado de despieces, aplicación y anulación con trazabilidad operativa."
+        title="Transformaciones"
+        description="Listado de borradores, transformaciones aplicadas y anulaciones con trazabilidad operativa."
         actions={(
           <Link to="/transformaciones/nueva">
-            <Button>Nuevo despiece</Button>
+            <Button>Nueva transformación</Button>
           </Link>
         )}
       />
@@ -200,7 +200,7 @@ export default function TransformacionesListPage() {
         </Alert>
       )}
 
-      <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-5">
+      <div className="grid gap-2 rounded-2xl border border-border bg-white p-4 shadow-sm md:grid-cols-5">
           <Input
             placeholder="Desde (YYYY-MM-DD)"
             value={filters.desde}
@@ -240,14 +240,12 @@ export default function TransformacionesListPage() {
         <Tabla>
           <TablaCabecera>
             <tr>
-              <TablaCelda as="th">Número</TablaCelda>
+              <TablaCelda as="th">Código</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
-              <TablaCelda as="th">Estado</TablaCelda>
-              <TablaCelda as="th">Tipo</TablaCelda>
               <TablaCelda as="th">Padre</TablaCelda>
-              <TablaCelda as="th">Entrada</TablaCelda>
-              <TablaCelda as="th">Salida útil</TablaCelda>
-              <TablaCelda as="th">Merma</TablaCelda>
+              <TablaCelda as="th">Total consumido</TablaCelda>
+              <TablaCelda as="th">Estado</TablaCelda>
+              <TablaCelda as="th">Usuario</TablaCelda>
               <TablaCelda as="th">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -257,13 +255,16 @@ export default function TransformacionesListPage() {
                 <TablaCelda>{row.numero}</TablaCelda>
                 <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
                 <TablaCelda>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-text">{row.insumo?.producto_nombre || '-'}</p>
+                    <p className="text-xs text-text-muted">{row.insumo?.producto_codigo || '-'}</p>
+                  </div>
+                </TablaCelda>
+                <TablaCelda>{formatQtyByUnit(row.metricas?.total_consumido ?? row.resumen?.entrada_total, row.insumo?.unidad_medida, { fixedWeight: true })}</TablaCelda>
+                <TablaCelda>
                   <StatusBadge status={row.estado} />
                 </TablaCelda>
-                <TablaCelda>{row.tipo_proceso}</TablaCelda>
-                <TablaCelda>{row.insumo?.producto_codigo} {row.insumo?.producto_nombre}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.resumen?.entrada_total, row.insumo?.unidad_medida, { fixedLB: true })}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.resumen?.salida_util_total, row.insumo?.unidad_medida, { fixedLB: true })}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.resumen?.merma_total, row.insumo?.unidad_medida, { fixedLB: true })}</TablaCelda>
+                <TablaCelda>{row.actor?.nombre || row.actor?.usuario || '-'}</TablaCelda>
                 <TablaCelda>
                   <div className="flex flex-wrap gap-1">
                     <Button variant="ghost" size="sm" onClick={() => navigate(`/transformaciones/${row.id}`)}>

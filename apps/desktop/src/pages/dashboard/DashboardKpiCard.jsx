@@ -1,21 +1,22 @@
 import clsx from 'clsx';
+import { kpiSoftToneMap } from '../../shared/tokens/colorTokens';
 
 const toneStyles = {
   brand: {
-    accent: 'var(--color-brand)',
-    iconBg: 'color-mix(in oklab, #9ed7f7 72%, white 28%)'
+    accent: 'var(--color-primary)',
+    iconBg: kpiSoftToneMap.primary
   },
   info: {
     accent: 'var(--color-info)',
-    iconBg: 'color-mix(in oklab, #a7f3d0 78%, white 22%)'
+    iconBg: kpiSoftToneMap.info
   },
   warning: {
     accent: 'var(--color-warning)',
-    iconBg: 'color-mix(in oklab, #fde68a 72%, white 28%)'
+    iconBg: kpiSoftToneMap.warning
   },
   danger: {
     accent: 'var(--color-danger)',
-    iconBg: 'color-mix(in oklab, #e9d5ff 78%, white 22%)'
+    iconBg: kpiSoftToneMap.danger
   }
 };
 
@@ -49,7 +50,13 @@ export default function DashboardKpiCard({ title, value, hint, trend, trendTone 
       }}
     >
       <div className="flex h-full flex-col gap-4">
-        <span className="ui-kpi-summary-icon">
+        <span
+          className="ui-kpi-summary-icon"
+          style={{
+            color: 'var(--dashboard-card-accent)',
+            boxShadow: 'inset 0 0 0 1px color-mix(in oklab, var(--dashboard-card-accent) 18%, white 82%)'
+          }}
+        >
           <Icon className="text-[1.2rem]" />
         </span>
 

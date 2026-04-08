@@ -57,7 +57,7 @@ export function printSaleTicketDocument(ticket, options = {}) {
             margin: 4mm 3mm;
           }
           html {
-            background: #ffffff;
+            background: white;
           }
           body {
             margin: 0;
@@ -65,8 +65,8 @@ export function printSaleTicketDocument(ticket, options = {}) {
             font-family: "Courier New", Courier, monospace;
             font-size: 12px;
             line-height: 1.45;
-            color: #000000;
-            background: #ffffff;
+            color: black;
+            background: white;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
             font-weight: 800;
@@ -76,8 +76,8 @@ export function printSaleTicketDocument(ticket, options = {}) {
             margin: 0 auto;
             padding: 0;
           }
-          .muted { color: #000000; }
-          .divider { border-top: 1.5px dashed #000000; margin: 8px 0; }
+          .muted { color: black; }
+          .divider { border-top: 1.5px dashed black; margin: 8px 0; }
           table {
             width: 100%;
             border-collapse: collapse;
@@ -86,7 +86,7 @@ export function printSaleTicketDocument(ticket, options = {}) {
           }
           th {
             text-align: left;
-            color: #000000;
+            color: black;
             text-transform: uppercase;
             letter-spacing: .04em;
             font-size: 10px;
@@ -104,7 +104,7 @@ export function printSaleTicketDocument(ticket, options = {}) {
           .total {
             font-size: 18px;
             font-weight: 800;
-            color: #000000;
+            color: black;
           }
           .center { text-align: center; }
           .meta-row {
@@ -114,13 +114,13 @@ export function printSaleTicketDocument(ticket, options = {}) {
           }
           .detail-name {
             font-weight: 800;
-            color: #000000;
+            color: black;
             word-break: break-word;
             font-size: 11px;
           }
           .detail-code {
             font-size: 10px;
-            color: #000000;
+            color: black;
             text-transform: uppercase;
             letter-spacing: .03em;
             font-weight: 800;
@@ -133,11 +133,11 @@ export function printSaleTicketDocument(ticket, options = {}) {
           }
           strong {
             font-weight: 800;
-            color: #000000;
+            color: black;
           }
           td, th, span, div, p {
             font-weight: 800;
-            color: #000000;
+            color: black;
           }
           @media print {
             body {
@@ -159,7 +159,7 @@ export function printSaleTicketDocument(ticket, options = {}) {
           <div style="font-size:12px; font-weight:800;">
             <div class="meta-row"><strong>Venta:</strong> #${escapeHtml(ticket.venta?.id || '-')}</div>
             <div class="meta-row"><strong>Fecha:</strong> ${escapeHtml(ticketFecha)}</div>
-            <div class="meta-row"><strong>Cliente:</strong> ${escapeHtml(ticket.cliente?.nombre || 'Consumidor final')}</div>
+            <div class="meta-row"><strong>Cliente:</strong> ${escapeHtml(ticket.cliente?.nombre || 'Comprobante final')}</div>
             <div class="meta-row"><strong>Cajero:</strong> ${escapeHtml(ticket.usuario?.nombre || '-')}</div>
             <div class="meta-row"><strong>Metodo:</strong> ${escapeHtml(metodoPago)}</div>
             <div class="meta-row"><strong>Referencia:</strong> ${escapeHtml(ticket.venta?.referencia || '-')}</div>
@@ -184,7 +184,7 @@ export function printSaleTicketDocument(ticket, options = {}) {
           <div class="summary-row muted"><span>Subtotal</span><span><strong>${escapeHtml(formatMoney(ticket.venta?.subtotal))}</strong></span></div>
           <div class="summary-row muted"><span>Descuento</span><span><strong>${escapeHtml(formatMoney(ticket.venta?.descuento_total))}</strong></span></div>
           <div class="summary-row total"><span>Total</span><span>${escapeHtml(formatMoney(ticket.venta?.total))}</span></div>
-          ${saldoCredito > 0 ? `<div class="summary-row" style="margin-top:6px; font-weight:700; color:#000000;"><span>Saldo pendiente</span><span>${escapeHtml(formatMoney(saldoCredito))}</span></div>` : ''}
+          ${saldoCredito > 0 ? `<div class="summary-row" style="margin-top:6px; font-weight:700; color:black;"><span>Saldo pendiente</span><span>${escapeHtml(formatMoney(saldoCredito))}</span></div>` : ''}
 
           <div class="divider"></div>
 
@@ -213,6 +213,7 @@ export function printSaleTicketDocument(ticket, options = {}) {
   iframe.style.height = '0';
   iframe.style.border = '0';
   iframe.style.visibility = 'hidden';
+  let hasPrinted = false;
 
   const cleanup = () => {
     window.setTimeout(() => {
@@ -221,6 +222,9 @@ export function printSaleTicketDocument(ticket, options = {}) {
   };
 
   iframe.onload = () => {
+    if (hasPrinted) return;
+    hasPrinted = true;
+
     const frameWindow = iframe.contentWindow;
     if (!frameWindow) {
       cleanup();

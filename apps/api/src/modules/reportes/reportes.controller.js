@@ -14,6 +14,13 @@ const cxc = asyncHandler(async (req, res) => successResponse(res, await service.
 const cxp = asyncHandler(async (req, res) => successResponse(res, await service.cxp()));
 const compras = asyncHandler(async (req, res) => successResponse(res, await service.compras(req.query)));
 const transformacionesResumen = asyncHandler(async (req, res) => successResponse(res, await service.transformacionesResumen()));
+const ventasDelDia = asyncHandler(async (req, res) => successResponse(res, await service.ventasDelDia(req.query)));
+const ventasPeriodo = asyncHandler(async (req, res) => successResponse(res, await service.ventasPeriodo(req.query)));
+const ventasPorProducto = asyncHandler(async (req, res) => successResponse(res, await service.ventasPorProducto(req.query)));
+const inventarioActual = asyncHandler(async (req, res) => successResponse(res, await service.inventarioActual(req.query)));
+const kardex = asyncHandler(async (req, res) => successResponse(res, await service.kardex(req.query)));
+const transformaciones = asyncHandler(async (req, res) => successResponse(res, await service.transformaciones(req.query)));
+const cajaDiaria = asyncHandler(async (req, res) => successResponse(res, await service.cajaDiaria(req.query)));
 
 module.exports = {
   dashboard,
@@ -27,5 +34,12 @@ module.exports = {
   cxc,
   cxp,
   compras,
-  transformacionesResumen
+  transformacionesResumen,
+  ventasDelDia,
+  ventasPeriodo,
+  ventasPorProducto,
+  inventarioActual,
+  kardex,
+  transformaciones,
+  cajaDiaria
 };

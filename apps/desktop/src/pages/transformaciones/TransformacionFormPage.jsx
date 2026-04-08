@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
+  BackButton,
   Button,
   Input,
   Modal,
@@ -11,7 +12,8 @@ import {
   TableBody,
   TableCell,
   TableHead,
-  TableRow
+  TableRow,
+  Textarea
 } from '../../ui';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatQtyByUnit, getUnidad, sanitizeQtyInput } from '../../lib/formatQty';
@@ -19,8 +21,16 @@ import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoS
 import { useAuthStore } from '../../stores/authStore';
 import { useTransformacionesStore } from '../../stores/transformacionesStore';
 
-const BALANCE_TOLERANCE = 0.01;
 const MODAL_PAGE_SIZE = 10;
+const WEIGHT_UNITS = new Set(['KG', 'LB']);
+const UNIT_TO_BASE_PER_MILLI = {
+  KG: 100_000_000,
+  LB: 45_359_237
+};
+const UNIT_TO_BASE_PER_UNIT = {
+  KG: 100_000_000_000,
+  LB: 45_359_237_000
+};
 
 function nowLocalDateInput() {
   const now = new Date();
@@ -30,26 +40,201 @@ function nowLocalDateInput() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function qtyRound(value) {
-  return Number(Number(value || 0).toFixed(3));
+function createRowId(prefix) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function parseQtyByUnit(raw, unidad) {
-  const unit = getUnidad(unidad);
-  if (unit === 'UND') {
-    const parsed = Number.parseInt(String(raw || '').trim(), 10);
-    return Number.isFinite(parsed) ? parsed : NaN;
+function normalizeUnit(unit) {
+  return getUnidad(unit || 'UND');
+}
+
+function isWeightUnit(unit) {
+  return WEIGHT_UNITS.has(normalizeUnit(unit));
+}
+
+function areUnitsCompatible(parentUnit, rowUnit) {
+  const normalizedParent = normalizeUnit(parentUnit);
+  const normalizedRow = normalizeUnit(rowUnit);
+  if (normalizedParent === normalizedRow) return true;
+  return isWeightUnit(normalizedParent) && isWeightUnit(normalizedRow);
+}
+
+function parseScaledInteger(value, scale) {
+  const normalizedRaw = String(value ?? '').trim().replace(',', '.');
+  if (!normalizedRaw) return null;
+
+  const sign = normalizedRaw.startsWith('-') ? -1 : 1;
+  const unsigned = normalizedRaw.replace(/^[+-]/, '');
+  if (!/^\d+(\.\d+)?$/.test(unsigned)) return null;
+
+  const [wholePartRaw, fractionRaw = ''] = unsigned.split('.');
+  if (fractionRaw.length > scale) return null;
+
+  const wholePart = Number(wholePartRaw || '0');
+  const paddedFraction = scale > 0 ? fractionRaw.padEnd(scale, '0') : '';
+  const fractionPart = scale > 0 ? Number(paddedFraction || '0') : 0;
+  if (!Number.isSafeInteger(wholePart) || !Number.isSafeInteger(fractionPart)) return null;
+
+  const scaled = (wholePart * (10 ** scale)) + fractionPart;
+  return Number.isSafeInteger(scaled) ? sign * scaled : null;
+}
+
+function quantityToBase(value, unit) {
+  const normalizedUnit = normalizeUnit(unit);
+  if (normalizedUnit === 'UND') return parseScaledInteger(value, 0);
+
+  const milliQuantity = parseScaledInteger(value, 3);
+  if (milliQuantity === null) return null;
+  return milliQuantity * UNIT_TO_BASE_PER_MILLI[normalizedUnit];
+}
+
+function baseToVisible(baseQuantity, unit) {
+  const normalizedUnit = normalizeUnit(unit);
+  const base = Number(baseQuantity || 0);
+  if (normalizedUnit === 'UND') return base;
+  return Number((base / UNIT_TO_BASE_PER_UNIT[normalizedUnit]).toFixed(3));
+}
+
+function centsToMoney(cents) {
+  return Number((Number(cents || 0) / 100).toFixed(2));
+}
+
+function centsToUnitCost(cents, baseQuantity, unit) {
+  const quantityBase = Number(baseQuantity || 0);
+  if (quantityBase <= 0) return 0;
+  if (normalizeUnit(unit) === 'UND') {
+    return Number((Number(cents || 0) / 100 / quantityBase).toFixed(6));
   }
-  const parsed = Number(String(raw || '').replace(',', '.'));
-  return Number.isFinite(parsed) ? parsed : NaN;
+  const visibleQuantity = baseToVisible(quantityBase, unit);
+  if (visibleQuantity <= 0) return 0;
+  return Number((Number(cents || 0) / 100 / visibleQuantity).toFixed(6));
 }
 
-function summarize(parentQty, resultados, mermas) {
-  const entrada = Number((parentQty || 0).toFixed(3));
-  const salida = Number(resultados.reduce((acc, row) => acc + Number(row.qty || 0), 0).toFixed(3));
-  const merma = Number(mermas.reduce((acc, row) => acc + Number(row.qty || 0), 0).toFixed(3));
-  const diff = Number((entrada - salida - merma).toFixed(3));
-  return { entrada, salida, merma, diff };
+function parseMoneyInput(raw) {
+  const text = String(raw || '').replace(/,/g, '.').replace(/[^0-9.]/g, '');
+  const firstDot = text.indexOf('.');
+  if (firstDot === -1) return text;
+  return `${text.slice(0, firstDot + 1)}${text.slice(firstDot + 1).replace(/\./g, '').slice(0, 2)}`;
+}
+
+function moneyToCents(value) {
+  const normalizedRaw = String(value ?? '').trim().replace(',', '.');
+  if (!normalizedRaw) return null;
+  if (!/^\d+(\.\d+)?$/.test(normalizedRaw)) return null;
+
+  const [wholePartRaw, fractionRaw = ''] = normalizedRaw.split('.');
+  const wholePart = Number(wholePartRaw || '0');
+  if (!Number.isSafeInteger(wholePart)) return null;
+
+  const centsDigits = (fractionRaw + '00').slice(0, 2);
+  const roundingDigit = Number((fractionRaw + '000').charAt(2) || '0');
+  let cents = Number(centsDigits || '0');
+  let carry = 0;
+
+  if (!Number.isSafeInteger(cents)) return null;
+  if (roundingDigit >= 5) {
+    cents += 1;
+    if (cents >= 100) {
+      cents -= 100;
+      carry = 1;
+    }
+  }
+
+  const total = ((wholePart + carry) * 100) + cents;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+function resolveProductStockBase(product) {
+  if (!product) return 0;
+  if (product.stock_actual_base !== undefined && product.stock_actual_base !== null) {
+    return Number(product.stock_actual_base || 0);
+  }
+  return quantityToBase(product.stock_actual || 0, product.unidad_medida || product.unidad) || 0;
+}
+
+function resolveProductValueCents(product) {
+  if (!product) return 0;
+  if (product.valor_inventario_centavos !== undefined && product.valor_inventario_centavos !== null) {
+    return Number(product.valor_inventario_centavos || 0);
+  }
+  const stockBase = resolveProductStockBase(product);
+  const stockVisible = baseToVisible(stockBase, product.unidad_medida || product.unidad);
+  return moneyToCents(Number(product.costo_promedio || 0) * stockVisible) || 0;
+}
+
+function computeOutgoingValueCents(stockBase, valueCents, outgoingBase) {
+  const currentStockBase = Number(stockBase || 0);
+  const currentValueCents = Number(valueCents || 0);
+  const qtyBase = Number(outgoingBase || 0);
+
+  if (qtyBase <= 0 || currentStockBase <= 0) return 0;
+  if (qtyBase >= currentStockBase) return currentValueCents;
+  return Math.round((currentValueCents * qtyBase) / currentStockBase);
+}
+
+function allocateCentsProRata(totalCents, rows, getWeight = (row) => row.weight || 0) {
+  const total = Number(totalCents || 0);
+  if (!rows.length) return [];
+
+  const weights = rows.map((row) => Number(getWeight(row) || 0));
+  const totalWeight = weights.reduce((acc, weight) => acc + weight, 0);
+  if (totalWeight <= 0) {
+    return rows.map((row, index) => ({ ...row, allocatedCents: index === 0 ? total : 0 }));
+  }
+
+  const provisional = rows.map((row, index) => {
+    const raw = total * weights[index];
+    const base = Math.floor(raw / totalWeight);
+    const remainder = raw % totalWeight;
+    return {
+      ...row,
+      allocatedCents: base,
+      __remainder: remainder,
+      __index: index
+    };
+  });
+
+  let pending = total - provisional.reduce((acc, row) => acc + row.allocatedCents, 0);
+  provisional
+    .sort((a, b) => {
+      if (b.__remainder !== a.__remainder) return b.__remainder - a.__remainder;
+      return a.__index - b.__index;
+    })
+    .forEach((row) => {
+      if (pending <= 0) return;
+      row.allocatedCents += 1;
+      pending -= 1;
+    });
+
+  return provisional
+    .sort((a, b) => a.__index - b.__index)
+    .map(({ __remainder, __index, ...row }) => row);
+}
+
+function defaultQtyInput(unit) {
+  return normalizeUnit(unit) === 'UND' ? '1' : '1.000';
+}
+
+function formatSummaryValue(value, unit) {
+  return `${formatQtyByUnit(value, unit, { fixedWeight: true })} ${normalizeUnit(unit)}`;
+}
+
+function resolveRow(row, productsMap, parentUnit) {
+  const product = row.producto_id ? productsMap.get(String(row.producto_id)) : null;
+  const unit = normalizeUnit(product?.unidad_medida || product?.unidad || parentUnit || 'UND');
+  const cantidadBase = quantityToBase(row.cantidadInput, unit);
+  const cantidad = cantidadBase === null ? null : baseToVisible(cantidadBase, unit);
+  const manualCents = row.costoTotalInput ? moneyToCents(row.costoTotalInput) : null;
+
+  return {
+    ...row,
+    product,
+    unit,
+    cantidad,
+    cantidadBase,
+    manualCents,
+    compatibleWithParent: parentUnit ? areUnitsCompatible(parentUnit, unit) : true
+  };
 }
 
 function ApplyConfirmModal({
@@ -61,80 +246,60 @@ function ApplyConfirmModal({
   loading,
   needsAuth,
   parentName,
-  parentQty,
   parentUnit,
+  totalConsumido,
   remainingQty,
   mermaQty
 }) {
   if (!open) return null;
-  const safeRemainingQty = qtyRound(Math.max(Number(remainingQty || 0), 0));
-  const safeMermaQty = qtyRound(Math.max(Number(mermaQty || 0), 0));
-  const usesAllParent = safeRemainingQty <= BALANCE_TOLERANCE;
 
   return (
     <Modal open={open} onClose={onClose} maxWidthClass="max-w-2xl" panelClassName="p-0">
-      <div className="border-b border-slate-200 px-6 py-4">
+      <div className="border-b border-border px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900">Confirmar aplicación de despiece</h3>
-            <p className="text-sm text-slate-500">
-              Revisa el impacto operativo antes de registrar movimientos reales en inventario.
+            <h3 className="text-lg font-semibold text-text">Confirmar aplicación</h3>
+            <p className="text-sm text-text-muted">
+              Se registrarán movimientos reales de inventario y costo para esta transformación.
             </p>
           </div>
-          <button type="button" className="text-sm text-slate-500" onClick={onClose}>
+          <button type="button" className="text-sm text-text-muted" onClick={onClose}>
             Cerrar
           </button>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="px-6 pt-5">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-            <p className="text-sm text-slate-700">
-              {`Se procesarán ${formatQtyByUnit(parentQty, parentUnit, { fixedLB: true })} ${parentUnit} de "${parentName}".`}
-            </p>
-            <p className="mt-2 text-sm text-slate-700">
-              {usesAllParent
-                ? 'Se utilizará la totalidad del producto padre.'
-                : `Quedarán ${formatQtyByUnit(safeRemainingQty, parentUnit, { fixedLB: true })} ${parentUnit} disponibles en inventario como producto padre.`}
-            </p>
-            <p className="mt-2 text-sm text-slate-700">
-              {`Merma registrada: ${formatQtyByUnit(safeMermaQty, parentUnit, { fixedLB: true })} ${parentUnit}.`}
-            </p>
-          </div>
+      <div className="space-y-4 px-6 py-5">
+        <div className="rounded-2xl border border-border bg-background p-4 text-sm text-text-muted">
+          <p>{`Producto padre: "${parentName}"`}</p>
+          <p className="mt-2">{`Total consumido: ${formatQtyByUnit(totalConsumido, parentUnit, { fixedWeight: true })} ${parentUnit}.`}</p>
+          <p className="mt-2">{`Merma registrada: ${formatQtyByUnit(mermaQty, parentUnit, { fixedWeight: true })} ${parentUnit}.`}</p>
+          <p className="mt-2">{`Stock restante estimado: ${formatQtyByUnit(Math.max(remainingQty, 0), parentUnit, { fixedWeight: true })} ${parentUnit}.`}</p>
         </div>
 
         {needsAuth && (
-          <div className="px-6">
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <p className="text-sm font-semibold text-amber-900">Autorización ADMIN</p>
-              <p className="mt-1 text-sm text-amber-800">
-                Ingresa credenciales de administrador para continuar con la aplicación del despiece.
-              </p>
-            </div>
+          <div className="rounded-2xl border border-warning bg-warning-soft px-4 py-3">
+            <p className="text-sm font-semibold text-warning">Autorización ADMIN</p>
+            <p className="mt-1 text-sm text-warning">
+              Ingresa credenciales de administrador para aplicar la transformación.
+            </p>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Usuario admin</label>
-                <Input
-                  value={auth.usuario}
-                  onChange={(e) => setAuth((s) => ({ ...s, usuario: e.target.value }))}
-                  placeholder="Ingresa usuario autorizado"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Clave admin</label>
-                <Input
-                  type="password"
-                  value={auth.password}
-                  onChange={(e) => setAuth((s) => ({ ...s, password: e.target.value }))}
-                  placeholder="Ingresa clave autorizada"
-                />
-              </div>
+              <Input
+                value={auth.usuario}
+                onChange={(e) => setAuth((current) => ({ ...current, usuario: e.target.value }))}
+                placeholder="Usuario admin"
+              />
+              <Input
+                type="password"
+                value={auth.password}
+                onChange={(e) => setAuth((current) => ({ ...current, password: e.target.value }))}
+                placeholder="Clave admin"
+              />
             </div>
           </div>
         )}
 
-        <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+        <div className="flex justify-end gap-3 border-t border-border pt-4">
           <Button variant="secondary" onClick={onClose} disabled={loading}>
             Cancelar
           </Button>
@@ -160,40 +325,38 @@ function ProductSearchModal({
   onPageChange,
   onClose,
   onSelect,
-  renderExtraFilters,
   getStockLabel
 }) {
   if (!open) return null;
 
   return (
     <Modal open={open} onClose={onClose} maxWidthClass="max-w-5xl" panelClassName="p-0">
-      <div className="border-b border-slate-200 px-6 py-4">
+      <div className="border-b border-border px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-            <p className="text-sm text-slate-500">Busca y selecciona un producto del inventario activo.</p>
+            <h3 className="text-lg font-semibold text-text">{title}</h3>
+            <p className="text-sm text-text-muted">Busca y selecciona un producto activo.</p>
           </div>
-          <button type="button" className="text-sm text-slate-500" onClick={onClose}>
+          <button type="button" className="text-sm text-text-muted" onClick={onClose}>
             Cerrar
           </button>
         </div>
       </div>
 
       <div className="space-y-4 px-6 py-5">
-        <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
+        <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Buscar</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Buscar</label>
             <Input
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Código o nombre"
             />
           </div>
-          {renderExtraFilters?.()}
           {filters}
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-hidden rounded-2xl border border-border bg-white">
           <Table>
             <TableHead>
               <TableRow>
@@ -208,11 +371,11 @@ function ProductSearchModal({
                 <TableRow key={row.id}>
                   <TableCell>
                     <div className="space-y-1">
-                      <p className="font-semibold text-slate-900">{row.nombre}</p>
-                      <p className="text-xs text-slate-500">{row.codigo || `#${row.id}`}</p>
+                      <p className="font-semibold text-text">{row.nombre}</p>
+                      <p className="text-xs text-text-muted">{row.codigo || `#${row.id}`}</p>
                     </div>
                   </TableCell>
-                  <TableCell>{getUnidad(row.unidad_medida || row.unidad)}</TableCell>
+                  <TableCell>{normalizeUnit(row.unidad_medida || row.unidad)}</TableCell>
                   <TableCell>{getStockLabel(row)}</TableCell>
                   <TableCell>
                     <Button size="sm" onClick={() => onSelect(row)}>
@@ -222,7 +385,7 @@ function ProductSearchModal({
                 </TableRow>
               )) : (
                 <TableRow>
-                  <TableCell className="py-6 text-slate-500" colSpan={4}>
+                  <TableCell className="py-6 text-text-muted" colSpan={4}>
                     No hay productos disponibles con esos filtros.
                   </TableCell>
                 </TableRow>
@@ -246,11 +409,9 @@ export default function TransformacionFormPage() {
   const { id } = useParams();
   const editId = Number(id);
   const isEdit = Number.isFinite(editId) && editId > 0;
-  const location = useLocation();
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
   const { actual, loading, saving, error, obtener, crear, editar, eliminar, aplicar, limpiarActual } = useTransformacionesStore();
-  const isReadOnlyMode = isEdit && !location.pathname.endsWith('/editar');
   const isAdminUser = String(currentUser?.rol?.nombre || currentUser?.rol || '').trim().toUpperCase() === 'ADMIN';
 
   const [productos, setProductos] = useState([]);
@@ -262,6 +423,15 @@ export default function TransformacionFormPage() {
   const [showBaseModal, setShowBaseModal] = useState(false);
   const [showChildModal, setShowChildModal] = useState(false);
   const [auth, setAuth] = useState({ usuario: '', password: '' });
+  const [header, setHeader] = useState({
+    fecha: nowLocalDateInput(),
+    tipo_proceso: 'DESPIECE',
+    observacion: ''
+  });
+  const [parent, setParent] = useState({ producto_id: '' });
+  const [children, setChildren] = useState([]);
+  const [mermas, setMermas] = useState([]);
+  const [costMode, setCostMode] = useState('AUTOMATICA');
   const [baseSearch, setBaseSearch] = useState('');
   const [baseStockFilter, setBaseStockFilter] = useState('CON_STOCK');
   const [basePage, setBasePage] = useState(1);
@@ -269,30 +439,15 @@ export default function TransformacionFormPage() {
   const [childCategory, setChildCategory] = useState('ALL');
   const [childPage, setChildPage] = useState(1);
 
-  const [header, setHeader] = useState({
-    fecha: nowLocalDateInput(),
-    observacion: ''
-  });
-  const [parent, setParent] = useState({
-    producto_id: '',
-    cantidadInput: ''
-  });
-  const [resultados, setResultados] = useState([]);
-  const [merma, setMerma] = useState({
-    producto_id: '',
-    cantidadInput: '',
-    motivo: 'Merma de despiece'
-  });
-
   useEffect(() => {
     Promise.all([fetchProductosActivos(), fetchCategorias()])
-      .then(([rows, categories]) => {
+      .then(([rows, categoryRows]) => {
         setProductos(rows || []);
-        setCategorias(categories || []);
+        setCategorias(categoryRows || []);
         setCatalogError('');
       })
-      .catch((e) => {
-        setCatalogError(e.message || 'No se pudo cargar catálogo de productos');
+      .catch((requestError) => {
+        setCatalogError(requestError.message || 'No se pudo cargar el catálogo');
       });
   }, []);
 
@@ -301,50 +456,38 @@ export default function TransformacionFormPage() {
       limpiarActual();
       return;
     }
-    obtener(editId).catch((e) => setLocalError(e.message));
+    obtener(editId).catch((requestError) => setLocalError(requestError.message));
     return () => limpiarActual();
   }, [editId, isEdit, limpiarActual, obtener]);
 
   useEffect(() => {
     if (!isEdit || !actual?.id || actual.id !== editId) return;
 
-    const totalMerma = (actual.mermas || []).reduce((acc, row) => acc + Number(row.cantidad || 0), 0);
-    const firstMerma = actual.mermas?.[0];
-
     setHeader({
       fecha: actual.fecha ? String(actual.fecha).slice(0, 10) : nowLocalDateInput(),
+      tipo_proceso: actual.tipo_proceso || 'DESPIECE',
       observacion: actual.observacion || ''
     });
-    setParent({
-      producto_id: String(actual.insumo?.producto_id || ''),
-      cantidadInput: String(actual.insumo?.cantidad ?? '')
-    });
-    setResultados(
-      (actual.resultados || []).map((row) => ({
-        producto_id: String(row.producto_id),
-        cantidadInput: String(row.cantidad)
-      }))
-    );
-    setMerma({
-      producto_id: String(firstMerma?.producto_id || ''),
-      cantidadInput: totalMerma ? String(totalMerma) : '',
-      motivo: firstMerma?.motivo || 'Merma de despiece'
-    });
+    setParent({ producto_id: String(actual.insumo?.producto_id || '') });
+    setChildren((actual.resultados || []).map((row) => ({
+      id: createRowId('child'),
+      producto_id: String(row.producto_id),
+      cantidadInput: String(row.cantidad ?? ''),
+      costoTotalInput: row.costo_asignado != null ? String(row.costo_asignado) : ''
+    })));
+    setMermas((actual.mermas || []).map((row) => ({
+      id: createRowId('merma'),
+      producto_id: String(row.producto_id || ''),
+      cantidadInput: String(row.cantidad ?? ''),
+      costoTotalInput: row.costo_total != null ? String(row.costo_total) : '',
+      motivo: row.motivo || ''
+    })));
+    setCostMode('MANUAL');
     setSavedInfo(actual);
   }, [actual, editId, isEdit]);
 
   const productsMap = useMemo(
     () => new Map((productos || []).map((product) => [String(product.id), product])),
-    [productos]
-  );
-
-  const parentCategoryId = useMemo(() => {
-    const categoriaPadre = categorias.find((category) => String(category.nombre || '').trim().toLowerCase() === 'producto padre');
-    return categoriaPadre ? String(categoriaPadre.id) : null;
-  }, [categorias]);
-
-  const lbProducts = useMemo(
-    () => (productos || []).filter((product) => getUnidad(product.unidad_medida || product.unidad) === 'LB'),
     [productos]
   );
 
@@ -367,81 +510,117 @@ export default function TransformacionFormPage() {
   }, [categorias, productos]);
 
   const parentProduct = productsMap.get(parent.producto_id);
-  const parentUnit = getUnidad(parentProduct?.unidad_medida || parentProduct?.unidad || 'LB');
-  const parentQty = parseQtyByUnit(parent.cantidadInput, parentUnit);
-  const isEditableDraft = !isReadOnlyMode && (!isEdit || actual?.estado === 'BORRADOR');
-  const parentAvailableStock = qtyRound(
-    isEdit
-      ? Number(actual?.insumo?.stock_disponible_snapshot || parentProduct?.stock_actual || 0)
-      : Number(parentProduct?.stock_actual || 0)
+  const parentUnit = normalizeUnit(parentProduct?.unidad_medida || parentProduct?.unidad || actual?.insumo?.unidad_medida || 'UND');
+  const parentAvailableStockBase = useMemo(() => {
+    if (parentProduct) return resolveProductStockBase(parentProduct);
+    if (actual?.insumo?.stock_disponible_base_snapshot !== undefined && actual?.insumo?.stock_disponible_base_snapshot !== null) {
+      return Number(actual.insumo.stock_disponible_base_snapshot || 0);
+    }
+    return 0;
+  }, [actual?.insumo?.stock_disponible_base_snapshot, parentProduct]);
+  const parentAvailableStock = useMemo(
+    () => baseToVisible(parentAvailableStockBase, parentUnit),
+    [parentAvailableStockBase, parentUnit]
   );
-  const parentRemainingEstimate = Number.isFinite(parentQty)
-    ? qtyRound(parentAvailableStock - parentQty)
-    : qtyRound(
-      isEdit
-        ? Number(actual?.insumo?.stock_restante_snapshot || parentAvailableStock)
-        : parentAvailableStock
-    );
+  const parentCurrentValueCents = parentProduct
+    ? resolveProductValueCents(parentProduct)
+    : (actual?.insumo?.subtotal_costo_centavos || 0);
+  const parentCurrentUnitCost = parentProduct
+    ? centsToUnitCost(parentCurrentValueCents, Math.max(parentAvailableStockBase, 1), parentUnit)
+    : Number(actual?.insumo?.costo_unitario_snapshot || actual?.insumo?.costo_promedio_actual || 0);
+  const isEditableDraft = !isEdit || actual?.estado === 'BORRADOR';
 
-  function formatSummaryValue(value, unit) {
-    return `${formatQtyByUnit(value, unit, { fixedLB: true })} ${unit}`;
-  }
-
-  const resultadosView = useMemo(
-    () =>
-      resultados.map((row) => {
-        const product = productsMap.get(row.producto_id);
-        const unit = getUnidad(product?.unidad_medida || product?.unidad || 'LB');
-        return {
-          ...row,
-          product,
-          unit,
-          qty: parseQtyByUnit(row.cantidadInput, unit)
-        };
-      }),
-    [productsMap, resultados]
+  const resolvedChildren = useMemo(
+    () => children.map((row) => resolveRow(row, productsMap, parentUnit)),
+    [children, parentUnit, productsMap]
+  );
+  const resolvedMermas = useMemo(
+    () => mermas.map((row) => resolveRow(row, productsMap, parentUnit)),
+    [mermas, parentUnit, productsMap]
   );
 
-  const mermaView = useMemo(() => {
-    const product = productsMap.get(merma.producto_id);
-    const qty = parseQtyByUnit(merma.cantidadInput, parentUnit);
+  const totalChildrenBase = resolvedChildren.reduce((acc, row) => acc + (row.cantidadBase || 0), 0);
+  const totalMermaBase = resolvedMermas.reduce((acc, row) => acc + (row.cantidadBase || 0), 0);
+  const totalConsumedBase = totalChildrenBase + totalMermaBase;
+  const totalChildren = baseToVisible(totalChildrenBase, parentUnit);
+  const totalMerma = baseToVisible(totalMermaBase, parentUnit);
+  const totalConsumed = baseToVisible(totalConsumedBase, parentUnit);
+  const remainingStockBase = parentAvailableStockBase - totalConsumedBase;
+  const remainingStock = baseToVisible(Math.max(remainingStockBase, 0), parentUnit);
+  const outgoingBaseForCost = Math.max(0, Math.min(totalConsumedBase, parentAvailableStockBase));
+  const parentCostCents = useMemo(
+    () => computeOutgoingValueCents(parentAvailableStockBase, parentCurrentValueCents, outgoingBaseForCost),
+    [outgoingBaseForCost, parentAvailableStockBase, parentCurrentValueCents]
+  );
+
+  const distribution = useMemo(() => {
+    const allRows = [
+      ...resolvedChildren.map((row) => ({ ...row, kind: 'child' })),
+      ...resolvedMermas.map((row) => ({ ...row, kind: 'merma' }))
+    ];
+
+    if (!allRows.length) {
+      return {
+        byId: new Map(),
+        distributedCents: 0,
+        diffCents: parentCostCents,
+        costOk: parentCostCents === 0
+      };
+    }
+
+    if (costMode === 'AUTOMATICA') {
+      const allocated = allocateCentsProRata(parentCostCents, allRows, (row) => row.cantidadBase);
+      return {
+        byId: new Map(allocated.map((row) => [row.id, row.allocatedCents])),
+        distributedCents: parentCostCents,
+        diffCents: 0,
+        costOk: true
+      };
+    }
+
+    const byId = new Map(allRows.map((row) => [row.id, row.manualCents || 0]));
+    const distributedCents = allRows.reduce((acc, row) => acc + (row.manualCents || 0), 0);
     return {
-      ...merma,
-      product,
-      qty
+      byId,
+      distributedCents,
+      diffCents: parentCostCents - distributedCents,
+      costOk: parentCostCents - distributedCents === 0
     };
-  }, [merma, parentUnit, productsMap]);
-  const effectiveMermaQty = Number.isFinite(mermaView.qty) && mermaView.qty >= 0 ? qtyRound(mermaView.qty) : 0;
+  }, [costMode, parentCostCents, resolvedChildren, resolvedMermas]);
 
-  const summary = useMemo(
-    () =>
-      summarize(
-        Number.isFinite(parentQty) ? parentQty : 0,
-        resultadosView,
-        effectiveMermaQty > 0 ? [{ ...mermaView, qty: effectiveMermaQty }] : []
-      ),
-    [effectiveMermaQty, mermaView, parentQty, resultadosView]
-  );
+  const rowsWithCost = useMemo(() => ({
+    children: resolvedChildren.map((row) => ({
+      ...row,
+      resolvedCents: distribution.byId.get(row.id) || 0,
+      resolvedCost: centsToMoney(distribution.byId.get(row.id) || 0)
+    })),
+    mermas: resolvedMermas.map((row) => ({
+      ...row,
+      resolvedCents: distribution.byId.get(row.id) || 0,
+      resolvedCost: centsToMoney(distribution.byId.get(row.id) || 0)
+    }))
+  }), [distribution.byId, resolvedChildren, resolvedMermas]);
 
   const baseCandidates = useMemo(() => {
     const q = baseSearch.trim().toLowerCase();
-    return lbProducts.filter((product) => {
-      if (parentCategoryId && String(product.categoria_id || '') !== parentCategoryId) return false;
-      if (baseStockFilter === 'CON_STOCK' && Number(product.stock_actual || 0) <= 0) return false;
+    return (productos || []).filter((product) => {
+      if (!product.es_transformable) return false;
+      if (baseStockFilter === 'CON_STOCK' && Number(resolveProductStockBase(product) || 0) <= 0) return false;
       if (!q) return true;
       return String(product.codigo || '').toLowerCase().includes(q)
         || String(product.nombre || '').toLowerCase().includes(q);
     });
-  }, [baseSearch, baseStockFilter, lbProducts, parentCategoryId]);
+  }, [baseSearch, baseStockFilter, productos]);
 
   const childCandidates = useMemo(() => {
     const q = childSearch.trim().toLowerCase();
-    const usedIds = new Set(resultados.map((row) => row.producto_id).filter(Boolean));
+    const usedIds = new Set(children.map((row) => String(row.producto_id)).filter(Boolean));
 
-    return lbProducts.filter((product) => {
+    return (productos || []).filter((product) => {
       if (String(product.id) === String(parent.producto_id)) return false;
-      if (parentCategoryId && String(product.categoria_id || '') === parentCategoryId) return false;
+      if (product.es_merma) return false;
       if (usedIds.has(String(product.id))) return false;
+      if (parent.producto_id && !areUnitsCompatible(parentUnit, product.unidad_medida || product.unidad)) return false;
 
       if (childCategory !== 'ALL') {
         const productCategoryId = product.categoria_id ? String(product.categoria_id) : String(product.categoria_nombre || '');
@@ -452,11 +631,18 @@ export default function TransformacionFormPage() {
       return String(product.codigo || '').toLowerCase().includes(q)
         || String(product.nombre || '').toLowerCase().includes(q);
     });
-  }, [childCategory, childSearch, lbProducts, parent.producto_id, parentCategoryId, resultados]);
+  }, [childCategory, childSearch, children, parent.producto_id, parentUnit, productos]);
+
+  const mermaOptions = useMemo(
+    () => (productos || []).filter((product) => (
+      product.es_merma
+      && (!parent.producto_id || areUnitsCompatible(parentUnit, product.unidad_medida || product.unidad))
+    )),
+    [parent.producto_id, parentUnit, productos]
+  );
 
   const baseTotalPages = Math.max(1, Math.ceil(baseCandidates.length / MODAL_PAGE_SIZE));
   const childTotalPages = Math.max(1, Math.ceil(childCandidates.length / MODAL_PAGE_SIZE));
-
   const pagedBaseRows = baseCandidates.slice((basePage - 1) * MODAL_PAGE_SIZE, basePage * MODAL_PAGE_SIZE);
   const pagedChildRows = childCandidates.slice((childPage - 1) * MODAL_PAGE_SIZE, childPage * MODAL_PAGE_SIZE);
 
@@ -468,83 +654,132 @@ export default function TransformacionFormPage() {
     setChildPage(1);
   }, [childCategory, childSearch]);
 
-  const balanceOk = Math.abs(summary.diff) <= BALANCE_TOLERANCE;
+  const quantityOk = totalConsumedBase > 0 && totalConsumedBase <= parentAvailableStockBase;
 
-  const validateForm = ({ strictBalance = false } = {}) => {
-    if (!parent.producto_id) return 'Selecciona un producto base.';
-    if (parentUnit !== 'LB') return 'El producto base debe manejarse en LB.';
-    if (parentCategoryId && String(parentProduct?.categoria_id || '') !== parentCategoryId) {
-      return 'El producto base debe pertenecer a la categoría Producto padre.';
+  function switchCostMode(nextMode) {
+    if (nextMode === costMode) return;
+    if (nextMode === 'MANUAL') {
+      setChildren((current) => current.map((row) => ({
+        ...row,
+        costoTotalInput: row.costoTotalInput || String(centsToMoney(distribution.byId.get(row.id) || 0))
+      })));
+      setMermas((current) => current.map((row) => ({
+        ...row,
+        costoTotalInput: row.costoTotalInput || String(centsToMoney(distribution.byId.get(row.id) || 0))
+      })));
     }
-    if (!Number.isFinite(parentQty) || parentQty <= 0) return 'La cantidad a despiezar debe ser válida.';
-    if (parentQty > parentAvailableStock) {
-      return `La cantidad a despiezar no puede superar el stock disponible (${formatQtyByUnit(parentAvailableStock, parentUnit, { fixedLB: true })} ${parentUnit}).`;
-    }
+    setCostMode(nextMode);
+  }
 
-    for (const row of resultadosView) {
-      if (!row.producto_id) return 'Cada hijo debe tener producto seleccionado.';
-      if (String(row.producto_id) === String(parent.producto_id)) return 'El producto base no puede registrarse como producto hijo.';
-      if (parentCategoryId && String(row.product?.categoria_id || '') === parentCategoryId) {
-        return 'Los productos de la categoría Producto padre no pueden registrarse como hijos.';
+  function validateForm() {
+    if (!parent.producto_id) return 'Selecciona un producto padre.';
+    if (!parentProduct?.es_transformable) return 'El producto padre no es transformable.';
+    if (!resolvedChildren.length) return 'Agrega al menos un producto hijo.';
+    if (!resolvedMermas.length) return 'Agrega al menos una merma.';
+
+    for (const row of resolvedChildren) {
+      if (!row.producto_id || !row.product) return 'Selecciona un producto hijo válido.';
+      if (String(row.producto_id) === String(parent.producto_id)) return 'El producto padre no puede registrarse como hijo.';
+      if (row.product.es_merma) return 'Los productos marcados como merma no pueden registrarse como hijos.';
+      if (!row.compatibleWithParent) return 'Los hijos deben usar una unidad compatible con el padre.';
+      if (row.cantidadBase === null || row.cantidadBase <= 0) {
+        return `La cantidad del hijo ${row.product.nombre || row.producto_id} es inválida.`;
       }
-      if (row.unit !== 'LB') return `El hijo ${row.product?.nombre || row.producto_id} debe manejarse en LB.`;
-      if (!Number.isFinite(row.qty) || row.qty <= 0) return `La cantidad del hijo ${row.product?.nombre || row.producto_id} es inválida.`;
+      if (costMode === 'MANUAL' && row.costoTotalInput && row.manualCents === null) {
+        return `El costo del hijo ${row.product.nombre || row.producto_id} es inválido.`;
+      }
     }
 
-    if (merma.cantidadInput !== '' || merma.producto_id) {
-      if (!Number.isFinite(mermaView.qty)) return 'La cantidad de merma debe ser válida.';
-      if (mermaView.qty < 0) return 'La cantidad de merma no puede ser negativa.';
-      if (mermaView.qty > 0 && !merma.producto_id) return 'Selecciona el producto de merma.';
+    for (const row of resolvedMermas) {
+      if (!row.producto_id || !row.product) return 'Selecciona un producto de merma válido.';
+      if (!row.product.es_merma) return 'El producto seleccionado para merma debe estar marcado como merma.';
+      if (!row.compatibleWithParent) return 'La merma debe usar una unidad compatible con el padre.';
+      if (row.cantidadBase === null || row.cantidadBase <= 0) return 'La merma debe ser mayor que 0.';
+      if (!String(row.motivo || '').trim()) return 'El motivo de merma es obligatorio.';
+      if (costMode === 'MANUAL' && row.costoTotalInput && row.manualCents === null) return 'El costo de merma es inválido.';
     }
 
-    if (!resultadosView.length && effectiveMermaQty <= 0) {
-      return 'Agrega al menos un producto hijo o una merma.';
+    if (totalConsumedBase <= 0) return 'El total consumido debe ser mayor que 0.';
+    if (totalConsumedBase > parentAvailableStockBase) {
+      return `El total consumido no puede superar el stock disponible (${formatSummaryValue(parentAvailableStock, parentUnit)}).`;
     }
-
-    if (strictBalance && !balanceOk) {
-      return `Para aplicar el despiece, la suma de hijos + merma debe igualar la cantidad a despiezar. Diferencia actual: ${formatQtyByUnit(summary.diff, parentUnit, { fixedLB: true })} ${parentUnit}.`;
-    }
-
+    if (!distribution.costOk) return 'La distribución de costo no cuadra.';
     return '';
-  };
+  }
 
-  const buildPayload = () => ({
-    fecha: header.fecha ? new Date(`${header.fecha}T12:00:00`).toISOString() : undefined,
-    tipo_proceso: 'DESPIECE',
-    observacion: header.observacion || undefined,
-    insumo: {
-      producto_id: Number(parent.producto_id),
-      cantidad: Number(parentQty)
-    },
-    resultados: resultadosView.map((row) => ({
+  function buildPayload() {
+    const payloadChildren = rowsWithCost.children.map((row) => ({
       producto_id: Number(row.producto_id),
-      cantidad: Number(row.qty)
-    })),
-    mermas: effectiveMermaQty > 0 ? [{
-      tipo_merma: 'RECORTE',
-      producto_id: merma.producto_id ? Number(merma.producto_id) : null,
-      cantidad: Number(effectiveMermaQty),
-      motivo: (merma.motivo || 'Merma de despiece').trim()
-    }] : []
-  });
+      cantidad: Number(row.cantidad),
+      ...(costMode === 'MANUAL' ? { costo_total: row.resolvedCost } : {})
+    }));
+    const payloadMermas = rowsWithCost.mermas.map((row) => ({
+      tipo_merma: 'MERMA',
+      producto_id: Number(row.producto_id),
+      cantidad: Number(row.cantidad),
+      motivo: String(row.motivo || '').trim(),
+      ...(costMode === 'MANUAL' ? { costo_total: row.resolvedCost } : {})
+    }));
+    const payload = {
+      fecha: header.fecha ? new Date(`${header.fecha}T12:00:00`).toISOString() : undefined,
+      tipo_proceso: header.tipo_proceso || 'DESPIECE',
+      observacion: header.observacion || undefined,
+      producto_padre_id: Number(parent.producto_id),
+      hijos: payloadChildren,
+      merma: payloadMermas,
+      resultados: payloadChildren,
+      mermas: payloadMermas
+    };
 
-  const handleSelectBase = (product) => {
-    setParent({
-      producto_id: String(product.id),
-      cantidadInput: ''
-    });
+    const canSendLegacyQty = [...rowsWithCost.children, ...rowsWithCost.mermas]
+      .every((row) => normalizeUnit(row.unit) === parentUnit);
+    if (canSendLegacyQty) {
+      payload.cantidad_padre_consumida = Number(totalConsumed);
+      payload.insumo = {
+        producto_id: Number(parent.producto_id),
+        cantidad: Number(totalConsumed)
+      };
+    } else {
+      payload.insumo = {
+        producto_id: Number(parent.producto_id)
+      };
+    }
+
+    return payload;
+  }
+
+  function handleSelectBase(product) {
+    setParent({ producto_id: String(product.id) });
+    setChildren([]);
+    setMermas([]);
+    setCostMode('AUTOMATICA');
     setShowBaseModal(false);
-  };
+  }
 
-  const handleAddChild = (product) => {
-    setResultados((current) => [...current, { producto_id: String(product.id), cantidadInput: '1.00' }]);
+  function handleAddChild(product) {
+    setChildren((current) => [...current, {
+      id: createRowId('child'),
+      producto_id: String(product.id),
+      cantidadInput: defaultQtyInput(product.unidad_medida || product.unidad),
+      costoTotalInput: ''
+    }]);
     setShowChildModal(false);
-  };
+  }
 
-  const handleSave = async () => {
+  function handleAddMerma() {
+    setMermas((current) => [...current, {
+      id: createRowId('merma'),
+      producto_id: mermaOptions[0] ? String(mermaOptions[0].id) : '',
+      cantidadInput: '',
+      costoTotalInput: '',
+      motivo: ''
+    }]);
+  }
+
+  async function handleSave() {
     if (!isEditableDraft) return;
     setLocalError('');
-    const validation = validateForm({ strictBalance: false });
+    const validation = validateForm();
     if (validation) {
       setLocalError(validation);
       return;
@@ -553,33 +788,35 @@ export default function TransformacionFormPage() {
     try {
       const saved = isEdit ? await editar(editId, buildPayload()) : await crear(buildPayload());
       setSavedInfo(saved);
-      if (!isEdit) {
-        navigate(`/transformaciones/${saved.id}/editar`);
-      }
-    } catch (e) {
-      setLocalError(e.message);
+      if (!isEdit) navigate(`/transformaciones/${saved.id}/editar`);
+    } catch (requestError) {
+      setLocalError(requestError.message);
     }
-  };
+  }
 
-  const handleOpenApply = () => {
+  async function handleOpenApply() {
     if (!isEditableDraft) return;
     setLocalError('');
-    const validation = validateForm({ strictBalance: true });
+    const validation = validateForm();
     if (validation) {
       setLocalError(validation);
       return;
     }
 
-    const targetId = isEdit ? editId : savedInfo?.id;
-    if (!targetId) {
-      setLocalError('Primero guarda el borrador antes de aplicar el despiece.');
-      return;
+    if (!isEdit && !savedInfo?.id) {
+      try {
+        const saved = await crear(buildPayload());
+        setSavedInfo(saved);
+      } catch (requestError) {
+        setLocalError(requestError.message);
+        return;
+      }
     }
 
     setShowApplyModal(true);
-  };
+  }
 
-  const handleApply = async () => {
+  async function handleApply() {
     setLocalError('');
     if (!isAdminUser && (!auth.usuario.trim() || !auth.password)) {
       setLocalError('Debes ingresar autorización ADMIN para aplicar.');
@@ -601,350 +838,417 @@ export default function TransformacionFormPage() {
       );
       setShowApplyModal(false);
       navigate(`/transformaciones/${applied.id}`);
-    } catch (e) {
-      setLocalError(e.message);
+    } catch (requestError) {
+      setLocalError(requestError.message);
     }
-  };
+  }
 
-  const handleDelete = async () => {
+  async function handleDelete() {
     if (!isEdit || !actual || actual.estado !== 'BORRADOR') return;
     if (!window.confirm(`¿Eliminar borrador ${actual.numero}?`)) return;
+
     setLocalError('');
     try {
       await eliminar(editId);
       navigate('/transformaciones');
-    } catch (e) {
-      setLocalError(e.message);
+    } catch (requestError) {
+      setLocalError(requestError.message);
     }
-  };
+  }
 
   return (
     <div className="space-y-5">
-      <div className="w-full">
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-text-muted)] transition hover:text-[var(--color-text)]"
-          onClick={() => navigate('/transformaciones')}
-        >
-          <span aria-hidden="true">←</span>
-          Volver a despieces
-        </button>
+      <BackButton to="/transformaciones">Volver a transformaciones</BackButton>
 
-        <div className="mt-5 space-y-1">
-          <h1 className="text-[2rem] font-bold tracking-[-0.02em] text-[var(--color-text)]">
-            {isReadOnlyMode
-              ? `Detalle despiece ${actual?.numero || `#${editId}`}`
-              : isEdit
-                ? `Editar despiece ${actual?.numero || `#${editId}`}`
-                : 'Nuevo despiece'}
-          </h1>
-          <p className="text-base text-[var(--color-text-muted)]">
-            Selecciona el producto base, define la cantidad a despiezar, registra hijos y merma. El resto del stock quedará en inventario para futuros despieces.
+      <div className="space-y-1">
+        <h1 className="text-[2rem] font-bold tracking-[-0.02em] text-[var(--color-text)]">
+          {isEdit ? `Editar transformación ${actual?.numero || `#${editId}`}` : 'Nueva transformación'}
+        </h1>
+        <p className="text-base text-[var(--color-text-muted)]">
+          Define hijos y merma. El sistema calcula el consumo del padre, el stock restante y el costo a distribuir.
+        </p>
+      </div>
+
+      {(error || localError || catalogError) && (
+        <Alert tone="error">
+          {localError || catalogError || error}
+        </Alert>
+      )}
+
+      <div className="space-y-5 rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm sm:p-7 lg:p-8">
+        <div className="space-y-4 border-b border-[var(--color-border)] pb-6">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Fecha</label>
+              <Input
+                type="date"
+                value={header.fecha}
+                onChange={(e) => setHeader((current) => ({ ...current, fecha: e.target.value }))}
+                disabled={!isEditableDraft}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Tipo proceso</label>
+              <Input value={header.tipo_proceso} readOnly disabled />
+            </div>
+            <div className="lg:col-span-3">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Observación</label>
+              <Textarea
+                rows={3}
+                value={header.observacion}
+                onChange={(e) => setHeader((current) => ({ ...current, observacion: e.target.value }))}
+                disabled={!isEditableDraft}
+                placeholder="Observación operativa"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] border border-border bg-background p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-text-muted">Padre</h3>
+              <p className="mt-1 text-sm text-text-muted">Selecciona un producto transformable y revisa su stock y costo actual.</p>
+            </div>
+            <Button type="button" variant="ghost" onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft}>
+              Buscar padre
+            </Button>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,1fr))]">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Producto padre</label>
+              <Input
+                readOnly
+                value={parentProduct ? `${parentProduct.codigo || `#${parentProduct.id}`} - ${parentProduct.nombre}` : ''}
+                placeholder="Selecciona un producto transformable"
+                onClick={() => setShowBaseModal(true)}
+                disabled={!isEditableDraft}
+              />
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">Unidad</p>
+              <p className="mt-2 text-lg font-semibold text-text">{parentUnit}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">Stock disponible actual</p>
+              <p className="mt-2 text-lg font-semibold text-text">{formatSummaryValue(parentAvailableStock, parentUnit)}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">Costo visible actual</p>
+              <p className="mt-2 text-lg font-semibold text-text">{formatMoney(parentCurrentUnitCost)}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-[24px] border border-border bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-5 py-4">
+            <div>
+              <h3 className="text-base font-semibold text-text">Resultados (Hijos)</h3>
+              <p className="text-sm text-text-muted">Agrega los productos hijo que saldrán del proceso.</p>
+            </div>
+            <Button onClick={() => setShowChildModal(true)} disabled={!isEditableDraft || !parent.producto_id}>
+              Agregar hijo
+            </Button>
+          </div>
+
+          <div className="px-5 py-5">
+            <div className="overflow-hidden rounded-2xl border border-border bg-white">
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Producto</TableCell>
+                    <TableCell>Cantidad</TableCell>
+                    <TableCell>Costo total</TableCell>
+                    <TableCell>Acción</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rowsWithCost.children.length ? rowsWithCost.children.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <p className="font-semibold text-text">{row.product?.nombre || 'Sin producto'}</p>
+                          <p className="text-xs text-text-muted">{`${row.product?.codigo || '-'} | ${row.unit}`}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="w-36">
+                          <Input
+                            value={row.cantidadInput}
+                            onChange={(e) => setChildren((current) => current.map((item) => (
+                              item.id === row.id
+                                ? { ...item, cantidadInput: sanitizeQtyInput(e.target.value, row.unit) }
+                                : item
+                            )))}
+                            disabled={!isEditableDraft}
+                            placeholder={row.unit === 'UND' ? '0' : '0.000'}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-text-muted">{row.unit === 'UND' ? 'UND entero' : `Unidad ${row.unit}`}</p>
+                      </TableCell>
+                      <TableCell>
+                        <div className="w-36">
+                          <Input
+                            value={costMode === 'AUTOMATICA' ? String(row.resolvedCost.toFixed(2)) : (row.costoTotalInput || '')}
+                            onChange={(e) => setChildren((current) => current.map((item) => (
+                              item.id === row.id
+                                ? { ...item, costoTotalInput: parseMoneyInput(e.target.value) }
+                                : item
+                            )))}
+                            disabled={!isEditableDraft || costMode === 'AUTOMATICA'}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-text-muted">
+                          {costMode === 'AUTOMATICA' ? 'Calculado por el sistema' : 'Editable en modo manual'}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => setChildren((current) => current.filter((item) => item.id !== row.id))}
+                          disabled={!isEditableDraft}
+                        >
+                          Quitar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )) : (
+                    <TableRow>
+                      <TableCell className="py-6 text-text-muted" colSpan={4}>
+                        No has agregado productos hijo.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-[24px] border border-border bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-5 py-4">
+            <div>
+              <h3 className="text-base font-semibold text-text">Merma</h3>
+              <p className="text-sm text-text-muted">Registra la merma obligatoria del proceso.</p>
+            </div>
+            <Button variant="secondary" onClick={handleAddMerma} disabled={!isEditableDraft || !parent.producto_id}>
+              Agregar merma
+            </Button>
+          </div>
+
+          <div className="px-5 py-5">
+            <div className="overflow-hidden rounded-2xl border border-border bg-white">
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Producto merma</TableCell>
+                    <TableCell>Cantidad</TableCell>
+                    <TableCell>Costo total</TableCell>
+                    <TableCell>Motivo</TableCell>
+                    <TableCell>Acción</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rowsWithCost.mermas.length ? rowsWithCost.mermas.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        <Select
+                          value={row.producto_id}
+                          onChange={(e) => setMermas((current) => current.map((item) => (
+                            item.id === row.id
+                              ? { ...item, producto_id: e.target.value }
+                              : item
+                          )))}
+                          disabled={!isEditableDraft}
+                        >
+                          <option value="">Seleccionar producto</option>
+                          {mermaOptions.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.codigo} - {product.nombre}
+                            </option>
+                          ))}
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <div className="w-36">
+                          <Input
+                            value={row.cantidadInput}
+                            onChange={(e) => setMermas((current) => current.map((item) => (
+                              item.id === row.id
+                                ? { ...item, cantidadInput: sanitizeQtyInput(e.target.value, row.unit) }
+                                : item
+                            )))}
+                            disabled={!isEditableDraft}
+                            placeholder={row.unit === 'UND' ? '0' : '0.000'}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-text-muted">{row.unit === 'UND' ? 'UND entero' : `Unidad ${row.unit}`}</p>
+                      </TableCell>
+                      <TableCell>
+                        <div className="w-36">
+                          <Input
+                            value={costMode === 'AUTOMATICA' ? String(row.resolvedCost.toFixed(2)) : (row.costoTotalInput || '')}
+                            onChange={(e) => setMermas((current) => current.map((item) => (
+                              item.id === row.id
+                                ? { ...item, costoTotalInput: parseMoneyInput(e.target.value) }
+                                : item
+                            )))}
+                            disabled={!isEditableDraft || costMode === 'AUTOMATICA'}
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={row.motivo || ''}
+                          onChange={(e) => setMermas((current) => current.map((item) => (
+                            item.id === row.id
+                              ? { ...item, motivo: e.target.value }
+                              : item
+                          )))}
+                          disabled={!isEditableDraft}
+                          placeholder="Motivo de merma"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => setMermas((current) => current.filter((item) => item.id !== row.id))}
+                          disabled={!isEditableDraft}
+                        >
+                          Quitar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )) : (
+                    <TableRow>
+                      <TableCell className="py-6 text-text-muted" colSpan={5}>
+                        No has agregado merma. Debe existir al menos una merma mayor que 0.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] border border-border bg-background p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-text-muted">Distribución de costo</h3>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant={costMode === 'AUTOMATICA' ? 'primary' : 'secondary'}
+              onClick={() => switchCostMode('AUTOMATICA')}
+              disabled={!isEditableDraft}
+            >
+              Automática
+            </Button>
+            <Button
+              type="button"
+              variant={costMode === 'MANUAL' ? 'primary' : 'secondary'}
+              onClick={() => switchCostMode('MANUAL')}
+              disabled={!isEditableDraft}
+            >
+              Manual
+            </Button>
+          </div>
+          <p className="mt-3 text-sm text-text-muted">
+            {costMode === 'AUTOMATICA'
+              ? 'El sistema distribuye el costo total del padre consumido en función de las cantidades registradas.'
+              : 'Puedes editar costos manualmente, pero la suma exacta debe coincidir con el costo total del padre consumido.'}
           </p>
         </div>
 
-        <div className="mt-6 space-y-4">
-          {(error || localError || catalogError) && (
-            <Alert tone="error">
-              {localError || catalogError || error}
-            </Alert>
-          )}
+        <div className="rounded-[24px] border border-border bg-background p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-text-muted">Resumen dinámico</h3>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3 rounded-2xl border border-border bg-white p-4 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Total hijos</span>
+                <strong className="text-text">{formatSummaryValue(totalChildren, parentUnit)}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Total merma</span>
+                <strong className="text-text">{formatSummaryValue(totalMerma, parentUnit)}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Total consumido</span>
+                <strong className="text-text">{formatSummaryValue(totalConsumed, parentUnit)}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Stock restante estimado</span>
+                <strong className={remainingStockBase < 0 ? 'text-danger' : 'text-text'}>
+                  {formatSummaryValue(remainingStock, parentUnit)}
+                </strong>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-border bg-white p-4 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Costo padre consumido</span>
+                <strong className="text-text">{formatMoney(centsToMoney(parentCostCents))}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Costo distribuido</span>
+                <strong className="text-text">{formatMoney(centsToMoney(distribution.distributedCents))}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Diferencia de costo</span>
+                <strong className={distribution.costOk ? 'text-success' : 'text-danger'}>
+                  {formatMoney(centsToMoney(distribution.diffCents))}
+                </strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Cantidad OK</span>
+                <strong className={quantityOk ? 'text-success' : 'text-danger'}>
+                  {quantityOk ? 'OK' : 'Revisar'}
+                </strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Costo OK</span>
+                <strong className={distribution.costOk ? 'text-success' : 'text-danger'}>
+                  {distribution.costOk ? 'OK' : 'Revisar'}
+                </strong>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="mt-6 space-y-5">
-          <div className="space-y-5 rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm sm:p-7 lg:p-8">
-            <div className="space-y-4 border-b border-[var(--color-border)] pb-6">
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Producto base</label>
-                  <div className="mt-2 flex gap-2">
-                    <Input
-                      readOnly
-                      className="flex-1"
-                      value={parentProduct ? `${parentProduct.codigo || `#${parentProduct.id}`} - ${parentProduct.nombre}` : ''}
-                      placeholder="Seleccionar producto base"
-                      onClick={() => setShowBaseModal(true)}
-                      disabled={!isEditableDraft}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="shrink-0"
-                      onClick={() => setShowBaseModal(true)}
-                      disabled={!isEditableDraft}
-                    >
-                      Buscar
-                    </Button>
-                  </div>
-                  <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                    {parentProduct
-                      ? `Stock disponible: ${formatQtyByUnit(parentAvailableStock, parentUnit, { fixedLB: true })} ${parentUnit}. El resto quedará en inventario para futuros despieces.`
-                      : parentCategoryId
-                        ? 'Selecciona un producto base activo de la categoría Producto padre.'
-                        : 'Selecciona un producto base activo para el despiece.'}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cantidad a despiezar</label>
-                  <Input
-                    className="mt-2"
-                    value={parent.cantidadInput}
-                    onChange={(e) => setParent((current) => ({
-                      ...current,
-                      cantidadInput: sanitizeQtyInput(e.target.value, parentUnit)
-                    }))}
-                    disabled={!isEditableDraft || !parent.producto_id}
-                    placeholder="0.00"
-                  />
-                  <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                    Solo esta cantidad se consumirá del producto padre.
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Puedes hacer un despiece parcial. No es obligatorio procesar todo el stock disponible.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Fecha</label>
-                  <Input
-                    className="mt-2"
-                    type="date"
-                    value={header.fecha}
-                    onChange={(e) => setHeader((current) => ({ ...current, fecha: e.target.value }))}
-                    disabled={!isEditableDraft}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Observación</label>
-                <Input
-                  className="mt-2"
-                  value={header.observacion}
-                  onChange={(e) => setHeader((current) => ({ ...current, observacion: e.target.value }))}
-                  disabled={!isEditableDraft}
-                  placeholder="Opcional"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-5">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Entrada base</h3>
-              <div className="mt-4 grid gap-4 xl:grid-cols-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Producto base</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-900">{parentProduct?.nombre || 'Sin seleccionar'}</p>
-                  <p className="text-sm text-slate-500">{parentProduct?.codigo || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Stock disponible</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-900">
-                    {formatQtyByUnit(parentAvailableStock, parentUnit, { fixedLB: true })} {parentUnit}
-                  </p>
-                  <p className="text-sm text-slate-500">Cantidad total actualmente disponible antes del proceso.</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cantidad a despiezar</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-900">
-                    {Number.isFinite(parentQty) ? `${formatQtyByUnit(parentQty, parentUnit, { fixedLB: true })} ${parentUnit}` : `0.00 ${parentUnit}`}
-                  </p>
-                  <p className="text-sm text-slate-500">Cantidad base que se procesará en esta operación.</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Stock restante estimado</p>
-                  <p className={`mt-2 text-lg font-semibold ${parentRemainingEstimate < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-                    {formatQtyByUnit(Math.max(parentRemainingEstimate, 0), parentUnit, { fixedLB: true })} {parentUnit}
-                  </p>
-                  <p className="text-sm text-slate-500">Saldo del padre que quedará disponible tras el despiece.</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-5 py-4">
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Productos hijo</h3>
-                  <p className="text-sm text-slate-500">Agrega los cortes o productos resultantes del despiece.</p>
-                </div>
-                <Button onClick={() => setShowChildModal(true)} disabled={!isEditableDraft || !parent.producto_id}>
-                  Agregar hijo
-                </Button>
-              </div>
-
-              <div className="px-5 py-5">
-                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Producto hijo</TableCell>
-                        <TableCell>Unidad</TableCell>
-                        <TableCell>Cantidad</TableCell>
-                        <TableCell>Costo ref</TableCell>
-                        <TableCell>Acciones</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {resultadosView.length ? resultadosView.map((row, index) => (
-                        <TableRow key={`child-${row.producto_id}-${index}`}>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <p className="font-semibold text-slate-900">{row.product?.nombre || 'Producto sin seleccionar'}</p>
-                              <p className="text-xs text-slate-500">{row.product?.codigo || '-'}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>{row.unit}</TableCell>
-                          <TableCell>
-                            <div className="w-32">
-                              <Input
-                                value={row.cantidadInput}
-                                onChange={(e) =>
-                                  setResultados((current) => current.map((item, currentIndex) => (
-                                    currentIndex === index
-                                      ? { ...item, cantidadInput: sanitizeQtyInput(e.target.value, row.unit) }
-                                      : item
-                                  )))
-                                }
-                                disabled={!isEditableDraft}
-                              />
-                            </div>
-                          </TableCell>
-                          <TableCell>{formatMoney(Number(row.product?.costo_promedio || 0))}</TableCell>
-                          <TableCell>
-                            <Button
-                              variant="iconDanger"
-                              size="sm"
-                              className="font-bold"
-                              aria-label={`Quitar ${row.product?.nombre || 'producto'}`}
-                              title="Quitar"
-                              onClick={() => setResultados((current) => current.filter((_, currentIndex) => currentIndex !== index))}
-                              disabled={!isEditableDraft}
-                            >
-                              <span className="text-lg font-extrabold leading-none text-current">×</span>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      )) : (
-                        <TableRow>
-                          <TableCell className="py-6 text-slate-500" colSpan={5}>
-                            No has agregado productos hijo.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-[1.5fr_1fr]">
-              <div className="rounded-2xl border border-slate-200 p-5">
-                <h3 className="text-base font-semibold text-slate-900">Merma</h3>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Producto merma</label>
-                    <Select
-                      value={merma.producto_id}
-                      onChange={(e) => setMerma((current) => ({ ...current, producto_id: e.target.value }))}
-                      disabled={!isEditableDraft}
-                    >
-                      <option value="">Seleccionar producto</option>
-                      {lbProducts.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {product.codigo} - {product.nombre}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cantidad merma</label>
-                    <Input
-                      value={merma.cantidadInput}
-                      onChange={(e) => setMerma((current) => ({
-                        ...current,
-                        cantidadInput: sanitizeQtyInput(e.target.value, parentUnit)
-                      }))}
-                      placeholder="0.00"
-                      disabled={!isEditableDraft}
-                    />
-                    <p className="mt-1 text-xs text-slate-500">Unidad: {parentUnit}. Puede ser 0.00.</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
-                <h3 className="text-base font-semibold text-slate-900">Resumen</h3>
-                <div className="mt-4 space-y-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Entrada base</span>
-                    <strong className="text-slate-900">{formatSummaryValue(summary.entrada, parentUnit)}</strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Salida hijos</span>
-                    <strong className="text-slate-900">{formatSummaryValue(summary.salida, parentUnit)}</strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Merma</span>
-                    <strong className="text-slate-900">{formatSummaryValue(effectiveMermaQty, parentUnit)}</strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Stock restante estimado</span>
-                    <strong className={parentRemainingEstimate < 0 ? 'text-rose-600' : 'text-slate-900'}>
-                      {formatSummaryValue(Math.max(parentRemainingEstimate, 0), parentUnit)}
-                    </strong>
-                  </div>
-                  <div className="border-t border-slate-200 pt-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-700">Saldo</span>
-                      <strong className={balanceOk ? 'text-emerald-600' : summary.diff < 0 ? 'text-rose-600' : 'text-amber-600'}>
-                        {formatSummaryValue(summary.diff, parentUnit)}
-                      </strong>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className="font-semibold text-slate-700">Balance</span>
-                      <strong className={balanceOk ? 'text-emerald-600' : 'text-amber-600'}>
-                        {balanceOk ? 'OK' : 'Revisar'}
-                      </strong>
-                    </div>
-                    <p className="mt-2 text-xs text-slate-500">
-                      Para aplicar el despiece, hijos + merma deben cerrar contra la cantidad a despiezar, con tolerancia {BALANCE_TOLERANCE}.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-5">
-              <div className="flex items-center gap-3">
-                {!isReadOnlyMode && isEdit && actual?.estado === 'BORRADOR' && (
-                  <Button variant="danger" onClick={handleDelete} disabled={saving}>
-                    Eliminar borrador
-                  </Button>
-                )}
-              </div>
-              {!isReadOnlyMode && (
-                <div className="flex items-center gap-3">
-                  <Button variant="secondary" onClick={handleSave} disabled={saving || !isEditableDraft || loading}>
-                    {saving ? 'Guardando...' : 'Guardar borrador'}
-                  </Button>
-                  <Button onClick={handleOpenApply} disabled={saving || loading || !isEditableDraft}>
-                    Aplicar despiece
-                  </Button>
-                </div>
-              )}
-            </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+          <div className="flex items-center gap-3">
+            {isEdit && actual?.estado === 'BORRADOR' && (
+              <Button variant="danger" onClick={handleDelete} disabled={saving}>
+                Eliminar borrador
+              </Button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="secondary" onClick={() => navigate('/transformaciones')} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button variant="secondary" onClick={handleSave} disabled={saving || loading || !isEditableDraft}>
+              {saving ? 'Guardando...' : 'Guardar borrador'}
+            </Button>
+            <Button onClick={handleOpenApply} disabled={saving || loading || !isEditableDraft}>
+              Aplicar transformación
+            </Button>
           </div>
         </div>
       </div>
 
       <ProductSearchModal
         open={showBaseModal}
-        title="Seleccionar producto base"
+        title="Seleccionar producto padre"
         search={baseSearch}
         onSearchChange={setBaseSearch}
         filters={(
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Stock</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Stock</label>
             <Select value={baseStockFilter} onChange={(e) => setBaseStockFilter(e.target.value)}>
               <option value="CON_STOCK">Con stock</option>
               <option value="TODOS">Todos</option>
@@ -958,7 +1262,7 @@ export default function TransformacionFormPage() {
         onPageChange={setBasePage}
         onClose={() => setShowBaseModal(false)}
         onSelect={handleSelectBase}
-        getStockLabel={(row) => formatQtyByUnit(row.stock_actual || 0, row.unidad_medida || row.unidad, { fixedLB: true })}
+        getStockLabel={(row) => formatQtyByUnit(baseToVisible(resolveProductStockBase(row), row.unidad_medida || row.unidad), row.unidad_medida || row.unidad, { fixedWeight: true })}
       />
 
       <ProductSearchModal
@@ -968,9 +1272,9 @@ export default function TransformacionFormPage() {
         onSearchChange={setChildSearch}
         filters={(
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Categoría</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Categoría</label>
             <Select value={childCategory} onChange={(e) => setChildCategory(e.target.value)}>
-              <option value="ALL">Todas las categorías</option>
+              <option value="ALL">Todas</option>
               {categoryOptions.map((category) => (
                 <option key={category.value} value={category.value}>
                   {category.label}
@@ -986,7 +1290,7 @@ export default function TransformacionFormPage() {
         onPageChange={setChildPage}
         onClose={() => setShowChildModal(false)}
         onSelect={handleAddChild}
-        getStockLabel={(row) => formatQtyByUnit(row.stock_actual || 0, row.unidad_medida || row.unidad, { fixedLB: true })}
+        getStockLabel={(row) => formatQtyByUnit(baseToVisible(resolveProductStockBase(row), row.unidad_medida || row.unidad), row.unidad_medida || row.unidad, { fixedWeight: true })}
       />
 
       <ApplyConfirmModal
@@ -998,10 +1302,10 @@ export default function TransformacionFormPage() {
         loading={saving}
         needsAuth={!isAdminUser}
         parentName={parentProduct?.nombre || 'Producto padre'}
-        parentQty={Number.isFinite(parentQty) ? parentQty : 0}
         parentUnit={parentUnit}
-        remainingQty={parentRemainingEstimate}
-        mermaQty={effectiveMermaQty}
+        totalConsumido={totalConsumed}
+        remainingQty={remainingStock}
+        mermaQty={totalMerma}
       />
     </div>
   );

@@ -65,21 +65,40 @@ function resolveMovementSense(movimiento) {
   if (tipo === 'VENTA_TRANSFERENCIA' || tipo === 'VENTA_CREDITO') {
     return {
       tone: 'default',
-      label: '0 Informativo'
+      label: 'Informativo'
     };
   }
 
   if (String(movimiento?.sentido || '').toUpperCase() === 'EGRESO') {
     return {
       tone: 'danger',
-      label: '- Caja'
+      label: 'Egreso'
     };
   }
 
   return {
     tone: 'success',
-    label: '+ Caja'
+    label: 'Ingreso'
   };
+}
+
+function resolveBalanceImpact(movimiento) {
+  return movimiento?.afecta_saldo
+    ? { tone: 'success', label: 'Afecta saldo' }
+    : { tone: 'default', label: 'No afecta saldo' };
+}
+
+function extractVentaIdFromText(...candidates) {
+  for (const candidate of candidates) {
+    const text = String(candidate || '');
+    const ventaTag = text.match(/VENTA:(\d{1,10})/i);
+    if (ventaTag) return Number(ventaTag[1]);
+
+    const ventaRef = text.match(/venta\s*#?\s*(\d{1,10})/i);
+    if (ventaRef) return Number(ventaRef[1]);
+  }
+
+  return null;
 }
 
 export default function CajaPage() {
@@ -107,6 +126,24 @@ export default function CajaPage() {
   const [movementFilter, setMovementFilter] = useState('TODOS');
   const [movimientosPage, setMovimientosPage] = useState(1);
   const pageSize = 10;
+
+  const resolveVentaId = (movimiento) => {
+    const tipo = String(movimiento?.tipo || '').toUpperCase();
+    const modulo = String(movimiento?.modulo_origen || '').toUpperCase();
+    const directId = Number(movimiento?.origen_id || 0);
+    const isVentaMovement = modulo.includes('VENTAS')
+      || ['VENTA_CONTADO', 'VENTA_TRANSFERENCIA', 'VENTA_CREDITO', 'DEVOLUCION_EFECTIVO', 'ANULACION_VENTA_EFECTIVO'].includes(tipo);
+
+    if (!isVentaMovement) return null;
+    if (directId > 0 && tipo !== 'DEVOLUCION_EFECTIVO') return directId;
+
+    return extractVentaIdFromText(
+      movimiento?.documento_origen,
+      movimiento?.concepto,
+      movimiento?.referencia,
+      movimiento?.observacion
+    );
+  };
 
   const resolveCompraOrdenId = (movimiento) => {
     const tipo = String(movimiento?.tipo || '').toUpperCase();
@@ -145,6 +182,12 @@ export default function CajaPage() {
   };
 
   const onViewMovimiento = (movimiento) => {
+    const ventaId = resolveVentaId(movimiento);
+    if (ventaId) {
+      navigate(`/ventas/${ventaId}`);
+      return;
+    }
+
     const compraOrdenId = resolveCompraOrdenId(movimiento);
     if (compraOrdenId) {
       navigate(`/compras/ordenes/${compraOrdenId}?readonly=1`);
@@ -198,12 +241,13 @@ export default function CajaPage() {
   };
   const ingresos = useMemo(() => round2(Number(resumenCaja.ingresos_efectivo || 0)), [resumenCaja]);
   const egresos = useMemo(() => round2(Number(resumenCaja.egresos_efectivo || 0)), [resumenCaja]);
-  const saldoActual = Number(resumenCaja.saldo_actual || 0);
+  const efectivoEsperado = Number(resumen?.efectivo_esperado || resumenCaja.saldo_actual || 0);
   const efectivoContado = Number(corteData.efectivo_contado || 0);
-  const diferenciaCierre = round2(efectivoContado - saldoActual);
+  const diferenciaCierre = round2(efectivoContado - efectivoEsperado);
   const requiereAutorizacionAdmin = corteData.efectivo_contado !== '' && Math.abs(diferenciaCierre) > 0.009;
   const cajaAbiertaPor = turnoActual?.usuario_nombre || (turnoActual?.usuario_id ? `Usuario #${turnoActual.usuario_id}` : 'Usuario no identificado');
   const cajaAbiertaEn = turnoActual?.fecha_apertura ? formatDateQuito(turnoActual.fecha_apertura) : null;
+  const turnoResumen = turnoActual?.id ? `Turno #${turnoActual.id}` : 'Sin turno';
   const totalMovimientosPages = Math.max(1, Math.ceil(movimientos.length / pageSize));
   const movimientosPaginados = useMemo(() => {
     const start = (movimientosPage - 1) * pageSize;
@@ -262,7 +306,7 @@ export default function CajaPage() {
     <div className="space-y-5">
       <PageHeader
         title="Caja"
-        description="Resumen del turno actual, movimientos y control de efectivo."
+        description="Turno actual, efectivo esperado y movimientos separados por impacto real en caja."
         actions={
           turnoActual ? (
             <>
@@ -280,7 +324,7 @@ export default function CajaPage() {
         <div className="-mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
           <StatusBadge tone="success">ABIERTO</StatusBadge>
           <span>
-            Caja abierta por <span className="font-semibold text-[var(--color-text)]">{cajaAbiertaPor}</span>
+            {turnoResumen} abierto por <span className="font-semibold text-[var(--color-text)]">{cajaAbiertaPor}</span>
             {cajaAbiertaEn ? ` a las ${cajaAbiertaEn}` : ''}.
           </span>
         </div>
@@ -289,7 +333,7 @@ export default function CajaPage() {
       {error && <Alert tone="error">{error}</Alert>}
 
       {!turnoActual ? (
-        <div className="min-h-[19rem] rounded-[1.35rem] border border-dashed border-[var(--color-border-strong)] bg-[color-mix(in_oklab,var(--color-surface-muted)_78%,#f8fafc_22%)] px-6 py-10">
+        <div className="min-h-[19rem] rounded-[1.35rem] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-alt)] px-6 py-10">
           <div className="mx-auto flex h-full max-w-sm flex-col items-center justify-center text-center">
             <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-brand)] shadow-sm">
               <PiCurrencyDollarSimpleBold className="h-7 w-7" />
@@ -306,7 +350,7 @@ export default function CajaPage() {
                 <div className="mt-2 flex items-center gap-2">
                   <span className="shrink-0 text-base font-semibold text-[var(--color-text-muted)]">$</span>
                   <Input
-                    className="!bg-white !border-[#9ca3af]"
+                    className="!bg-surface !border-border-strong"
                     value={fondo}
                     onChange={(e) => setFondo(e.target.value)}
                   />
@@ -320,11 +364,29 @@ export default function CajaPage() {
         </div>
       ) : (
         <>
+          <div className="grid gap-3 lg:grid-cols-3">
+            <Card className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Turno</p>
+              <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{turnoResumen}</p>
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">{cajaAbiertaPor}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Fondo inicial</p>
+              <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{formatMoney(turnoActual.fondo_inicial)}</p>
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">Base de efectivo al abrir caja</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Efectivo esperado</p>
+              <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{formatMoney(efectivoEsperado)}</p>
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">Solo incluye movimientos que afectan saldo</p>
+            </Card>
+          </div>
+
           <section className="ui-kpi-summary-shell">
             <div className="ui-kpi-summary-grid grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div
                 className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #bfdbfe 72%, white 28%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-primary-soft)' }}
               >
                 <span className="ui-kpi-summary-icon h-11 w-11">
                   <PiWallet className="text-[1rem]" />
@@ -338,7 +400,7 @@ export default function CajaPage() {
 
               <div
                 className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #a7f3d0 78%, white 22%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-success-soft)' }}
               >
                 <span className="ui-kpi-summary-icon h-11 w-11">
                   <PiCashRegister className="text-[1rem]" />
@@ -352,7 +414,7 @@ export default function CajaPage() {
 
               <div
                 className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #fde68a 72%, white 28%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-warning-soft)' }}
               >
                 <span className="ui-kpi-summary-icon h-11 w-11">
                   <PiReceipt className="text-[1rem]" />
@@ -366,16 +428,16 @@ export default function CajaPage() {
 
               <div
                 className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #e9d5ff 78%, white 22%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-danger-soft)' }}
               >
                 <span className="ui-kpi-summary-icon h-11 w-11">
                   <PiCurrencyDollarSimpleBold className="text-[1rem]" />
                 </span>
                 <div className="space-y-1">
-                  <p className="ui-kpi-summary-label">Saldo actual</p>
-                  <p className="ui-kpi-summary-value text-[1.85rem]">{formatMoney(saldoActual)}</p>
+                  <p className="ui-kpi-summary-label">Efectivo esperado</p>
+                  <p className="ui-kpi-summary-value text-[1.85rem]">{formatMoney(efectivoEsperado)}</p>
                 </div>
-                <p className="ui-kpi-summary-hint">Efectivo esperado del turno en curso</p>
+                <p className="ui-kpi-summary-hint">Caja fisica esperada del turno en curso</p>
               </div>
             </div>
           </section>
@@ -390,7 +452,7 @@ export default function CajaPage() {
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div
                 className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #bfdbfe 72%, white 28%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-primary-soft)' }}
               >
                 <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
                   <PiWallet className="text-[1.05rem]" />
@@ -403,7 +465,7 @@ export default function CajaPage() {
 
               <div
                 className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #c7d2fe 72%, white 28%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-info-soft)' }}
               >
                 <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
                   <PiArrowsLeftRightBold className="text-[1.05rem]" />
@@ -416,7 +478,7 @@ export default function CajaPage() {
 
               <div
                 className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #fde68a 72%, white 28%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-warning-soft)' }}
               >
                 <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
                   <PiCreditCardBold className="text-[1.05rem]" />
@@ -429,7 +491,7 @@ export default function CajaPage() {
 
               <div
                 className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #ddd6fe 74%, white 26%)' }}
+                style={{ '--dashboard-card-icon-bg': 'var(--color-danger-soft)' }}
               >
                 <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
                   <PiCurrencyDollarSimpleBold className="text-[1.05rem]" />
@@ -468,6 +530,7 @@ export default function CajaPage() {
                   <tr>
                     <TablaCelda as="th">Fecha</TablaCelda>
                     <TablaCelda as="th">Método</TablaCelda>
+                    <TablaCelda as="th">Impacto saldo</TablaCelda>
                     <TablaCelda as="th">Sentido</TablaCelda>
                     <TablaCelda as="th">Origen</TablaCelda>
                     <TablaCelda as="th" className="text-right">Monto</TablaCelda>
@@ -478,15 +541,16 @@ export default function CajaPage() {
                 <TablaCuerpo>
                   {movimientos.length === 0 ? (
                     <TablaFila>
-                      <TablaCelda colSpan={7} className="text-center text-[var(--color-text-muted)]">
+                      <TablaCelda colSpan={8} className="text-center text-[var(--color-text-muted)]">
                         Sin movimientos registrados en este turno.
                       </TablaCelda>
                     </TablaFila>
                   ) : (
                     movimientosPaginados.map((m) => {
                       const sense = resolveMovementSense(m);
+                      const balanceImpact = resolveBalanceImpact(m);
                       return (
-                      <TablaFila key={m.id}>
+                      <TablaFila key={m.id} className={!m.afecta_saldo ? 'bg-[var(--color-surface-muted)]' : undefined}>
                         <TablaCelda>{formatDateQuito(m.fecha)}</TablaCelda>
                         <TablaCelda>
                           <div className="space-y-1">
@@ -494,6 +558,7 @@ export default function CajaPage() {
                             <div className="text-xs text-[var(--color-text-muted)]">{formatMovementType(m.tipo)}</div>
                           </div>
                         </TablaCelda>
+                        <TablaCelda><StatusBadge tone={balanceImpact.tone}>{balanceImpact.label}</StatusBadge></TablaCelda>
                         <TablaCelda><StatusBadge tone={sense.tone}>{sense.label}</StatusBadge></TablaCelda>
                         <TablaCelda>{m.documento_origen || m.modulo_origen || '-'}</TablaCelda>
                         <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(m.monto)}</TablaCelda>
@@ -566,11 +631,11 @@ export default function CajaPage() {
               />
 
               <div className="grid gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm text-[var(--color-text-muted)]">
-                <p>Saldo esperado: <strong className="text-[var(--color-text)]">{formatMoney(saldoActual)}</strong></p>
+                <p>Efectivo esperado: <strong className="text-[var(--color-text)]">{formatMoney(efectivoEsperado)}</strong></p>
                 <p>Efectivo contado: <strong className="text-[var(--color-text)]">{formatMoney(efectivoContado)}</strong></p>
                 <p>
                   Diferencia:{' '}
-                  <strong className={diferenciaCierre > 0 ? 'text-emerald-600' : diferenciaCierre < 0 ? 'text-rose-600' : 'text-[var(--color-text)]'}>
+                  <strong className={diferenciaCierre > 0 ? 'text-success' : diferenciaCierre < 0 ? 'text-danger' : 'text-[var(--color-text)]'}>
                     {formatMoney(diferenciaCierre)}
                   </strong>
                 </p>
@@ -583,16 +648,16 @@ export default function CajaPage() {
               </div>
 
               {requiereAutorizacionAdmin && (
-                <div className="grid gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <div className="grid gap-2 rounded-xl border border-warning bg-warning-soft p-3">
                   <Input
-                    className="border-amber-300"
+                    className="border-warning"
                     placeholder="Usuario admin"
                     value={corteAuth.usuario}
                     onChange={(e) => setCorteAuth((s) => ({ ...s, usuario: e.target.value }))}
                   />
                   <Input
                     type="password"
-                    className="border-amber-300"
+                    className="border-warning"
                     placeholder="Clave admin"
                     value={corteAuth.password}
                     onChange={(e) => setCorteAuth((s) => ({ ...s, password: e.target.value }))}

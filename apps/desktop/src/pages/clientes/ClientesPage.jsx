@@ -44,7 +44,7 @@ export default function ClientesPage() {
   const [clienteModal, setClienteModal] = useState({ open: false, mode: 'create' });
   const [clienteForm, setClienteForm] = useState(emptyClienteForm);
   const [abonoModal, setAbonoModal] = useState(null);
-  const [abonoForm, setAbonoForm] = useState({ monto: '', referencia: '', observacion: '' });
+  const [abonoForm, setAbonoForm] = useState({ monto: '', metodo_pago: 'EFECTIVO', observacion: '' });
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [deactivateError, setDeactivateError] = useState('');
   const [deactivateLoading, setDeactivateLoading] = useState(false);
@@ -133,12 +133,12 @@ export default function ClientesPage() {
     if (!abonoModal) return;
     await abonar(abonoModal.id, {
       monto: Number(abonoForm.monto || 0),
-      referencia: abonoForm.referencia || undefined,
+      metodo_pago: abonoForm.metodo_pago,
       observacion: abonoForm.observacion || undefined
     });
 
     setAbonoModal(null);
-    setAbonoForm({ monto: '', referencia: '', observacion: '' });
+    setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', observacion: '' });
     refreshList();
   };
 
@@ -250,7 +250,10 @@ export default function ClientesPage() {
               const saldoCredito = Number(c.saldo_credito || 0);
               const sinSaldo = saldoCredito <= 0;
               return (
-                <TablaFila key={c.id}>
+                <TablaFila
+                  key={c.id}
+                  className={saldoCredito > 0 ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_62%,white_38%)]' : ''}
+                >
                   <TablaCelda className="font-semibold text-[var(--color-text)]">#{c.id}</TablaCelda>
                   <TablaCelda>
                     <p className="text-[var(--color-text)]">{c.nombre}</p>
@@ -281,7 +284,7 @@ export default function ClientesPage() {
                         disabled={sinSaldo}
                         onClick={() => {
                           setAbonoModal(c);
-                          setAbonoForm({ monto: '', referencia: '', observacion: '' });
+                          setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', observacion: '' });
                         }}
                       >
                         <PiCurrencyDollar className="text-lg" />
@@ -334,49 +337,53 @@ export default function ClientesPage() {
           </Button>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1.3fr_1fr_1.3fr_auto]">
-          <div>
-            <label className="text-sm font-medium text-[var(--color-text)]">Nombre</label>
-            <Input
-              className="mt-2"
-              value={clienteForm.nombre}
-              onChange={(e) => setClienteForm((s) => ({ ...s, nombre: e.target.value }))}
-              placeholder="Ej: Restaurante El Buen Sabor"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-[var(--color-text)]">Telefono</label>
-            <Input
-              className="mt-2"
-              value={clienteForm.telefono}
-              onChange={(e) => setClienteForm((s) => ({ ...s, telefono: e.target.value }))}
-              placeholder="0990000000"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-[var(--color-text)]">Direccion</label>
-            <Input
-              className="mt-2"
-              value={clienteForm.direccion}
-              onChange={(e) => setClienteForm((s) => ({ ...s, direccion: e.target.value }))}
-              placeholder="Sector / calle"
-            />
-          </div>
-
-          <div className="flex items-end">
-            <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 text-sm font-medium text-[var(--color-text)]">
-              <input
-                type="checkbox"
-                checked={clienteForm.activo}
-                onChange={(e) => setClienteForm((s) => ({ ...s, activo: e.target.checked }))}
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text)]">Nombre</label>
+              <Input
+                className="mt-2"
+                value={clienteForm.nombre}
+                onChange={(e) => setClienteForm((s) => ({ ...s, nombre: e.target.value }))}
+                placeholder="Ej: Restaurante El Buen Sabor"
               />
-              Cliente activo
-            </label>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text)]">Telefono</label>
+              <Input
+                className="mt-2"
+                value={clienteForm.telefono}
+                onChange={(e) => setClienteForm((s) => ({ ...s, telefono: e.target.value }))}
+                placeholder="0990000000"
+              />
+            </div>
           </div>
 
-          <div className="lg:col-span-4">
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text)]">Direccion</label>
+              <Input
+                className="mt-2"
+                value={clienteForm.direccion}
+                onChange={(e) => setClienteForm((s) => ({ ...s, direccion: e.target.value }))}
+                placeholder="Sector / calle"
+              />
+            </div>
+
+            <div className="pt-6">
+              <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 text-sm font-medium text-[var(--color-text)]">
+                <input
+                  type="checkbox"
+                  checked={clienteForm.activo}
+                  onChange={(e) => setClienteForm((s) => ({ ...s, activo: e.target.checked }))}
+                />
+                Cliente activo
+              </label>
+            </div>
+          </div>
+
+          <div className="lg:col-span-2">
             <label className="text-sm font-medium text-[var(--color-text)]">Observacion</label>
             <Textarea
               className="mt-2"
@@ -412,17 +419,22 @@ export default function ClientesPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Registrar abono</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Cliente: {abonoModal?.nombre}</p>
+            <p className="text-xl font-bold text-[var(--color-text)]">{abonoModal?.nombre}</p>
+            <p className="text-base font-semibold text-[var(--color-text-muted)]">Saldo actual: {formatMoney(abonoModal?.saldo_credito)}</p>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={() => setAbonoModal(null)}>
             X
           </Button>
         </div>
 
-        <p className="mt-2 text-sm text-[var(--color-text-muted)]">Saldo actual: <span className="font-semibold text-[var(--color-text)]">{formatMoney(abonoModal?.saldo_credito)}</span></p>
-        <div className="mt-3 space-y-2">
-          <Input placeholder="Monto" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
-          <Input placeholder="Referencia" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <Input placeholder="Valor" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
+          <Select value={abonoForm.metodo_pago} onChange={(e) => setAbonoForm((s) => ({ ...s, metodo_pago: e.target.value }))}>
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="TRANSFERENCIA">Transferencia</option>
+          </Select>
+        </div>
+        <div className="mt-3">
           <Textarea placeholder="Observacion" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
         </div>
         <div className="mt-3 flex justify-end gap-2">

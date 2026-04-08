@@ -45,6 +45,7 @@ function formatNowTime(date) {
 export default function PosTopbar({ user, onToggleMenu }) {
   const logout = useAuthStore((s) => s.logout);
   const turnoActual = useCajaStore((s) => s.turnoActual);
+  const fetchTurnoActual = useCajaStore((s) => s.fetchTurnoActual);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -66,8 +67,23 @@ export default function PosTopbar({ user, onToggleMenu }) {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const syncTurno = () => {
+      fetchTurnoActual({ silent: true }).catch(() => {});
+    };
+
+    syncTurno();
+    window.addEventListener('focus', syncTurno);
+    const timer = window.setInterval(syncTurno, 60000);
+
+    return () => {
+      window.removeEventListener('focus', syncTurno);
+      window.clearInterval(timer);
+    };
+  }, [fetchTurnoActual]);
+
   return (
-    <header className="fixed left-0 right-0 top-0 z-[31] h-[var(--topbar-height)] border-b border-[var(--color-border)] bg-white shadow-sm lg:left-[var(--sidebar-width)]">
+    <header className="fixed left-0 right-0 top-0 z-[31] h-[var(--topbar-height)] border-b border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm lg:left-[var(--sidebar-width)]">
       <div className="flex h-full items-center justify-between gap-3 px-4 md:px-6 lg:px-8">
         <div className="flex items-center gap-3">
           <IconButton
@@ -82,17 +98,17 @@ export default function PosTopbar({ user, onToggleMenu }) {
         </div>
 
         <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:flex items-center gap-4">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-base font-extrabold text-[var(--color-text)] shadow-sm">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-[1.02rem] font-bold tracking-[-0.03em] text-[var(--color-text)] shadow-sm">
             <PiClock className="text-lg text-[var(--color-info)]" />
             <span>{formatNowDate(now)}</span>
           </div>
-          <div className="inline-flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-base font-extrabold text-[var(--color-text)] shadow-sm">
+          <div className="inline-flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-[1.02rem] font-bold tracking-[-0.03em] text-[var(--color-text)] shadow-sm">
             {formatNowTime(now)}
           </div>
-          <div className={`inline-flex items-center rounded-full border px-4 py-2.5 text-base font-extrabold shadow-sm ${
+          <div className={`inline-flex items-center rounded-full border px-4 py-2.5 text-[1.02rem] font-bold tracking-[-0.03em] shadow-sm ${
             turnoActual?.id
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : 'border-slate-200 bg-slate-100 text-slate-700'
+              ? 'border-success bg-success text-text-inverse'
+              : 'border-danger bg-danger text-text-inverse'
           }`}>
             {turnoActual?.id ? 'Caja abierta' : 'Caja cerrada'}
           </div>
@@ -100,7 +116,7 @@ export default function PosTopbar({ user, onToggleMenu }) {
 
         <div className="relative" ref={dropdownRef}>
           <TopbarAction onClick={() => setOpen((prev) => !prev)}>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-brand)] text-xs font-semibold text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)] text-xs font-semibold text-[var(--color-text-inverse)]">
               {initials(user?.nombre)}
             </div>
             <div className="hidden text-left sm:block">
@@ -129,7 +145,7 @@ export default function PosTopbar({ user, onToggleMenu }) {
                 logout();
                 navigate('/login');
               }}
-              className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm font-medium text-[var(--color-danger)] hover:bg-[color-mix(in_oklab,var(--color-danger)_10%,white_90%)]"
+              className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
             >
               <PiSignOut className="text-base" />
               Salir

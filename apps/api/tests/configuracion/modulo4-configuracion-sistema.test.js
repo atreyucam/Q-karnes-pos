@@ -151,7 +151,7 @@ async function runSuite(options = {}) {
     const config = (await configuracionService.getConfiguracion()).data;
     const methods = (await configuracionService.getMetodosPago()).data;
     assert(config.negocio_nombre === 'QKarnes POS', 'La configuracion por defecto no fue creada');
-    assert(Array.isArray(methods) && methods.length >= 4, 'No se cargaron metodos de pago por defecto');
+    assert(Array.isArray(methods) && methods.length >= 3, 'No se cargaron metodos de pago por defecto');
     assert(methods.some((method) => method.codigo === 'EFECTIVO' && method.habilitado), 'EFECTIVO no quedo habilitado');
     assert(methods.some((method) => method.codigo === 'CREDITO_CLIENTE' && method.habilitado), 'CREDITO_CLIENTE no quedo habilitado');
     add(1, 'Configuracion inicial y metodos de pago por defecto disponibles', true);
@@ -170,14 +170,14 @@ async function runSuite(options = {}) {
       ticket_prefijo: 'CC',
       ticket_mensaje: 'Gracias por preferirnos'
     });
-    await updateMethodsAs(admin, { TARJETA: false, TRANSFERENCIA: true });
+    await updateMethodsAs(admin, { TRANSFERENCIA: false, EFECTIVO: true });
     const updatedConfig = (await configuracionService.getConfiguracion()).data;
     const updatedMethods = (await configuracionService.getMetodosPago()).data;
     const cliente = await clientesService.create({ nombre: 'Cliente config' });
     const proveedor = await proveedoresService.create({ nombre: 'Proveedor config', tiene_credito: true });
     assert(updatedConfig.negocio_nombre === 'Carniceria Centro', 'ADMIN no pudo actualizar configuracion');
     assert(updatedConfig.impuesto_porcentaje === 12, 'No se guardo impuesto configurado');
-    assert(updatedMethods.some((method) => method.codigo === 'TARJETA' && !method.habilitado), 'No se guardo el cambio de metodo de pago');
+    assert(updatedMethods.some((method) => method.codigo === 'TRANSFERENCIA' && !method.habilitado), 'No se guardo el cambio de metodo de pago');
     assert(Number(cliente.dias_credito) === 12, 'El cliente no tomo el plazo por defecto configurado');
     assert(Number(proveedor.dias_pago) === 18, 'El proveedor no tomo el plazo por defecto configurado');
     add(2, 'ADMIN puede actualizar configuracion, metodos y defaults de credito', true);

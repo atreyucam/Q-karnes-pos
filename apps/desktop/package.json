@@ -10,12 +10,16 @@
     "electron:dev": "node electron/dev.cjs",
     "electron:prod": "node electron/run-prod.cjs",
     "electron": "npm run electron:prod",
+    "test:modulo2:frontend": "node scripts/modulo2-compras-inventario-frontend-tests.cjs",
     "test:bloque6": "node scripts/bloque6-frontend-tests.cjs",
     "test:ux-regression": "npm run build && npm run test:bloque6",
     "test:bloque9": "node scripts/bloque9-transformaciones-frontend-tests.cjs",
+    "test:ventas": "node scripts/ventas-frontend-tests.cjs",
+    "test:caja": "node scripts/caja-frontend-tests.cjs",
     "test:productos": "node scripts/productos-pos-frontend-tests.cjs",
     "test:sidebar:final": "node scripts/sidebar-final-tests.cjs",
     "test:reportes": "node scripts/reportes-graficos-tests.cjs",
+    "test:auditoria": "node scripts/auditoria-frontend-tests.cjs",
     "test:ticket": "node scripts/ticket-print-tests.cjs"
   },
   "dependencies": {

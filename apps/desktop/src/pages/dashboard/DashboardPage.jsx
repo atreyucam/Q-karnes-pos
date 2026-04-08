@@ -84,7 +84,7 @@ export default function DashboardPage() {
         description="Resumen rápido del negocio"
         actions={(
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/80 px-3 py-2 text-xs font-semibold text-[var(--color-text-muted)] shadow-[var(--shadow-sm)]">
+            <div className="flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-surface px-3 py-2 text-xs font-semibold text-[var(--color-text-muted)] shadow-[var(--shadow-sm)]">
               <PiCalendarBlank className="text-sm text-[var(--color-brand)]" />
               <span>{formatDashboardDate(dashboardData.business_date)}</span>
             </div>
@@ -117,7 +117,7 @@ export default function DashboardPage() {
       )}
 
       {!loading && !error && dashboardData.alertas_operativas.length === 0 && kpis.stock_bajo === 0 && kpis.transacciones_hoy === 0 ? (
-        <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[color-mix(in_oklab,var(--color-surface)_84%,#f5f5f4_16%)] px-4 py-3 text-sm text-[var(--color-text-muted)]">
+        <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-alt)] px-4 py-3 text-sm text-[var(--color-text-muted)]">
           <PiWarningCircle className="text-base text-[var(--color-warning)]" />
           <span>Sin operación registrada hoy. El layout se mantiene estable y mostrará datos en cuanto entren movimientos.</span>
         </div>

@@ -9,7 +9,8 @@ export const useCajaStore = create((set) => ({
   movimientosMeta: null,
   loading: false,
   error: null,
-  fetchTurnoActual: async () => {
+  fetchTurnoActual: async (options = {}) => {
+    const silent = Boolean(options?.silent);
     set({ loading: true, error: null });
     try {
       const response = await apiClient.get('/api/caja/turno/actual');
@@ -18,7 +19,8 @@ export const useCajaStore = create((set) => ({
       return data;
     } catch (error) {
       const message = parseApiError(error);
-      set({ loading: false, error: message });
+      set({ turnoActual: null, loading: false, error: silent ? null : message });
+      if (silent) return null;
       throw new Error(message);
     }
   },

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { parseApiError } from '../../../lib/apiClient';
-import { fetchCategorias, fetchProductosActivos } from '../../../services/catalogoService';
+import { fetchCategorias, fetchProductosVendiblesActivos } from '../../../services/catalogoService';
 
 export function useVentaCatalogo({ enabled = true } = {}) {
   const [categorias, setCategorias] = useState([]);
@@ -40,7 +40,7 @@ export function useVentaCatalogo({ enabled = true } = {}) {
       try {
         const [dataCategorias, dataProductos] = await Promise.all([
           fetchCategorias(),
-          fetchProductosActivos()
+          fetchProductosVendiblesActivos()
         ]);
 
         const categoriasActivas = (dataCategorias || []).filter((categoria) => Boolean(categoria.activo ?? true));

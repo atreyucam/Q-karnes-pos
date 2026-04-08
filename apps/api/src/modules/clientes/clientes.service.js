@@ -34,6 +34,7 @@ const updateSchema = z.object({
 const abonoSchema = z.object({
   monto: z.number().positive(),
   venta_id: z.number().int().positive(),
+  metodo_pago: z.enum(['EFECTIVO', 'TRANSFERENCIA']).optional(),
   referencia: z.string().optional(),
   observacion: z.string().optional()
 });
@@ -185,13 +186,14 @@ async function abono(id, body, actorUser) {
 
     const deudaDocumento = mapDebtDocument(deuda);
     const monto = moneyRound(parsed.data.monto);
+    const metodoPago = String(parsed.data.metodo_pago || 'EFECTIVO').trim().toUpperCase();
 
     if (monto > deudaDocumento.saldo) {
       throw new AppError(400, 'El abono no puede exceder el saldo del documento');
     }
 
     const turno = await cajaRepository.findOpenShift(trx);
-    if (config.exigir_caja_abierta_para_cobros && !turno) {
+    if (config.exigir_caja_abierta_para_cobros && metodoPago === 'EFECTIVO' && !turno) {
       throw new AppError(400, 'Se requiere turno abierto para registrar cobranza de cliente');
     }
 
@@ -213,7 +215,7 @@ async function abono(id, body, actorUser) {
     const documentoOrigen = deudaDocumento.numero_documento || `VENTA:${parsed.data.venta_id}`;
     let movimientoCaja = null;
 
-    if (turno) {
+    if (turno && metodoPago === 'EFECTIVO') {
       await configuracionService.assertPaymentMethodEnabled('EFECTIVO', trx);
       const existingCash = await cajaRepository.findMovementByOrigin(
         {
@@ -233,6 +235,7 @@ async function abono(id, body, actorUser) {
           tipo: CASH_MOVEMENT_TYPES.ABONO_CLIENTE,
           concepto: `Cobranza cliente #${id}`,
           monto,
+          metodoPago,
           documentoOrigen,
           moduloOrigen: 'CXC',
           origenId: movimiento.id,
@@ -255,6 +258,7 @@ async function abono(id, body, actorUser) {
           venta_id: parsed.data.venta_id,
           turno_id: turno?.id || null,
           monto,
+          metodo_pago: metodoPago,
           referencia: parsed.data.referencia || null,
           movimiento_caja_id: movimientoCaja?.id || null
         }
@@ -267,7 +271,7 @@ async function abono(id, body, actorUser) {
       data: {
         movimiento_cxc: movimiento,
         movimiento_caja: movimientoCaja,
-        turno_id: turno?.id || null
+        turno_id: metodoPago === 'EFECTIVO' ? turno?.id || null : null
       }
     };
   });

@@ -14,16 +14,16 @@ export default function CajaTurnosChart({ data = [] }) {
     colors: [chartPalette.primary],
     xaxis: {
       categories,
-      labels: { style: { colors: '#64748b' } }
+      labels: { style: { colors: chartPalette.axis } }
     },
     yaxis: {
       labels: {
         formatter: (v) => `$${Number(v || 0).toFixed(0)}`,
-        style: { colors: '#64748b' }
+        style: { colors: chartPalette.axis }
       }
     },
     grid: {
-      borderColor: '#e2e8f0'
+      borderColor: chartPalette.grid
     },
     tooltip: {
       y: {
@@ -39,10 +39,9 @@ export default function CajaTurnosChart({ data = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
       <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Caja: fondo inicial por turno</p>
       <Chart type="bar" height={260} options={options} series={[{ name: 'Fondo inicial', data: fondo }]} />
     </div>
   );
 }
-

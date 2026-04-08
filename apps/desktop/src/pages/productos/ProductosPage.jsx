@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiCheck, PiFolders, PiPencilSimple, PiPlus, PiTrash, PiX } from 'react-icons/pi';
+import { PiCheck, PiFolders, PiPencilSimple, PiPlus, PiTrash, PiWarningCircle, PiX } from 'react-icons/pi';
 import {
   Alert,
   Button,
@@ -22,11 +22,24 @@ import {
 } from '../../ui';
 import { parseApiError } from '../../lib/apiClient';
 import { useProductosStore } from '../../stores/productosStore';
-import { createCategoria, deleteCategoria, fetchCategorias, updateCategoria } from '../../services/catalogoService';
+import { createCategoria, deleteCategoria, fetchCategorias, fetchProductos, updateCategoria } from '../../services/catalogoService';
 import { formatMoney } from '../../lib/formatMoney';
-import { sanitizeDecimalInput } from '../../lib/formatQty';
+import { formatQtyByUnit, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 
 const PAGE_SIZE = 10;
+const PRODUCT_ROLE_OPTIONS = [
+  { key: 'es_vendible', label: 'Vendible', hint: 'Aparece en ventas.' },
+  { key: 'es_transformable', label: 'Transformable', hint: 'Puede usarse como padre en transformaciones.' },
+  { key: 'es_insumo', label: 'Insumo', hint: 'Uso interno.' },
+  { key: 'es_merma', label: 'Merma', hint: 'Producto técnico no comercial.' }
+];
+const PRODUCT_ROLE_FILTER_OPTIONS = [
+  { value: 'TODOS', label: 'Todos' },
+  { value: 'VENDIBLE', label: 'Vendible', key: 'es_vendible' },
+  { value: 'TRANSFORMABLE', label: 'Transformable', key: 'es_transformable' },
+  { value: 'INSUMO', label: 'Insumo', key: 'es_insumo' },
+  { value: 'MERMA', label: 'Merma', key: 'es_merma' }
+];
 
 const emptyProductoForm = {
   id: null,
@@ -36,7 +49,11 @@ const emptyProductoForm = {
   unidad_medida: 'UND',
   precio_venta: '',
   stock_minimo: '0',
-  activo: true
+  activo: true,
+  es_vendible: true,
+  es_transformable: false,
+  es_insumo: false,
+  es_merma: false
 };
 
 const emptyCategoriaForm = {
@@ -49,19 +66,69 @@ function labelClassName() {
   return 'text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]';
 }
 
-function parseMargin(precioVenta, costoPromedio) {
-  const price = Number(precioVenta || 0);
-  const cost = Number(costoPromedio || 0);
-  if (price <= 0) return null;
-  if (cost <= 0) return 100;
-  return Math.round((((price - cost) / price) * 100) * 10) / 10;
+function getProductRoles(producto) {
+  return PRODUCT_ROLE_OPTIONS.filter((role) => Boolean(producto?.[role.key]));
+}
+
+function validateProductRoles(productoForm) {
+  const rolesActivos = PRODUCT_ROLE_OPTIONS.filter((role) => Boolean(productoForm?.[role.key]));
+  if (!rolesActivos.length) return 'Selecciona al menos un rol para el producto.';
+  if (productoForm.es_merma && rolesActivos.length > 1) {
+    return 'Un producto de merma no puede combinarse con otros roles.';
+  }
+  return '';
+}
+
+function RoleBadge({ label, tone = 'neutral' }) {
+  const toneClass = {
+    success: 'border-[color-mix(in_oklab,var(--color-success)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-success)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-success)_68%,black_32%)]',
+    info: 'border-[color-mix(in_oklab,var(--color-primary)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-primary)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-primary)_72%,black_28%)]',
+    warning: 'border-[color-mix(in_oklab,var(--color-warning)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-warning)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-warning)_72%,black_28%)]',
+    danger: 'border-[color-mix(in_oklab,var(--color-danger)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-danger)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-danger)_72%,black_28%)]',
+    neutral: 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
+  };
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${toneClass[tone] || toneClass.neutral}`}>
+      {label}
+    </span>
+  );
+}
+
+function roleTone(roleKey) {
+  if (roleKey === 'es_vendible') return 'success';
+  if (roleKey === 'es_transformable') return 'info';
+  if (roleKey === 'es_insumo') return 'warning';
+  if (roleKey === 'es_merma') return 'danger';
+  return 'neutral';
+}
+
+function resolveRoleFilterParams(roleValue) {
+  const selectedRole = PRODUCT_ROLE_FILTER_OPTIONS.find((option) => option.value === roleValue);
+  if (!selectedRole?.key) return {};
+  return { [selectedRole.key]: 1 };
+}
+
+function normalizeStockInputForUnit(value, unit) {
+  if (unit !== 'UND') return sanitizeQtyInput(value, unit);
+
+  const normalizedValue = String(value ?? '').trim().replace(',', '.');
+  if (!normalizedValue) return '';
+
+  const parsed = Number(normalizedValue);
+  if (Number.isFinite(parsed)) return String(Math.trunc(parsed));
+
+  const digitsOnly = String(value ?? '').replace(/[^0-9]/g, '');
+  if (!digitsOnly) return '';
+  return String(Math.trunc(Number(digitsOnly)));
 }
 
 export default function ProductosPage() {
   const { productos, error, loading, listar, crear, actualizar } = useProductosStore();
   const [categorias, setCategorias] = useState([]);
+  const [allProductos, setAllProductos] = useState([]);
   const [pagina, setPagina] = useState(1);
-  const [filtros, setFiltros] = useState({ search: '', categoria: 'TODAS', estado: 'TODOS' });
+  const [filtros, setFiltros] = useState({ search: '', categoria: 'TODAS', estado: 'TODOS', rol: 'TODOS' });
   const [productoModal, setProductoModal] = useState({ open: false, mode: 'create' });
   const [productoForm, setProductoForm] = useState(emptyProductoForm);
   const [localError, setLocalError] = useState('');
@@ -84,15 +151,18 @@ export default function ProductosPage() {
     listar({
       search: filtros.search || undefined,
       categoria_id: filtros.categoria === 'TODAS' ? undefined : Number(filtros.categoria),
-      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado
+      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
+      ...resolveRoleFilterParams(filtros.rol)
     });
 
   const refreshCategorias = async () => {
     try {
-      const rows = await fetchCategorias();
+      const [rows, productsSnapshot] = await Promise.all([fetchCategorias(), fetchProductos()]);
       setCategorias(rows || []);
+      setAllProductos(productsSnapshot || []);
     } catch (_) {
       setCategorias([]);
+      setAllProductos([]);
     }
   };
 
@@ -112,13 +182,13 @@ export default function ProductosPage() {
 
   const categoriaUsageMap = useMemo(() => {
     const counts = new Map();
-    for (const producto of productos) {
+    for (const producto of allProductos) {
       const key = String(producto.categoria_id || '');
       if (!key) continue;
       counts.set(key, (counts.get(key) || 0) + 1);
     }
     return counts;
-  }, [productos]);
+  }, [allProductos]);
 
   const productosOrdenados = useMemo(
     () => [...productos].sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })),
@@ -140,6 +210,37 @@ export default function ProductosPage() {
     setFiltros((prev) => ({ ...prev, [key]: value }));
   };
 
+  const onChangeUnidadMedida = (value) => {
+    setProductoForm((prev) => ({
+      ...prev,
+      unidad_medida: value,
+      stock_minimo: normalizeStockInputForUnit(prev.stock_minimo, value)
+    }));
+  };
+
+  const onToggleRole = (roleKey, checked) => {
+    setProductoForm((prev) => {
+      if (roleKey === 'es_merma') {
+        return checked
+          ? {
+              ...prev,
+              es_vendible: false,
+              es_transformable: false,
+              es_insumo: false,
+              es_merma: true,
+              precio_venta: '0'
+            }
+          : { ...prev, es_merma: false };
+      }
+
+      return {
+        ...prev,
+        es_merma: false,
+        [roleKey]: checked
+      };
+    });
+  };
+
   const openCreateModal = () => {
     setLocalError('');
     setProductoModal({ open: true, mode: 'create' });
@@ -157,7 +258,11 @@ export default function ProductosPage() {
       unidad_medida: producto.unidad_medida || producto.unidad || 'UND',
       precio_venta: String(Number(producto.precio_venta || producto.precio_referencia || 0)),
       stock_minimo: String(Number(producto.stock_minimo || 0)),
-      activo: Boolean(producto.activo)
+      activo: Boolean(producto.activo),
+      es_vendible: Boolean(producto.es_vendible),
+      es_transformable: Boolean(producto.es_transformable),
+      es_insumo: Boolean(producto.es_insumo),
+      es_merma: Boolean(producto.es_merma)
     });
   };
 
@@ -194,31 +299,47 @@ export default function ProductosPage() {
 
   const onSaveProducto = async () => {
     setLocalError('');
-    if (!productoForm.codigo.trim() || !productoForm.nombre.trim()) {
-      setLocalError('Código y nombre son obligatorios.');
+    if (!productoForm.nombre.trim()) {
+      setLocalError('El nombre es obligatorio.');
       return;
     }
 
-    const precioVenta = Number(String(productoForm.precio_venta || '').replace(',', '.'));
-    if (!Number.isFinite(precioVenta) || precioVenta <= 0) {
-      setLocalError('Precio de venta inválido.');
-      return;
-    }
-
-    const stockMinimo = Number(String(productoForm.stock_minimo || '0').replace(',', '.'));
+    const normalizedStockInput = normalizeStockInputForUnit(productoForm.stock_minimo, productoForm.unidad_medida);
+    const stockMinimo = Number(String(normalizedStockInput || '0').replace(',', '.'));
     if (!Number.isFinite(stockMinimo) || stockMinimo < 0) {
       setLocalError('Stock mínimo inválido.');
       return;
     }
 
+    const roleError = validateProductRoles(productoForm);
+    if (roleError) {
+      setLocalError(roleError);
+      return;
+    }
+
+    const precioTexto = String(productoForm.precio_venta || '').replace(',', '.').trim();
+    const precioVenta = precioTexto === '' ? 0 : Number(precioTexto);
+    if (productoForm.es_vendible) {
+      if (!Number.isFinite(precioVenta) || precioVenta <= 0) {
+        setLocalError('Precio de venta inválido para un producto vendible.');
+        return;
+      }
+    } else if (!Number.isFinite(precioVenta) || precioVenta < 0) {
+      setLocalError('Precio de referencia inválido.');
+      return;
+    }
+
     const payload = {
-      ...(productoModal.mode === 'create' ? { codigo: productoForm.codigo.trim() } : {}),
       nombre: productoForm.nombre.trim(),
       categoria_id: productoForm.categoria_id ? Number(productoForm.categoria_id) : null,
       unidad_medida: productoForm.unidad_medida,
       precio_venta: precioVenta,
       stock_minimo: stockMinimo,
-      activo: productoForm.activo
+      activo: productoForm.activo,
+      es_vendible: Boolean(productoForm.es_vendible),
+      es_transformable: Boolean(productoForm.es_transformable),
+      es_insumo: Boolean(productoForm.es_insumo),
+      es_merma: Boolean(productoForm.es_merma)
     };
 
     try {
@@ -228,7 +349,7 @@ export default function ProductosPage() {
         await crear(payload);
       }
       closeProductoModal();
-      refreshList();
+      await Promise.all([refreshList(), refreshCategorias()]);
     } catch (err) {
       setLocalError(err.message || 'No se pudo guardar el producto');
     }
@@ -242,7 +363,7 @@ export default function ProductosPage() {
 
     try {
       await actualizar(producto.id, { activo: true });
-      refreshList();
+      await Promise.all([refreshList(), refreshCategorias()]);
     } catch (error) {
       setLocalError(error.message || 'No se pudo actualizar el estado del producto.');
     }
@@ -255,7 +376,7 @@ export default function ProductosPage() {
     try {
       await actualizar(deactivateTarget.id, { activo: false });
       setDeactivateTarget(null);
-      refreshList();
+      await Promise.all([refreshList(), refreshCategorias()]);
     } catch (error) {
       setDeactivateTarget(null);
       setDeactivateError(error.message || 'El sistema no permitio desactivar este producto.');
@@ -285,6 +406,7 @@ export default function ProductosPage() {
         });
       }
       await refreshCategorias();
+      await refreshList();
       setCategoriaMode('create');
       setCategoriaForm(emptyCategoriaForm);
     } catch (nextError) {
@@ -303,6 +425,7 @@ export default function ProductosPage() {
     try {
       await updateCategoria(categoria.id, { activo: true });
       await refreshCategorias();
+      await refreshList();
     } catch (nextError) {
       setCategoriaDeactivateError(parseApiError(nextError));
     }
@@ -315,6 +438,7 @@ export default function ProductosPage() {
       await updateCategoria(categoriaDeactivateTarget.id, { activo: false });
       setCategoriaDeactivateTarget(null);
       await refreshCategorias();
+      await refreshList();
     } catch (nextError) {
       setCategoriaDeactivateTarget(null);
       setCategoriaDeactivateError(parseApiError(nextError));
@@ -351,7 +475,7 @@ export default function ProductosPage() {
     <div className="space-y-5">
       <PageHeader
         title="Productos"
-        description="Catálogo comercial separado del inventario: nombre, categoría, unidad, precio de venta y estado."
+        description="Catálogo operativo con roles explícitos: vendible, transformable, insumo o merma."
         actions={(
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={openCategoriaManager}>
@@ -373,7 +497,7 @@ export default function ProductosPage() {
       {(error || localError) && <Alert tone="error">{localError || error}</Alert>}
 
       <Card className="p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_180px_180px]">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_180px_180px_180px]">
           <div>
             <label className={labelClassName()}>Buscar</label>
             <Input
@@ -405,13 +529,24 @@ export default function ProductosPage() {
             </Select>
           </div>
 
-          <div className="flex items-end">
+          <div>
+            <label className={labelClassName()}>Rol</label>
+            <Select className="mt-2" value={filtros.rol} onChange={(e) => onChangeFiltro('rol', e.target.value)}>
+              {PRODUCT_ROLE_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="flex items-end md:col-span-2">
             <Button
               variant="secondary"
               className="w-full"
               onClick={() => {
                 setPagina(1);
-                setFiltros({ search: '', categoria: 'TODAS', estado: 'TODOS' });
+                setFiltros({ search: '', categoria: 'TODAS', estado: 'TODOS', rol: 'TODOS' });
               }}
             >
               Limpiar filtros
@@ -425,36 +560,59 @@ export default function ProductosPage() {
           <TablaCabecera>
             <tr>
               <TablaCelda as="th">Código</TablaCelda>
-              <TablaCelda as="th">Producto</TablaCelda>
+              <TablaCelda as="th">Nombre</TablaCelda>
               <TablaCelda as="th">Categoría</TablaCelda>
               <TablaCelda as="th">Unidad</TablaCelda>
               <TablaCelda as="th" className="text-right">Precio venta</TablaCelda>
-              <TablaCelda as="th" className="text-right">Costo promedio</TablaCelda>
-              <TablaCelda as="th" className="text-right">Margen</TablaCelda>
+              <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
+              <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
+              <TablaCelda as="th">Roles</TablaCelda>
               <TablaCelda as="th">Estado</TablaCelda>
               <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
           <TablaCuerpo>
             {productosPaginados.map((producto) => {
-              const margin = parseMargin(producto.precio_venta, producto.costo_promedio);
+              const hasAlert = Number(producto.stock_actual || 0) <= Number(producto.stock_minimo || 0);
+              const unidadMedida = producto.unidad_medida || producto.unidad || 'UND';
               return (
-                <TablaFila key={producto.id}>
-                  <TablaCelda className="font-semibold text-[var(--color-text)]">{producto.codigo}</TablaCelda>
+                <TablaFila
+                  key={producto.id}
+                  className={hasAlert ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_74%,white_26%)]' : ''}
+                >
+                  <TablaCelda className="font-semibold text-[var(--color-text)]">
+                    <div className="flex items-center gap-2">
+                      {hasAlert ? (
+                        <PiWarningCircle
+                          className="shrink-0 cursor-pointer text-[1.2rem] text-warning"
+                          title="Stock bajo el mínimo"
+                          aria-label="Stock bajo el mínimo"
+                        />
+                      ) : null}
+                      <span>{producto.codigo}</span>
+                    </div>
+                  </TablaCelda>
                   <TablaCelda>
                     <div className="space-y-1">
                       <p className="font-semibold text-[var(--color-text)]">{producto.nombre}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">Stock mínimo: {Number(producto.stock_minimo || 0)}</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        Stock mínimo: {formatQtyByUnit(producto.stock_minimo, unidadMedida)} {unidadMedida}
+                      </p>
                     </div>
                   </TablaCelda>
                   <TablaCelda>{producto.categoria_nombre || 'Sin categoría'}</TablaCelda>
-                  <TablaCelda>{producto.unidad_medida || producto.unidad || 'UND'}</TablaCelda>
+                  <TablaCelda>{unidadMedida}</TablaCelda>
                   <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(producto.precio_venta)}</TablaCelda>
+                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                    {formatQtyByUnit(producto.stock_actual, unidadMedida)}
+                  </TablaCelda>
                   <TablaCelda className="text-right">{formatMoney(producto.costo_promedio)}</TablaCelda>
-                  <TablaCelda className="text-right">
-                    <span className={margin !== null && margin < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}>
-                      {margin === null ? '-' : `${margin.toFixed(1)}%`}
-                    </span>
+                  <TablaCelda>
+                    <div className="flex flex-wrap gap-1.5">
+                      {getProductRoles(producto).map((role) => (
+                        <RoleBadge key={`${producto.id}-${role.key}`} label={role.label} tone={roleTone(role.key)} />
+                      ))}
+                    </div>
                   </TablaCelda>
                   <TablaCelda>
                     <StatusBadge status={producto.activo ? 'ACTIVO' : 'INACTIVO'} />
@@ -506,7 +664,7 @@ export default function ProductosPage() {
             <h3 className="text-lg font-semibold text-[var(--color-text)]">
               {productoModal.mode === 'edit' ? 'Editar producto' : 'Nuevo producto'}
             </h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Gestiona el catálogo comercial y el precio de venta.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Define datos base y roles operativos del producto.</p>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={closeProductoModal}>
             X
@@ -514,16 +672,12 @@ export default function ProductosPage() {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div>
-            <label className={labelClassName()}>Código</label>
-            <Input
-              className="mt-2"
-              value={productoForm.codigo}
-              onChange={(e) => setProductoForm((prev) => ({ ...prev, codigo: e.target.value }))}
-              placeholder="P001"
-              disabled={productoModal.mode === 'edit'}
-            />
-          </div>
+          {productoModal.mode === 'edit' ? (
+            <div>
+              <label className={labelClassName()}>Código</label>
+              <Input className="mt-2" value={productoForm.codigo} disabled />
+            </div>
+          ) : null}
 
           <div>
             <label className={labelClassName()}>Nombre descriptivo</label>
@@ -556,21 +710,27 @@ export default function ProductosPage() {
             <Select
               className="mt-2"
               value={productoForm.unidad_medida}
-              onChange={(e) => setProductoForm((prev) => ({ ...prev, unidad_medida: e.target.value }))}
+              onChange={(e) => onChangeUnidadMedida(e.target.value)}
             >
               <option value="UND">UND</option>
+              <option value="KG">KG</option>
               <option value="LB">LB</option>
             </Select>
           </div>
 
           <div>
-            <label className={labelClassName()}>Precio de venta</label>
+            <label className={labelClassName()}>
+              {productoForm.es_vendible ? 'Precio de venta' : 'Precio de referencia'}
+            </label>
             <Input
               className="mt-2"
               value={productoForm.precio_venta}
               onChange={(e) => setProductoForm((prev) => ({ ...prev, precio_venta: sanitizeDecimalInput(e.target.value, 2) }))}
-              placeholder="0.00"
+              placeholder={productoForm.es_vendible ? '0.00' : 'Opcional'}
             />
+            <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+              {productoForm.es_vendible ? 'Obligatorio y mayor que cero para productos vendibles.' : 'Puede quedar en cero si el producto no aparece en ventas.'}
+            </p>
           </div>
 
           <div>
@@ -578,9 +738,42 @@ export default function ProductosPage() {
             <Input
               className="mt-2"
               value={productoForm.stock_minimo}
-              onChange={(e) => setProductoForm((prev) => ({ ...prev, stock_minimo: sanitizeDecimalInput(e.target.value, 3) }))}
+              onChange={(e) => setProductoForm((prev) => ({ ...prev, stock_minimo: sanitizeQtyInput(e.target.value, prev.unidad_medida) }))}
               placeholder="0"
             />
+            <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+              {productoForm.unidad_medida === 'UND' ? 'UND se maneja como entero.' : 'KG y LB permiten decimales visibles.'}
+            </p>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className={labelClassName()}>Roles del producto</label>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              {PRODUCT_ROLE_OPTIONS.map((role) => (
+                <label
+                  key={role.key}
+                  className={`flex items-start gap-3 rounded-xl border px-3 py-3 text-sm ${
+                    productoForm.es_merma && role.key !== 'es_merma'
+                      ? 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(productoForm[role.key])}
+                    disabled={productoForm.es_merma && role.key !== 'es_merma'}
+                    onChange={(e) => onToggleRole(role.key, e.target.checked)}
+                  />
+                  <div>
+                    <p className="font-semibold text-[var(--color-text)]">{role.label}</p>
+                    <p className="text-xs text-[var(--color-text-muted)]">{role.hint}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+              Debe existir al menos un rol activo. `Merma` es exclusivo y bloquea los demás roles mientras esté activo.
+            </p>
           </div>
 
           {productoModal.mode === 'edit' && (
@@ -724,8 +917,7 @@ export default function ProductosPage() {
                               variant="iconDanger"
                               size="sm"
                               aria-label={`Eliminar categoría ${categoria.nombre}`}
-                              title={totalProductos > 0 ? 'No se puede eliminar; tiene productos asociados' : 'Eliminar categoría'}
-                              disabled={totalProductos > 0}
+                              title={totalProductos > 0 ? 'Eliminar categoría (solo si queda sin productos)' : 'Eliminar categoría'}
                               onClick={() => onRequestDeleteCategoria(categoria)}
                             >
                               <PiTrash className="text-lg" />

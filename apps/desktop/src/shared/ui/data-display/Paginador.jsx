@@ -20,7 +20,7 @@ export default function Paginador({
   const pages = buildVisiblePages(paginaActual, Math.max(totalPaginas, 1));
 
   return (
-    <div className="ui-paginator">
+    <div className="ui-paginator mt-4">
       <div className="flex items-center gap-1.5">
         <button
           type="button"

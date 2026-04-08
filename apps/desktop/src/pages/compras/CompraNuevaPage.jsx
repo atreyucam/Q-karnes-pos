@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { PiMagnifyingGlass, PiPlus } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import { parseApiError } from '../../lib/apiClient';
-import { Alert, Button, EmptyState, Input, Modal, Paginador, Select, Tabla, TablaCabecera, TablaCuerpo, TablaCelda, TablaFila } from '../../ui';
+import { Alert, BackButton, Button, EmptyState, Input, Modal, Paginador, Select, Tabla, TablaCabecera, TablaCuerpo, TablaCelda, TablaFila, Toast } from '../../ui';
 import { useComprasStore } from '../../stores/comprasStore';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoService';
 
 const emptyProveedorForm = { nombre: '', telefono: '', direccion: '', dias_pago: '15' };
-const emptyProductoForm = { codigo: '', nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' };
+const emptyProductoForm = { nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' };
 const MODAL_PAGE_SIZE = 10;
 
 function getTodayInEcuador() {
@@ -73,6 +73,7 @@ export default function CompraNuevaPage() {
   const [productoPage, setProductoPage] = useState(1);
   const [proveedorNuevo, setProveedorNuevo] = useState(emptyProveedorForm);
   const [productoNuevo, setProductoNuevo] = useState(emptyProductoForm);
+  const [productToast, setProductToast] = useState('');
 
   const proveedorSeleccionado = useMemo(() => proveedores.find((p) => Number(p.id) === Number(proveedorId)) || null, [proveedorId, proveedores]);
   const lineErrors = errorMeta?.details?.lines || [];
@@ -89,6 +90,11 @@ export default function CompraNuevaPage() {
 
   useEffect(() => setProveedorPage(1), [proveedorSearch, showProveedorPicker]);
   useEffect(() => setProductoPage(1), [productoSearch, productoCategoria, showProductoPicker]);
+  useEffect(() => {
+    if (!productToast) return undefined;
+    const timer = window.setTimeout(() => setProductToast(''), 2200);
+    return () => window.clearTimeout(timer);
+  }, [productToast]);
 
   const proveedoresFiltrados = useMemo(() => {
     const q = proveedorSearch.trim().toLowerCase();
@@ -125,9 +131,7 @@ export default function CompraNuevaPage() {
         ? { ...item, cantidadInput: unidad === 'UND' ? String((Number(item.cantidadInput) || 0) + 1) : Number((Number(item.cantidadInput) || 0) + 1).toFixed(2) }
         : item)
       : [...prev, { producto_id: producto.id, codigo: producto.codigo, nombre: producto.nombre, unidad, cantidadInput: unidad === 'UND' ? '1' : '1.00' }]);
-    setProductoSearch('');
-    setProductoCategoria('TODAS');
-    setShowProductoPicker(false);
+    setProductToast(`${producto.nombre} agregado correctamente.`);
   };
 
   const updateItem = (index, key, value) => {
@@ -196,9 +200,8 @@ export default function CompraNuevaPage() {
 
   const onCrearProducto = async () => {
     setLocalError('');
-    if (!productoNuevo.codigo.trim() || !productoNuevo.nombre.trim()) return setLocalError('Código y nombre del producto son obligatorios.');
+    if (!productoNuevo.nombre.trim()) return setLocalError('El nombre del producto es obligatorio.');
     const created = await crearProducto({
-      codigo: productoNuevo.codigo.trim(),
       nombre: productoNuevo.nombre.trim(),
       categoria_id: productoNuevo.categoria_id ? Number(productoNuevo.categoria_id) : null,
       unidad_medida: productoNuevo.unidad_medida,
@@ -219,10 +222,7 @@ export default function CompraNuevaPage() {
   return (
     <div className="space-y-5">
       <div className="w-full">
-        <button type="button" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-text-muted)] transition hover:text-[var(--color-text)]" onClick={() => navigate('/compras')}>
-          <span aria-hidden="true">←</span>
-          Volver a órdenes
-        </button>
+        <BackButton to="/compras">Volver a órdenes</BackButton>
 
         <div className="mt-5 space-y-1">
           <h1 className="text-[2rem] font-bold tracking-[-0.02em] text-[var(--color-text)]">Nueva orden de compra</h1>
@@ -231,6 +231,9 @@ export default function CompraNuevaPage() {
 
         <div className="mt-6 space-y-4">
           {localError && <Alert tone="error">{localError}</Alert>}
+          <Alert tone="info">
+            Esta orden no captura costos finales y no actualiza stock. El inventario cambia cuando se registra la recepción.
+          </Alert>
           {lineErrors.length > 0 && (
             <Alert tone="error">
               <ul className="list-disc pl-5 text-sm">
@@ -356,6 +359,10 @@ export default function CompraNuevaPage() {
                   <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-3 text-sm font-semibold text-[var(--color-text)]">
                     <span>Filas válidas</span>
                     <span>{totals.validRows}</span>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-3 text-sm text-[var(--color-text-muted)]">
+                    <span>Recepción posterior</span>
+                    <span className="font-semibold text-[var(--color-text)]">Obligatoria</span>
                   </div>
                 </div>
               </div>
@@ -543,10 +550,6 @@ export default function CompraNuevaPage() {
 
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <label className={labelClassName()}>Código del producto</label>
-              <Input className="mt-2" value={productoNuevo.codigo} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, codigo: e.target.value }))} />
-            </div>
-            <div>
               <label className={labelClassName()}>Nombre descriptivo</label>
               <Input className="mt-2" value={productoNuevo.nombre} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, nombre: e.target.value }))} />
             </div>
@@ -561,6 +564,7 @@ export default function CompraNuevaPage() {
               <label className={labelClassName()}>Unidad de medida</label>
               <Select className="mt-2" value={productoNuevo.unidad_medida} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, unidad_medida: e.target.value }))}>
                 <option value="UND">UND</option>
+                <option value="KG">KG</option>
                 <option value="LB">LB</option>
               </Select>
             </div>
@@ -613,6 +617,12 @@ export default function CompraNuevaPage() {
           </div>
         </div>
       </Modal>
+
+      {productToast ? (
+        <div className="fixed bottom-5 right-5 z-[1100] max-w-sm">
+          <Toast tone="success">{productToast}</Toast>
+        </div>
+      ) : null}
     </div>
   );
 }

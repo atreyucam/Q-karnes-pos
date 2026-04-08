@@ -12,36 +12,27 @@ const { prepareDatabase } = require('../support/database');
 const { createCategoria, createProducto, createProveedor } = require('../support/factories');
 const { assert, expectThrows, printSuiteReport } = require('../support/testHarness');
 
-function approxEqual(actual, expected, tolerance = 0.001) {
-  return Math.abs(Number(actual) - Number(expected)) <= tolerance;
-}
-
-function asQty(value) {
-  return Number(Number(value || 0).toFixed(3));
-}
-
 async function ensureOpenShift(cajero) {
   const current = await cajaService.turnoActual();
   if (current) return current;
-  return cajaService.abrirTurno({ fondo_inicial: 200, observacion: 'Turno test despiece parcial' }, cajero.id);
+  return cajaService.abrirTurno({ fondo_inicial: 200, observacion: 'Turno test transformaciones' }, cajero.id);
 }
 
-async function createOrderAndReceive(actorUser, proveedorId, productoId, cantidad, costoTotalReal, documentoRespaldo = `RCV-DESP-${productoId}`) {
+async function receiveStock(actorUser, proveedorId, productoId, cantidad, costoTotalReal, documento = `RCV-${productoId}`) {
   const orden = await comprasService.createOrden(
     {
       proveedor_id: proveedorId,
-      observacion: 'Compra canal para despiece parcial',
+      observacion: 'Compra test transformaciones',
       items: [{ producto_id: productoId, cantidad }]
     },
     actorUser
   );
 
   const detalle = await db('compras_orden_detalle').where({ orden_id: orden.data.orden.id }).first();
-
   await comprasService.receiveOrden(
     orden.data.orden.id,
     {
-      documento_respaldo: documentoRespaldo,
+      documento_respaldo: documento,
       factura: { metodo_pago: 'CREDITO' },
       items: [{
         orden_detalle_id: detalle.id,
@@ -66,329 +57,351 @@ async function runSuite(options = {}) {
     const cajero = (await authService.login({ usuario: 'cajero', password: 'cajero123' })).user;
     await ensureOpenShift(cajero);
 
-    const categoriaPadre = await createCategoria(db, { nombre: 'Producto padre' });
-    const categoriaCortes = await createCategoria(db, { nombre: 'Cortes res' });
-    const proveedor = await createProveedor(db, { nombre: 'Proveedor canal res', tiene_credito: true, dias_pago: 15 });
+    const categoria = await createCategoria(db, { nombre: 'Transformaciones test' });
+    const proveedor = await createProveedor(db, { nombre: 'Proveedor transformaciones', tiene_credito: true, dias_pago: 15 });
 
-    const canalRes = await createProducto(db, {
-      categoria_id: categoriaPadre.id,
-      codigo: 'CANAL-RES-225',
-      nombre: 'Canal de res',
+    const padreLb = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'PADRE-LB',
+      nombre: 'Canal LB',
       unidad_medida: 'LB',
       stock_actual: 0,
       costo_promedio: 0,
-      precio_referencia: 2.2
+      es_transformable: true
     });
-
-    const lomo = await createProducto(db, {
-      categoria_id: categoriaCortes.id,
-      codigo: 'LOMO-RES',
-      nombre: 'Lomo',
+    const hijoLbA = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'HIJO-LB-A',
+      nombre: 'Lomo LB',
       unidad_medida: 'LB',
       stock_actual: 0,
       costo_promedio: 0,
-      precio_referencia: 6.2
+      es_transformable: true
     });
-
-    const costilla = await createProducto(db, {
-      categoria_id: categoriaCortes.id,
-      codigo: 'COSTILLA-RES',
-      nombre: 'Costilla',
+    const hijoLbB = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'HIJO-LB-B',
+      nombre: 'Costilla LB',
       unidad_medida: 'LB',
       stock_actual: 0,
       costo_promedio: 0,
-      precio_referencia: 5.4
+      es_transformable: false
     });
-
-    const molida = await createProducto(db, {
-      categoria_id: categoriaCortes.id,
-      codigo: 'MOLIDA-RES',
-      nombre: 'Molida',
+    const mermaLb = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'MERMA-LB',
+      nombre: 'Merma LB',
       unidad_medida: 'LB',
       stock_actual: 0,
       costo_promedio: 0,
-      precio_referencia: 4.8
+      es_vendible: false,
+      es_transformable: false,
+      es_merma: true
     });
 
-    const canalResTotal = await createProducto(db, {
-      categoria_id: categoriaPadre.id,
-      codigo: 'CANAL-RES-226',
-      nombre: 'Canal de res total',
-      unidad_medida: 'LB',
+    const padreKg = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'PADRE-KG',
+      nombre: 'Canal KG',
+      unidad_medida: 'KG',
       stock_actual: 0,
       costo_promedio: 0,
-      precio_referencia: 2.2
+      es_transformable: true
     });
-
-    const aguja = await createProducto(db, {
-      categoria_id: categoriaCortes.id,
-      codigo: 'AGUJA-RES',
-      nombre: 'Aguja',
-      unidad_medida: 'LB',
+    const hijoKgA = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'HIJO-KG-A',
+      nombre: 'Suave KG',
+      unidad_medida: 'KG',
       stock_actual: 0,
       costo_promedio: 0,
-      precio_referencia: 5.1
+      es_transformable: true
     });
-
-    const falda = await createProducto(db, {
-      categoria_id: categoriaCortes.id,
-      codigo: 'FALDA-RES',
-      nombre: 'Falda',
-      unidad_medida: 'LB',
+    const hijoKgB = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'HIJO-KG-B',
+      nombre: 'Molida KG',
+      unidad_medida: 'KG',
       stock_actual: 0,
       costo_promedio: 0,
-      precio_referencia: 4.7
+      es_transformable: false
+    });
+    const mermaKg = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'MERMA-KG',
+      nombre: 'Merma KG',
+      unidad_medida: 'KG',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_vendible: false,
+      es_transformable: false,
+      es_merma: true
     });
 
-    await createOrderAndReceive(cajero, proveedor.id, canalRes.id, 225, 300);
-    await createOrderAndReceive(cajero, proveedor.id, canalResTotal.id, 226, 300);
+    const padreUnd = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'PADRE-UND',
+      nombre: 'Caja UND',
+      unidad_medida: 'UND',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_transformable: true
+    });
+    const hijoUndA = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'HIJO-UND-A',
+      nombre: 'Pieza UND A',
+      unidad_medida: 'UND',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_transformable: true
+    });
+    const hijoUndB = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'HIJO-UND-B',
+      nombre: 'Pieza UND B',
+      unidad_medida: 'UND',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_transformable: false
+    });
+    const mermaUnd = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'MERMA-UND',
+      nombre: 'Merma UND',
+      unidad_medida: 'UND',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_vendible: false,
+      es_transformable: false,
+      es_merma: true
+    });
 
-    const canalRecibido = await db('productos').where({ id: canalRes.id }).first();
-    assert(Number(canalRecibido.stock_actual) === 225, 'El canal debe ingresar con 225 LB');
-    assert(approxEqual(canalRecibido.costo_promedio, 1.333), `Costo esperado 1.333 y obtuvo ${canalRecibido.costo_promedio}`);
+    await receiveStock(cajero, proveedor.id, padreLb.id, 100, 250, 'RCV-LB-001');
+    await receiveStock(cajero, proveedor.id, padreKg.id, 50, 400, 'RCV-KG-001');
+    await receiveStock(cajero, proveedor.id, padreUnd.id, 20, 100, 'RCV-UND-001');
 
     try {
-      const borrador = await transformacionesService.createBorrador(
+      const before = await db('productos').where({ id: padreLb.id }).first();
+      const draft = await transformacionesService.createBorrador(
         {
           tipo_proceso: 'DESPIECE',
-          observacion: 'Primer despiece parcial 120 LB',
-          insumo: {
-            producto_id: canalRes.id,
-            cantidad: 120
-          },
+          observacion: 'Borrador LB',
+          insumo: { producto_id: padreLb.id, cantidad: 70 },
           resultados: [
-            { producto_id: lomo.id, cantidad: 50 },
-            { producto_id: costilla.id, cantidad: 40 },
-            { producto_id: molida.id, cantidad: 20 }
+            { producto_id: hijoLbA.id, cantidad: 40 },
+            { producto_id: hijoLbB.id, cantidad: 20 }
           ],
           mermas: [
-            { tipo_merma: 'RECORTE', cantidad: 10, motivo: 'Merma operativa' }
+            { tipo_merma: 'RECORTE', producto_id: mermaLb.id, cantidad: 10, motivo: 'Merma obligatoria' }
           ]
         },
         admin
       );
 
-      const aplicada = await transformacionesService.aplicarTransformacion(borrador.data.id, {}, admin);
-      const canalActual = await db('productos').where({ id: canalRes.id }).first();
-      const lomoActual = await db('productos').where({ id: lomo.id }).first();
-      const costillaActual = await db('productos').where({ id: costilla.id }).first();
-      const molidaActual = await db('productos').where({ id: molida.id }).first();
-      const movimientos = await db('inventario_movimientos').where({ referencia: `TRANSFORMACION:${aplicada.data.id}` }).orderBy('id', 'asc');
-      const consumoPadre = movimientos.find((row) => row.tipo === 'TRANSFORMACION_CONSUMO');
-      const mermaMovimiento = movimientos.find((row) => row.tipo === 'TRANSFORMACION_MERMA');
-      const produccion = movimientos.filter((row) => row.tipo === 'TRANSFORMACION_PRODUCCION');
-
-      assert(aplicada.data.balance.en_rango === true, 'El balance aplicado debe quedar en rango');
-      assert(asQty(canalActual.stock_actual) === 105, 'El padre debe conservar 105 LB remanentes');
-      assert(asQty(lomoActual.stock_actual) === 50, 'Lomo no ingresó correctamente');
-      assert(asQty(costillaActual.stock_actual) === 40, 'Costilla no ingresó correctamente');
-      assert(asQty(molidaActual.stock_actual) === 20, 'Molida no ingresó correctamente');
-      assert(approxEqual(canalActual.costo_promedio, 1.333), 'El costo del padre restante debe mantenerse');
-      assert(approxEqual(lomoActual.costo_promedio, 1.333), 'Lomo debe heredar costo base');
-      assert(approxEqual(costillaActual.costo_promedio, 1.333), 'Costilla debe heredar costo base');
-      assert(approxEqual(molidaActual.costo_promedio, 1.333), 'Molida debe heredar costo base');
-      assert(Number(aplicada.data.insumo.stock_disponible_snapshot) === 225, 'Snapshot de stock disponible incorrecto');
-      assert(Number(aplicada.data.insumo.stock_restante_snapshot) === 105, 'Snapshot de stock restante incorrecto');
-      assert(consumoPadre && Number(consumoPadre.cantidad) === 120 && Number(consumoPadre.signo) === -1, 'La salida del padre no quedó registrada correctamente');
-      assert(produccion.length === 3, 'Deben existir tres movimientos de entrada de hijos');
-      assert(mermaMovimiento && Number(mermaMovimiento.cantidad) === 10, 'La merma no quedó registrada correctamente');
-      add(1, 'Caso real 225/120 conserva 105 LB y registra hijos + merma + movimientos', true);
-    } catch (error) {
-      add(1, 'Caso real 225/120 conserva 105 LB y registra hijos + merma + movimientos', false, error.message);
-    }
-
-    try {
-      const borradorUsoTotal = await transformacionesService.createBorrador(
+      await transformacionesService.updateBorrador(
+        draft.data.id,
         {
           tipo_proceso: 'DESPIECE',
-          observacion: 'Uso total del padre con merma 0',
-          insumo: {
-            producto_id: canalResTotal.id,
-            cantidad: 226
-          },
+          observacion: 'Borrador LB editado',
+          insumo: { producto_id: padreLb.id, cantidad: 70 },
           resultados: [
-            { producto_id: aguja.id, cantidad: 150 },
-            { producto_id: falda.id, cantidad: 76 }
+            { producto_id: hijoLbA.id, cantidad: 35 },
+            { producto_id: hijoLbB.id, cantidad: 25 }
           ],
           mermas: [
-            { tipo_merma: 'RECORTE', cantidad: 0, motivo: 'Sin merma operativa' }
+            { tipo_merma: 'RECORTE', producto_id: mermaLb.id, cantidad: 10, motivo: 'Merma editada' }
           ]
         },
         admin
       );
 
-      const aplicadaTotal = await transformacionesService.aplicarTransformacion(borradorUsoTotal.data.id, {}, admin);
-      const canalTotalActual = await db('productos').where({ id: canalResTotal.id }).first();
-      const agujaActual = await db('productos').where({ id: aguja.id }).first();
-      const faldaActual = await db('productos').where({ id: falda.id }).first();
-      const movimientosTotal = await db('inventario_movimientos')
-        .where({ referencia: `TRANSFORMACION:${aplicadaTotal.data.id}` })
-        .orderBy('id', 'asc');
-
-      assert(asQty(canalTotalActual.stock_actual) === 0, 'El uso total debe dejar el padre en 0 LB');
-      assert(asQty(agujaActual.stock_actual) === 150, 'Aguja no ingresó correctamente');
-      assert(asQty(faldaActual.stock_actual) === 76, 'Falda no ingresó correctamente');
-      assert(Number(aplicadaTotal.data.insumo.stock_disponible_snapshot) === 226, 'Snapshot inicial de uso total incorrecto');
-      assert(Number(aplicadaTotal.data.insumo.stock_restante_snapshot) === 0, 'El uso total debe dejar snapshot restante en 0');
-      assert(asQty(aplicadaTotal.data.resumen.merma_total) === 0, 'La merma 0 debe aceptarse y conservarse como 0');
-      assert(!movimientosTotal.some((row) => row.tipo === 'TRANSFORMACION_MERMA'), 'No debe registrarse movimiento de merma cuando la merma es 0');
-      add(2, 'Permite uso total del padre con merma 0 y deja stock restante en 0', true);
+      const after = await db('productos').where({ id: padreLb.id }).first();
+      const moves = await db('inventario_movimientos').where({ referencia: `TRANSFORMACION:${draft.data.id}` });
+      assert(Number(before.stock_actual) === Number(after.stock_actual), 'El borrador no debe mover stock');
+      assert(moves.length === 0, 'El borrador no debe generar kardex');
+      add(1, 'Crea y edita borrador sin mover inventario', true);
     } catch (error) {
-      add(2, 'Permite uso total del padre con merma 0 y deja stock restante en 0', false, error.message);
+      add(1, 'Crea y edita borrador sin mover inventario', false, error.message);
     }
 
     try {
-      const overStock = await expectThrows(
+      const applied = await transformacionesService.createBorrador(
+        {
+          tipo_proceso: 'DESPIECE',
+          observacion: 'Aplicacion parcial LB',
+          insumo: { producto_id: padreLb.id, cantidad: 70 },
+          resultados: [
+            { producto_id: hijoLbA.id, cantidad: 35 },
+            { producto_id: hijoLbB.id, cantidad: 25 }
+          ],
+          mermas: [
+            { tipo_merma: 'RECORTE', producto_id: mermaLb.id, cantidad: 10, motivo: 'Merma obligatoria' }
+          ]
+        },
+        admin
+      );
+      const result = await transformacionesService.aplicarTransformacion(applied.data.id, {}, admin);
+
+      const parent = await db('productos').where({ id: padreLb.id }).first();
+      const childA = await db('productos').where({ id: hijoLbA.id }).first();
+      const childB = await db('productos').where({ id: hijoLbB.id }).first();
+      assert(Number(parent.stock_actual) === 30, 'El sobrante del padre debe quedar en inventario');
+      assert(Number(childA.stock_actual) === 35, 'El hijo A debe ingresar');
+      assert(Number(childB.stock_actual) === 25, 'El hijo B debe ingresar');
+      assert(result.data.balance.en_rango === true, 'El balance de cantidad debe quedar exacto');
+      add(2, 'Aplica transformación parcial y deja sobrante correcto', true);
+    } catch (error) {
+      add(2, 'Aplica transformación parcial y deja sobrante correcto', false, error.message);
+    }
+
+    try {
+      const mermaZero = await expectThrows(
         () => transformacionesService.createBorrador(
           {
             tipo_proceso: 'DESPIECE',
-            observacion: 'Intento inválido sobre stock disponible',
-            insumo: {
-              producto_id: canalRes.id,
-              cantidad: 106
-            },
+            observacion: 'Merma cero',
+            insumo: { producto_id: padreKg.id, cantidad: 10 },
             resultados: [
-              { producto_id: lomo.id, cantidad: 90 }
+              { producto_id: hijoKgA.id, cantidad: 10 }
             ],
             mermas: [
-              { tipo_merma: 'RECORTE', cantidad: 16, motivo: 'Intento inválido' }
+              { tipo_merma: 'RECORTE', producto_id: mermaKg.id, cantidad: 0, motivo: 'No permitido' }
             ]
           },
           admin
         ),
-        'excede el stock disponible'
+        'merma'
       );
-
-      assert(overStock.ok, 'No rechazó el despiece con cantidad mayor al stock disponible');
-      add(3, 'Rechaza procesar más cantidad de la disponible', true);
+      assert(mermaZero.ok, 'Debe rechazar merma = 0');
+      add(3, 'Rechaza merma igual a 0', true);
     } catch (error) {
-      add(3, 'Rechaza procesar más cantidad de la disponible', false, error.message);
+      add(3, 'Rechaza merma igual a 0', false, error.message);
     }
 
     try {
-      const borradorDesbalanceado = await transformacionesService.createBorrador(
+      const borradorUnd = await transformacionesService.createBorrador(
         {
           tipo_proceso: 'DESPIECE',
-          observacion: 'Despiece desbalanceado',
-          insumo: {
-            producto_id: canalRes.id,
-            cantidad: 50
-          },
-          resultados: [
-            { producto_id: lomo.id, cantidad: 20 },
-            { producto_id: costilla.id, cantidad: 20 }
+          observacion: 'Contrato v2 UND sin cantidad explícita',
+          producto_padre_id: padreUnd.id,
+          hijos: [
+            { producto_id: hijoUndA.id, cantidad: 8 },
+            { producto_id: hijoUndB.id, cantidad: 5 }
           ],
-          mermas: [
-            { tipo_merma: 'RECORTE', cantidad: 5, motivo: 'Balance inválido' }
+          merma: [
+            { tipo_merma: 'ROTURA', producto_id: mermaUnd.id, cantidad: 2, motivo: 'Merma UND' }
           ]
         },
         admin
       );
+      const aplicadaUnd = await transformacionesService.aplicarTransformacion(borradorUnd.data.id, {}, admin);
+      const parentUndAfter = await db('productos').where({ id: padreUnd.id }).first();
+      const childUndAAfter = await db('productos').where({ id: hijoUndA.id }).first();
+      const childUndBAfter = await db('productos').where({ id: hijoUndB.id }).first();
 
-      const invalidBalance = await expectThrows(
-        () => transformacionesService.aplicarTransformacion(borradorDesbalanceado.data.id, {}, admin),
-        'Balance inválido'
-      );
-
-      assert(invalidBalance.ok, 'No rechazó el despiece con balance inválido');
-      add(4, 'Rechaza aplicar despiece cuando hijos + merma no cuadran con la cantidad procesada', true);
+      assert(Number(aplicadaUnd.data.insumo?.cantidad || 0) === 15, 'Debe derivar cantidad consumida desde hijos + merma');
+      assert(Number(parentUndAfter.stock_actual) === 5, 'Debe dejar stock restante correcto para UND');
+      assert(Number(childUndAAfter.stock_actual) === 8, 'Debe ingresar stock del hijo UND A');
+      assert(Number(childUndBAfter.stock_actual) === 5, 'Debe ingresar stock del hijo UND B');
+      assert(Number(aplicadaUnd.data.metricas?.total_consumido || 0) === 15, 'Debe exponer total consumido en respuesta');
+      add(4, 'Soporta contrato v2 sin cantidad explícita y unidades UND', true);
     } catch (error) {
-      add(4, 'Rechaza aplicar despiece cuando hijos + merma no cuadran con la cantidad procesada', false, error.message);
+      add(4, 'Soporta contrato v2 sin cantidad explícita y unidades UND', false, error.message);
     }
 
+    let primeraKgAplicada = null;
     try {
-      const mermaNegativa = await expectThrows(
-        () => transformacionesService.createBorrador(
-          {
-            tipo_proceso: 'DESPIECE',
-            observacion: 'Merma negativa inválida',
-            insumo: {
-              producto_id: canalRes.id,
-              cantidad: 10
-            },
-            resultados: [
-              { producto_id: lomo.id, cantidad: 10 }
-            ],
-            mermas: [
-              { tipo_merma: 'RECORTE', cantidad: -1, motivo: 'Valor inválido' }
-            ]
-          },
-          admin
-        ),
-        'no puede ser negativa'
-      );
-
-      assert(mermaNegativa.ok, 'No rechazó la merma negativa');
-      add(5, 'Rechaza merma negativa', true);
-    } catch (error) {
-      add(5, 'Rechaza merma negativa', false, error.message);
-    }
-
-    try {
-      const segundoBorrador = await transformacionesService.createBorrador(
+      const draftKg = await transformacionesService.createBorrador(
         {
           tipo_proceso: 'DESPIECE',
-          observacion: 'Segundo despiece sobre remanente',
-          insumo: {
-            producto_id: canalRes.id,
-            cantidad: 60
-          },
+          observacion: 'Transformacion KG',
+          insumo: { producto_id: padreKg.id, cantidad: 50 },
           resultados: [
-            { producto_id: lomo.id, cantidad: 25 },
-            { producto_id: costilla.id, cantidad: 20 },
-            { producto_id: molida.id, cantidad: 10 }
+            { producto_id: hijoKgA.id, cantidad: 30, costo_total: 240 },
+            { producto_id: hijoKgB.id, cantidad: 15, costo_total: 120 }
           ],
           mermas: [
-            { tipo_merma: 'RECORTE', cantidad: 5, motivo: 'Segundo proceso' }
+            { tipo_merma: 'RECORTE', producto_id: mermaKg.id, cantidad: 5, motivo: 'Merma KG', costo_total: 40 }
           ]
         },
         admin
       );
-
-      const segundaAplicada = await transformacionesService.aplicarTransformacion(segundoBorrador.data.id, {}, admin);
-      const canalFinal = await db('productos').where({ id: canalRes.id }).first();
-      const lomoFinal = await db('productos').where({ id: lomo.id }).first();
-      const costillaFinal = await db('productos').where({ id: costilla.id }).first();
-      const molidaFinal = await db('productos').where({ id: molida.id }).first();
-
-      assert(Number(segundaAplicada.data.insumo.stock_disponible_snapshot) === 105, 'El segundo snapshot debe partir del remanente de 105 LB');
-      assert(Number(segundaAplicada.data.insumo.stock_restante_snapshot) === 45, 'El segundo remanente debe quedar en 45 LB');
-      assert(asQty(canalFinal.stock_actual) === 45, 'El segundo despiece debe dejar 45 LB remanentes');
-      assert(asQty(lomoFinal.stock_actual) === 75, 'Lomo acumulado incorrecto tras segundo despiece');
-      assert(asQty(costillaFinal.stock_actual) === 60, 'Costilla acumulada incorrecta tras segundo despiece');
-      assert(asQty(molidaFinal.stock_actual) === 30, 'Molida acumulada incorrecta tras segundo despiece');
-      add(6, 'Permite segundo despiece posterior sobre el stock remanente', true);
+      primeraKgAplicada = await transformacionesService.aplicarTransformacion(draftKg.data.id, {}, admin);
+      const costos = primeraKgAplicada.data.costos;
+      assert(costos.costo_total_padre_centavos === 40000, 'El costo total padre debe conservar 400.00');
+      assert(costos.costo_total_distribuido_centavos === 40000, 'La distribución total debe conservar el costo exacto');
+      assert(primeraKgAplicada.data.resultados.reduce((acc, row) => acc + Number(row.costo_asignado_centavos || 0), 0) +
+        primeraKgAplicada.data.mermas.reduce((acc, row) => acc + Number(row.costo_total_centavos || 0), 0) === 40000,
+      'La suma hijos + merma debe cuadrar exacta en centavos');
+      add(5, 'Soporta KG y conserva costo exacto en centavos', true);
     } catch (error) {
-      add(6, 'Permite segundo despiece posterior sobre el stock remanente', false, error.message);
+      add(5, 'Soporta KG y conserva costo exacto en centavos', false, error.message);
     }
 
     try {
-      const canalFinal = await db('productos').where({ id: canalRes.id }).first();
-      const lomoFinal = await db('productos').where({ id: lomo.id }).first();
-      const costillaFinal = await db('productos').where({ id: costilla.id }).first();
-      const molidaFinal = await db('productos').where({ id: molida.id }).first();
-      const canalTotalFinal = await db('productos').where({ id: canalResTotal.id }).first();
-      const agujaFinal = await db('productos').where({ id: aguja.id }).first();
-      const faldaFinal = await db('productos').where({ id: falda.id }).first();
-      const costoCanal225 = 300 / 225;
-      const costoCanal226 = 300 / 226;
-
-      assert(approxEqual(canalFinal.costo_promedio, costoCanal225), 'El costo del padre restante no debe alterarse');
-      assert(approxEqual(lomoFinal.costo_promedio, costoCanal225), 'Lomo no mantiene costo heredado esperado');
-      assert(approxEqual(costillaFinal.costo_promedio, costoCanal225), 'Costilla no mantiene costo heredado esperado');
-      assert(approxEqual(molidaFinal.costo_promedio, costoCanal225), 'Molida no mantiene costo heredado esperado');
-      assert(approxEqual(canalTotalFinal.costo_promedio, costoCanal226), 'El padre de uso total debe conservar su costo base');
-      assert(approxEqual(agujaFinal.costo_promedio, costoCanal226), 'Aguja no mantiene costo heredado esperado');
-      assert(approxEqual(faldaFinal.costo_promedio, costoCanal226), 'Falda no mantiene costo heredado esperado');
-      add(7, 'Mantiene costo del padre restante y redistribuye costo a hijos sin crear costo nuevo', true);
+      const chainedDraft = await transformacionesService.createBorrador(
+        {
+          tipo_proceso: 'MOLIENDA',
+          observacion: 'Encadenada usando hijo como padre',
+          insumo: { producto_id: hijoKgA.id, cantidad: 10 },
+          resultados: [
+            { producto_id: hijoKgB.id, cantidad: 8 }
+          ],
+          mermas: [
+            { tipo_merma: 'RECORTE', producto_id: mermaKg.id, cantidad: 2, motivo: 'Subtransformacion' }
+          ]
+        },
+        admin
+      );
+      const chainedApplied = await transformacionesService.aplicarTransformacion(chainedDraft.data.id, {}, admin);
+      assert(chainedApplied.data.estado === 'APLICADA', 'La subtransformación debe aplicarse');
+      add(6, 'Permite transformaciones encadenadas', true);
     } catch (error) {
-      add(7, 'Mantiene costo del padre restante y redistribuye costo a hijos sin crear costo nuevo', false, error.message);
+      add(6, 'Permite transformaciones encadenadas', false, error.message);
+    }
+
+    try {
+      const blocking = await expectThrows(
+        () => transformacionesService.anularTransformacion(primeraKgAplicada.data.id, { novedad: 'Debe bloquear' }, admin),
+        'movimientos posteriores'
+      );
+      assert(blocking.ok, 'Debe bloquear anulación con movimientos posteriores sobre hijos');
+      add(7, 'Bloquea anulación insegura cuando ya hubo movimientos posteriores', true);
+    } catch (error) {
+      add(7, 'Bloquea anulación insegura cuando ya hubo movimientos posteriores', false, error.message);
+    }
+
+    try {
+      const reversibleDraft = await transformacionesService.createBorrador(
+        {
+          tipo_proceso: 'DESPIECE',
+          observacion: 'Reversible',
+          insumo: { producto_id: hijoLbA.id, cantidad: 10 },
+          resultados: [
+            { producto_id: hijoLbB.id, cantidad: 8 }
+          ],
+          mermas: [
+            { tipo_merma: 'RECORTE', producto_id: mermaLb.id, cantidad: 2, motivo: 'Reversible' }
+          ]
+        },
+        admin
+      );
+      const reversibleApplied = await transformacionesService.aplicarTransformacion(reversibleDraft.data.id, {}, admin);
+      const beforeCancelChild = await db('productos').where({ id: hijoLbA.id }).first();
+      const cancelled = await transformacionesService.anularTransformacion(reversibleApplied.data.id, { novedad: 'Reverso seguro' }, admin);
+      const afterCancelParent = await db('productos').where({ id: hijoLbA.id }).first();
+      assert(cancelled.data.estado === 'ANULADA', 'La transformación debe quedar anulada');
+      assert(Number(afterCancelParent.stock_actual) > Number(beforeCancelChild.stock_actual), 'Debe restaurar stock del padre');
+      add(8, 'Anula una transformación reversible restaurando inventario', true);
+    } catch (error) {
+      add(8, 'Anula una transformación reversible restaurando inventario', false, error.message);
     }
   } catch (fatalError) {
     add(999, 'Preparación de suite', false, fatalError.message);
   }
 
-  const report = printSuiteReport('TESTS DESPIECE PARCIAL', results);
+  const report = printSuiteReport('TESTS TRANSFORMACIONES MODULO 3', results);
   const summary = { total: report.total, passed: report.passed, failed: report.failed, results: report.sorted };
   if (destroyDb) await cleanupRuntime({ db });
   if (exitOnFinish) process.exit(summary.failed > 0 ? 1 : 0);

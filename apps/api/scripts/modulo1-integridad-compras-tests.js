@@ -15,7 +15,7 @@ const { runModule1Diagnostic } = require('./modulo1-compras-integridad-diagnosti
 const dbFile = resolveDbFilePath({ nodeEnv: process.env.NODE_ENV || 'test' });
 
 async function prepareDb() {
-  await prepareDatabase(db, { seedProfile: 'demo' });
+  await prepareDatabase(db, { seedProfile: 'minimal' });
 }
 
 async function closeOpenShift(user) {
@@ -51,13 +51,13 @@ async function runSuite(options = {}) {
   let ordenContadoId = null;
 
   try {
-    const stockAntes = await db('productos').where({ id: 13 }).first();
+    const stockAntes = await db('productos').where({ id: 3 }).first();
     const orden = await comprasService.createOrden(
       {
-        proveedor_id: 1,
+        proveedor_id: 2,
         observacion: 'Modulo1 contado',
         autorizacion: { usuario: 'admin', password: 'admin123' },
-        items: [{ producto_id: 13, cantidad: 4 }]
+        items: [{ producto_id: 3, cantidad: 4 }]
       },
       cajero
     );
@@ -73,7 +73,7 @@ async function runSuite(options = {}) {
       cajero
     );
 
-    const stockDespues = await db('productos').where({ id: 13 }).first();
+    const stockDespues = await db('productos').where({ id: 3 }).first();
     const factura = await db('compras_facturas').where({ numero_factura: 'M1-CONT-01' }).first();
     const cajaRows = await db('caja_movimientos').where({
       tipo: 'COMPRA_CONTADO',
@@ -82,7 +82,7 @@ async function runSuite(options = {}) {
     });
 
     assert(Number(stockDespues.stock_actual) > Number(stockAntes.stock_actual), 'No incremento stock');
-    assert(Number(factura.proveedor_id) === 1 && Number(factura.orden_id) === Number(ordenContadoId), 'Factura contado inconsistente');
+    assert(Number(factura.proveedor_id) === 2 && Number(factura.orden_id) === Number(ordenContadoId), 'Factura contado inconsistente');
     assert(cajaRows.length > 0, 'Compra contado no impacto caja');
     add(1, 'Compra contado valida genera orden, recepcion, factura e inventario', true);
   } catch (error) {
@@ -95,7 +95,7 @@ async function runSuite(options = {}) {
         {
           observacion: 'Sin proveedor',
           autorizacion: { usuario: 'admin', password: 'admin123' },
-        items: [{ producto_id: 13, cantidad: 1 }]
+          items: [{ producto_id: 3, cantidad: 1 }]
         },
         cajero
       ),
@@ -105,14 +105,14 @@ async function runSuite(options = {}) {
   }
 
   try {
-    await db('proveedores').where({ id: 6 }).update({ activo: 0 });
+    await db('proveedores').where({ id: 2 }).update({ activo: 0 });
     const r = await expectThrows(
       () => comprasService.createOrden(
         {
-          proveedor_id: 6,
+          proveedor_id: 2,
           observacion: 'Proveedor inactivo',
           autorizacion: { usuario: 'admin', password: 'admin123' },
-        items: [{ producto_id: 21, cantidad: 2 }]
+          items: [{ producto_id: 2, cantidad: 2 }]
         },
         cajero
       ),
@@ -122,16 +122,16 @@ async function runSuite(options = {}) {
   } catch (error) {
     add(3, 'Compra con proveedor inactivo falla', false, error.message);
   } finally {
-    await db('proveedores').where({ id: 6 }).update({ activo: 1 });
+    await db('proveedores').where({ id: 2 }).update({ activo: 1 });
   }
 
   try {
     const orden = await comprasService.createOrden(
       {
-        proveedor_id: 4,
+        proveedor_id: 2,
         observacion: 'Proveedor sin credito',
         autorizacion: { usuario: 'admin', password: 'admin123' },
-        items: [{ producto_id: 19, cantidad: 5 }]
+        items: [{ producto_id: 2, cantidad: 5 }]
       },
       cajero
     );
@@ -157,7 +157,7 @@ async function runSuite(options = {}) {
     const stockAntes = await db('productos').where({ id: 1 }).first();
     const orden = await comprasService.createOrden(
       {
-        proveedor_id: 2,
+        proveedor_id: 1,
         observacion: 'Modulo1 credito',
         autorizacion: { usuario: 'admin', password: 'admin123' },
         items: [{ producto_id: 1, cantidad: 3 }]
@@ -181,7 +181,7 @@ async function runSuite(options = {}) {
 
     assert(Number(stockDespues.stock_actual) > Number(stockAntes.stock_actual), 'No incremento stock en compra credito');
     assert(Number(factura.orden_id) === Number(orden.data.orden.id), 'Factura credito sin orden_id');
-    assert(Number(cxp.proveedor_id) === 2, 'CxP sin proveedor correcto');
+    assert(Number(cxp.proveedor_id) === 1, 'CxP sin proveedor correcto');
     assert(cxp.documento_origen === 'FACTURA:M1-CRED-01', 'CxP sin documento_origen');
     assert(cxp.estado === 'APLICADO', 'CxP sin estado esperado');
     add(5, 'Compra credito valida genera factura y CxP consistente', true);
@@ -192,10 +192,10 @@ async function runSuite(options = {}) {
   try {
     const orden = await comprasService.createOrden(
       {
-        proveedor_id: 2,
+        proveedor_id: 1,
         observacion: 'Duplicado factura',
         autorizacion: { usuario: 'admin', password: 'admin123' },
-        items: [{ producto_id: 6, cantidad: 2 }]
+        items: [{ producto_id: 2, cantidad: 2 }]
       },
       cajero
     );
@@ -228,7 +228,7 @@ async function runSuite(options = {}) {
     const r = await expectThrows(
       () => db('compras_facturas').insert({
         orden_id: 1,
-        proveedor_id: 2,
+        proveedor_id: 1,
         numero_factura: 'M1-RAW-FACT',
         metodo_pago: 'CONTADO',
         total: 10
@@ -241,12 +241,12 @@ async function runSuite(options = {}) {
   {
     const r = await expectThrows(
       () => db('cxp_movimientos').insert({
-        proveedor_id: 1,
+        proveedor_id: 2,
         factura_id: 1,
         tipo: 'CARGO',
         monto: 10,
-        documento_origen: 'FACTURA:F-1001',
-        numero_documento: 'F-1001',
+        documento_origen: 'FACTURA:M1-CONT-01',
+        numero_documento: 'M1-CONT-01',
         fecha_emision: '2026-03-16',
         fecha_vencimiento: '2026-03-16',
         estado: 'APLICADO',
@@ -272,7 +272,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const pago = await require('../src/modules/cxp/cxp.service').pagarProveedor(2, {
+    const pago = await require('../src/modules/cxp/cxp.service').pagarProveedor(1, {
       factura_id: facturaCreditoId,
       monto: 5,
       referencia: 'M1-PAGO-01'

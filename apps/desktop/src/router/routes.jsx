@@ -5,6 +5,7 @@ import LoginPage from '../pages/auth/LoginPage';
 import DashboardPage from '../pages/dashboard/DashboardPage';
 import CajaPage from '../pages/caja/CajaPage';
 import NuevaVentaPage from '../pages/ventas/NuevaVentaPage';
+import VentaDetallePage from '../pages/ventas/VentaDetallePage';
 import VentasListPage from '../pages/ventas/VentasListPage';
 import ClientesPage from '../pages/clientes/ClientesPage';
 import ClienteDetallePage from '../pages/clientes/ClienteDetallePage';
@@ -22,6 +23,7 @@ import AuditoriaPage from '../pages/admin/AuditoriaPage';
 import SistemaPage from '../pages/admin/SistemaPage';
 import TransformacionesListPage from '../pages/transformaciones/TransformacionesListPage';
 import TransformacionFormPage from '../pages/transformaciones/TransformacionFormPage';
+import TransformacionDetallePage from '../pages/transformaciones/TransformacionDetallePage';
 
 export const appRoutes = [
   { path: '/', element: <RootRedirect /> },
@@ -38,7 +40,7 @@ export const appRoutes = [
             children: [
               { path: '/caja', element: <CajaPage /> },
               { path: '/ventas/nueva', element: <NuevaVentaPage /> },
-              { path: '/ventas/:id', element: <NuevaVentaPage /> },
+              { path: '/ventas/:id', element: <VentaDetallePage /> },
               { path: '/ventas', element: <VentasListPage /> },
               { path: '/clientes', element: <ClientesPage /> },
               { path: '/clientes/:id', element: <ClienteDetallePage /> }
@@ -58,7 +60,7 @@ export const appRoutes = [
               { path: '/transformaciones', element: <TransformacionesListPage /> },
               { path: '/transformaciones/nueva', element: <TransformacionFormPage /> },
               { path: '/transformaciones/:id/editar', element: <TransformacionFormPage /> },
-              { path: '/transformaciones/:id', element: <TransformacionFormPage /> }
+              { path: '/transformaciones/:id', element: <TransformacionDetallePage /> }
             ]
           },
           {

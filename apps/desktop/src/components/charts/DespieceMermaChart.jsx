@@ -13,23 +13,23 @@ export default function DespieceMermaChart({ data = [] }) {
     chart: {
       toolbar: { show: false }
     },
-    colors: [chartPalette.info, chartPalette.success, chartPalette.warning],
+    colors: [chartPalette.info, chartPalette.success, chartPalette.danger],
     stroke: {
       width: [2.5, 2.5, 2.5],
       curve: 'smooth'
     },
     xaxis: {
       categories,
-      labels: { style: { colors: '#64748b' } }
+      labels: { style: { colors: chartPalette.axis } }
     },
     yaxis: {
       labels: {
         formatter: (v) => `${Number(v || 0).toFixed(0)} LB`,
-        style: { colors: '#64748b' }
+        style: { colors: chartPalette.axis }
       }
     },
     grid: {
-      borderColor: '#e2e8f0'
+      borderColor: chartPalette.grid
     },
     tooltip: {
       y: {
@@ -42,7 +42,7 @@ export default function DespieceMermaChart({ data = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
       <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Despiece: entrada, salida útil y merma (LB)</p>
       <Chart
         type="line"
@@ -57,4 +57,3 @@ export default function DespieceMermaChart({ data = [] }) {
     </div>
   );
 }
-

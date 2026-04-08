@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import logoEmpresa from '../../public/LogoEmpresa.png';
 import { SidebarItem, SidebarSection } from '../../shared/ui';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { isGroupActive, navigationItems } from './posNavigation';
@@ -80,9 +81,7 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
               collapsed && 'justify-center'
             )}
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-brand-soft)] text-[var(--color-brand)] shadow-sm ring-1 ring-[var(--color-border)]">
-              <span className="text-[0.95rem] font-black">QK</span>
-            </div>
+            <img src={logoEmpresa} alt={negocioNombre} className="h-10 w-auto shrink-0 object-contain" />
 
             {!collapsed && (
               <div className="min-w-0 overflow-hidden text-left">

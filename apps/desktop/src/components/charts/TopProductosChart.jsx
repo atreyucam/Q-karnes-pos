@@ -18,10 +18,10 @@ export default function TopProductosChart({ data = [] }) {
     colors: [chartPalette.warning],
     xaxis: {
       categories,
-      labels: { style: { colors: '#64748b' } }
+      labels: { style: { colors: chartPalette.axis } }
     },
     grid: {
-      borderColor: '#e2e8f0'
+      borderColor: chartPalette.grid
     },
     tooltip: {
       theme: 'light'
@@ -29,7 +29,7 @@ export default function TopProductosChart({ data = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
       <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Top productos</p>
       <Chart type="bar" height={280} options={options} series={[{ name: 'Unidades', data: seriesData }]} />
     </div>

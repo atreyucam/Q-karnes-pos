@@ -42,8 +42,10 @@ function run() {
   }
 
   try {
-    assert(printTicket.includes('window.open'), 'No existe apertura de ventana de impresión');
-    assert(printTicket.includes('window.print()'), 'No existe trigger window.print para impresion simulada');
+    assert(printTicket.includes("document.createElement('iframe')"), 'No existe iframe de impresión aislado');
+    assert(printTicket.includes('frameWindow.print()'), 'No existe trigger de impresión sobre el iframe');
+    assert(printTicket.includes('hasPrinted'), 'No existe guard para evitar impresión duplicada');
+    assert(printTicket.includes("frameWindow.addEventListener('afterprint'"), 'No existe cierre tras afterprint');
     add(2, 'El flujo de ticket dispara impresion simulada', true);
   } catch (error) {
     add(2, 'El flujo de ticket dispara impresion simulada', false, error.message);

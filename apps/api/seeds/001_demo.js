@@ -4,66 +4,58 @@ const {
   buildSystemConfigRow
 } = require('../src/modules/configuracion/configuracion.defaults');
 
-function toDateOnly(value = new Date()) {
-  return new Date(value).toISOString().slice(0, 10);
-}
-
-function addDays(baseDate, days = 0) {
-  const date = new Date(`${toDateOnly(baseDate)}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + Number(days || 0));
-  return toDateOnly(date);
-}
+const CLEAN_TABLES = [
+  'inventario_conteo_detalle',
+  'inventario_conteos',
+  'transformacion_mermas',
+  'transformacion_resultados',
+  'transformacion_insumos',
+  'transformaciones',
+  'auditoria_eventos',
+  'ventas_anulaciones',
+  'cxp_movimientos',
+  'cxc_movimientos',
+  'devolucion_detalle',
+  'devoluciones',
+  'venta_pagos',
+  'venta_detalle',
+  'ventas',
+  'compras_recepcion_detalle',
+  'compras_recepciones',
+  'compras_facturas',
+  'compras_orden_detalle',
+  'compras_ordenes',
+  'proveedor_precios_historial',
+  'caja_movimientos',
+  'caja_turnos',
+  'mermas',
+  'inventario_valorizacion',
+  'inventario_movimientos',
+  'productos',
+  'categorias',
+  'proveedores',
+  'clientes',
+  'metodos_pago',
+  'configuracion_sistema',
+  'usuarios',
+  'roles'
+];
 
 /**
+ * Seed base del sistema:
+ * - deja la operacion totalmente vacia
+ * - conserva configuracion minima y metodos de pago
+ * - mantiene solo credenciales de acceso para admin y cajero
+ * - deja un catalogo minimo por flags para ventas y transformaciones
+ *
  * @param { import('knex').Knex } knex
  */
 exports.seed = async function seed(knex) {
-  const today = toDateOnly();
-  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== 'true') {
-    throw new Error('Seed demo bloqueado en producción. Defina ALLOW_DEMO_SEED=true solo si es intencional.');
-  }
-
-  const tables = [
-    'inventario_conteo_detalle',
-    'inventario_conteos',
-    'transformacion_mermas',
-    'transformacion_resultados',
-    'transformacion_insumos',
-    'transformaciones',
-    'auditoria_eventos',
-    'ventas_anulaciones',
-    'cxp_movimientos',
-    'cxc_movimientos',
-    'devolucion_detalle',
-    'devoluciones',
-    'venta_pagos',
-    'venta_detalle',
-    'ventas',
-    'compras_recepcion_detalle',
-    'compras_recepciones',
-    'compras_facturas',
-    'compras_orden_detalle',
-    'compras_ordenes',
-    'proveedor_precios_historial',
-    'caja_movimientos',
-    'caja_turnos',
-    'mermas',
-    'inventario_movimientos',
-    'productos',
-    'categorias',
-    'proveedores',
-    'clientes',
-    'metodos_pago',
-    'configuracion_sistema',
-    'usuarios',
-    'roles'
-  ];
-
-  for (const table of tables) {
+  for (const table of CLEAN_TABLES) {
     await knex(table).del();
   }
 
-  await knex.raw("DELETE FROM sqlite_sequence");
+  await knex.raw('DELETE FROM sqlite_sequence');
 
   await knex('roles').insert([
     { id: 1, nombre: 'ADMIN' },
@@ -84,7 +76,7 @@ exports.seed = async function seed(knex) {
     },
     {
       id: 2,
-      nombre: 'Cajero Demo',
+      nombre: 'Cajero',
       usuario: 'cajero',
       password_hash: bcrypt.hashSync('cajero123', 10),
       rol_id: 2,
@@ -92,378 +84,155 @@ exports.seed = async function seed(knex) {
     }
   ]);
 
+  await knex('categorias').insert([
+    { id: 1, nombre: 'Canales y bases', activo: 1 },
+    { id: 2, nombre: 'Cortes y venta', activo: 1 },
+    { id: 3, nombre: 'Insumos', activo: 1 },
+    { id: 4, nombre: 'Mermas', activo: 1 }
+  ]);
+
   await knex('proveedores').insert([
-    { id: 1, nombre: 'Pronaca', telefono: '0991110001', direccion: 'Av. Eloy Alfaro y 10 de Agosto', observacion: 'Proveedor principal de pollo', tiene_credito: 1, dias_pago: 15, activo: 1 },
-    { id: 2, nombre: 'AgroCarnes Ecuador', telefono: '0991110002', direccion: 'Parque Industrial Norte', observacion: 'Entrega diaria bajo pedido', tiene_credito: 1, dias_pago: 12, activo: 1 },
-    { id: 3, nombre: 'Lacteos Andinos', telefono: '0991110003', direccion: 'Sangolqui centro', observacion: 'Despachos martes y viernes con credito semanal', tiene_credito: 1, dias_pago: 7, activo: 1 },
-    { id: 4, nombre: 'Descartables Express', telefono: '0991110004', direccion: 'Av. Maldonado Km 3', observacion: 'Pago contado en entrega', tiene_credito: 0, dias_pago: 0, activo: 1 },
-    { id: 5, nombre: 'Embutidos Don Pepe', telefono: '0991110005', direccion: 'Calderon, lote 22', observacion: 'Linea premium de embutidos', tiene_credito: 1, dias_pago: 7, activo: 1 },
-    { id: 6, nombre: 'Mercado Mayorista Central', telefono: '0991110006', direccion: 'Sector mayorista sur', observacion: 'Facturacion consolidada mensual', tiene_credito: 1, dias_pago: 30, activo: 1 }
-  ]);
-
-  const categorias = [
-    { id: 1, nombre: 'Carnes Res', activo: 1 },
-    { id: 2, nombre: 'Carnes Cerdo', activo: 1 },
-    { id: 3, nombre: 'Embutidos', activo: 1 },
-    { id: 4, nombre: 'Pollo', activo: 1 },
-    { id: 5, nombre: 'Lacteos', activo: 1 },
-    { id: 6, nombre: 'Descartables', activo: 1 },
-    { id: 7, nombre: 'Condimentos', activo: 1 },
-    { id: 8, nombre: 'Platos preparados', activo: 1 }
-  ];
-
-  await knex('categorias').insert(categorias);
-
-  const productos = [
-    ['P001', 'Costilla de res', 1, 'LB', 5.9, 7.3, 61.0, 8.0],
-    ['P002', 'Pulpa de res', 1, 'LB', 6.4, 8.1, 55.5, 7.0],
-    ['P003', 'Lomo fino de res', 1, 'LB', 7.8, 9.9, 39.25, 5.0],
-    ['P004', 'Molida especial res', 1, 'LB', 5.2, 6.8, 68.7, 10.0],
-    ['P005', 'Bistec de res', 1, 'LB', 6.1, 7.9, 43.3, 8.0],
-
-    ['P006', 'Chuleta de cerdo', 2, 'LB', 4.1, 5.9, 61.0, 7.0],
-    ['P007', 'Lomo de cerdo', 2, 'LB', 4.4, 6.2, 35.4, 6.0],
-    ['P008', 'Costilla de cerdo', 2, 'LB', 4.0, 5.8, 37.5, 6.0],
-    ['P009', 'Pernil de cerdo', 2, 'LB', 3.7, 5.4, 52.6, 9.0],
-
-    ['P010', 'Chorizo artesanal', 3, 'UND', 1.4, 2.2, 105, 15],
-    ['P011', 'Morcilla', 3, 'UND', 1.1, 1.9, 82, 12],
-    ['P012', 'Longaniza ahumada', 3, 'UND', 1.6, 2.5, 58, 10],
-
-    ['P013', 'Pechuga de pollo', 4, 'LB', 2.8, 3.95, 97.2, 12.0],
-    ['P014', 'Pierna muslo de pollo', 4, 'LB', 2.2, 3.3, 87.9, 11.0],
-    ['P015', 'Pollo entero', 4, 'UND', 4.4, 6.3, 44, 8],
-    ['P016', 'Alitas de pollo', 4, 'LB', 2.6, 3.7, 44.6, 7.0],
-
-    ['P017', 'Queso fresco 250g', 5, 'UND', 1.4, 2.1, 55, 10],
-    ['P018', 'Queso mozzarella 250g', 5, 'UND', 1.8, 2.8, 40, 8],
-
-    ['P019', 'Platos desechables x25', 6, 'UND', 0.9, 1.6, 120, 25],
-    ['P020', 'Vasos desechables x25', 6, 'UND', 0.7, 1.35, 140, 30],
-    ['P021', 'Cucharas desechables x50', 6, 'UND', 0.6, 1.1, 160, 20],
-    ['P022', 'Servilletas x100', 6, 'UND', 0.5, 0.95, 172, 35],
-
-    ['P023', 'Sal parrillera 1kg', 7, 'UND', 0.8, 1.5, 80, 10],
-    ['P024', 'Ajo en pasta 500g', 7, 'UND', 1.1, 1.95, 62, 8],
-
-    ['P025', 'Lasana familiar', 8, 'UND', 5.2, 8.5, 18, 4]
-  ];
-
-  await knex('productos').insert(
-    productos.map((p, idx) => ({
-      id: idx + 1,
-      codigo: p[0],
-      nombre: p[1],
-      categoria_id: p[2],
-      unidad: p[3],
-      unidad_medida: p[3],
-      costo_promedio: p[4],
-      precio_venta: p[5],
-      precio_referencia: p[5],
-      stock_actual: p[6],
-      stock_minimo: p[7],
+    {
+      id: 1,
+      nombre: 'Frigorífico Central',
+      telefono: '0991110001',
+      direccion: 'Av. Industrial 100',
+      observacion: 'Proveedor base para compras valorizadas',
+      tiene_credito: 1,
+      dias_pago: 15,
       activo: 1
-    }))
-  );
-
-  await knex('clientes').insert([
-    { id: 1, nombre: 'Cliente credito demo', telefono: '0980000001', direccion: 'Quito norte', observacion: 'Cliente frecuente', dias_credito: 7, activo: 1 },
-    { id: 2, nombre: 'Restaurante El Buen Sabor', telefono: '0980000002', direccion: 'La Floresta', observacion: 'Compra semanal a credito', dias_credito: 14, activo: 1 },
-    { id: 3, nombre: 'Dona Maria', telefono: '0980000003', direccion: 'Comite del pueblo', observacion: 'Preferencia por pago mixto', dias_credito: 7, activo: 1 },
-    { id: 4, nombre: 'Panaderia San Juan', telefono: '0980000004', direccion: 'Centro historico', observacion: null, dias_credito: 10, activo: 1 },
-    { id: 5, nombre: 'Cafeteria Central', telefono: '0980000005', direccion: 'La Carolina', observacion: null, dias_credito: 7, activo: 1 },
-    { id: 6, nombre: 'Comedor Mi Tierra', telefono: '0980000006', direccion: 'Sur de Quito', observacion: null, dias_credito: 12, activo: 1 },
-    { id: 7, nombre: 'Hotel Los Andes', telefono: '0980000007', direccion: 'Av. Amazonas', observacion: null, dias_credito: 15, activo: 1 },
-    { id: 8, nombre: 'Mercado Las Flores', telefono: '0980000008', direccion: 'Mercado central', observacion: null, dias_credito: 7, activo: 1 },
-    { id: 9, nombre: 'Asadero Don Pepe', telefono: '0980000009', direccion: 'Cotocollao', observacion: null, dias_credito: 14, activo: 1 },
-    { id: 10, nombre: 'Delicias de Casa', telefono: '0980000010', direccion: 'Tumbaco', observacion: null, dias_credito: 10, activo: 1 },
-    { id: 11, nombre: 'Bistro Colonial', telefono: '0980000011', direccion: 'Centro norte', observacion: null, dias_credito: 12, activo: 1 },
-    { id: 12, nombre: 'Fonda La Abuela', telefono: '0980000012', direccion: 'Calderon', observacion: null, dias_credito: 7, activo: 1 },
-    { id: 13, nombre: 'Cocina Express', telefono: '0980000013', direccion: 'Carcelen', observacion: null, dias_credito: 10, activo: 1 },
-    { id: 14, nombre: 'Parrilladas El Patio', telefono: '0980000014', direccion: 'Conocoto', observacion: null, dias_credito: 15, activo: 1 },
-    { id: 15, nombre: 'Mini Market Norte', telefono: '0980000015', direccion: 'Ponceano', observacion: null, dias_credito: 7, activo: 1 },
-    { id: 16, nombre: 'Cliente Inactivo Uno', telefono: '0980000016', direccion: 'Llano grande', observacion: 'No usar para credito', dias_credito: 0, activo: 0 },
-    { id: 17, nombre: 'Cliente Inactivo Dos', telefono: '0980000017', direccion: 'Solanda', observacion: 'Cuenta suspendida', dias_credito: 0, activo: 0 }
-  ]);
-
-  await knex('caja_turnos').insert([
-    {
-      id: 1,
-      usuario_id: 2,
-      fondo_inicial: 120,
-      estado: 'ABIERTO',
-      observacion: 'Turno demo abierto para pruebas'
-    }
-  ]);
-
-  await knex('compras_ordenes').insert([
-    { id: 1, proveedor_id: 1, estado: 'COMPLETA', observacion: 'Orden semanal res/pollo' },
-    { id: 2, proveedor_id: 2, estado: 'PARCIAL', observacion: 'Reposicion carnes frescas' },
-    { id: 3, proveedor_id: 3, estado: 'ABIERTA', observacion: 'Lacteos pendientes' },
-    { id: 4, proveedor_id: 4, estado: 'CANCELADA', observacion: 'Cancelada por proveedor' },
-    { id: 5, proveedor_id: 5, estado: 'COMPLETA', observacion: 'Embutidos completos' },
-    { id: 6, proveedor_id: 6, estado: 'PARCIAL', observacion: 'Descartables parcial' },
-    { id: 7, proveedor_id: 1, estado: 'ABIERTA', observacion: 'Pedido pollo fin de semana' },
-    { id: 8, proveedor_id: 2, estado: 'COMPLETA', observacion: 'Recepcion completa de res y pollo' },
-    { id: 9, proveedor_id: 3, estado: 'PARCIAL', observacion: 'Condimentos parcial' },
-    { id: 10, proveedor_id: 4, estado: 'CANCELADA', observacion: 'Presupuesto excedido' }
-  ]);
-
-  await knex('compras_orden_detalle').insert([
-    { id: 1, orden_id: 1, producto_id: 13, cantidad: 20, cantidad_recibida: 20, costo_unit_est: 2.9 },
-    { id: 2, orden_id: 1, producto_id: 10, cantidad: 30, cantidad_recibida: 30, costo_unit_est: 1.5 },
-    { id: 3, orden_id: 2, producto_id: 1, cantidad: 25, cantidad_recibida: 10, costo_unit_est: 6.1 },
-    { id: 4, orden_id: 2, producto_id: 6, cantidad: 40, cantidad_recibida: 20, costo_unit_est: 4.3 },
-    { id: 5, orden_id: 3, producto_id: 17, cantidad: 10, cantidad_recibida: 0, costo_unit_est: 1.6 },
-    { id: 6, orden_id: 3, producto_id: 22, cantidad: 12, cantidad_recibida: 0, costo_unit_est: 0.52 },
-    { id: 7, orden_id: 4, producto_id: 19, cantidad: 50, cantidad_recibida: 0, costo_unit_est: 1.0 },
-    { id: 8, orden_id: 4, producto_id: 20, cantidad: 60, cantidad_recibida: 0, costo_unit_est: 0.8 },
-    { id: 9, orden_id: 5, producto_id: 2, cantidad: 35, cantidad_recibida: 35, costo_unit_est: 6.5 },
-    { id: 10, orden_id: 5, producto_id: 11, cantidad: 25, cantidad_recibida: 25, costo_unit_est: 1.2 },
-    { id: 11, orden_id: 6, producto_id: 21, cantidad: 100, cantidad_recibida: 60, costo_unit_est: 0.65 },
-    { id: 12, orden_id: 6, producto_id: 24, cantidad: 90, cantidad_recibida: 20, costo_unit_est: 1.15 },
-    { id: 13, orden_id: 7, producto_id: 15, cantidad: 15, cantidad_recibida: 0, costo_unit_est: 4.8 },
-    { id: 14, orden_id: 7, producto_id: 18, cantidad: 10, cantidad_recibida: 0, costo_unit_est: 1.95 },
-    { id: 15, orden_id: 8, producto_id: 3, cantidad: 22, cantidad_recibida: 22, costo_unit_est: 8.0 },
-    { id: 16, orden_id: 8, producto_id: 14, cantidad: 18, cantidad_recibida: 18, costo_unit_est: 2.35 },
-    { id: 17, orden_id: 9, producto_id: 4, cantidad: 45, cantidad_recibida: 15, costo_unit_est: 5.3 },
-    { id: 18, orden_id: 9, producto_id: 23, cantidad: 55, cantidad_recibida: 30, costo_unit_est: 0.85 },
-    { id: 19, orden_id: 10, producto_id: 25, cantidad: 14, cantidad_recibida: 0, costo_unit_est: 5.5 },
-    { id: 20, orden_id: 10, producto_id: 12, cantidad: 20, cantidad_recibida: 0, costo_unit_est: 1.7 }
-  ]);
-
-  await knex('compras_facturas').insert([
-    { id: 1, orden_id: 1, proveedor_id: 1, numero_factura: 'F-1001', metodo_pago: 'CONTADO', total: 103 },
-    { id: 2, orden_id: 2, proveedor_id: 2, numero_factura: 'F-1002', metodo_pago: 'CREDITO', total: 147 },
-    { id: 3, orden_id: 5, proveedor_id: 5, numero_factura: 'F-1003', metodo_pago: 'CREDITO', total: 257.5 },
-    { id: 4, orden_id: 6, proveedor_id: 6, numero_factura: 'F-1004', metodo_pago: 'CONTADO', total: 62 },
-    { id: 5, orden_id: 8, proveedor_id: 2, numero_factura: 'F-1005', metodo_pago: 'CONTADO', total: 218.3 },
-    { id: 6, orden_id: 9, proveedor_id: 3, numero_factura: 'F-1006', metodo_pago: 'CREDITO', total: 105 }
-  ]);
-
-  await knex('compras_recepciones').insert([
-    { id: 1, orden_id: 1, total: 103, factura_id: 'F-1001', factura_compra_id: 1 },
-    { id: 2, orden_id: 2, total: 147, factura_id: 'F-1002', factura_compra_id: 2 },
-    { id: 3, orden_id: 5, total: 257.5, factura_id: 'F-1003', factura_compra_id: 3 },
-    { id: 4, orden_id: 6, total: 62, factura_id: 'F-1004', factura_compra_id: 4 },
-    { id: 5, orden_id: 8, total: 218.3, factura_id: 'F-1005', factura_compra_id: 5 },
-    { id: 6, orden_id: 9, total: 105, factura_id: 'F-1006', factura_compra_id: 6 }
-  ]);
-
-  await knex('compras_recepcion_detalle').insert([
-    { id: 1, recepcion_id: 1, orden_detalle_id: 1, cantidad: 20, costo_unit_real: 2.9, subtotal: 58 },
-    { id: 2, recepcion_id: 1, orden_detalle_id: 2, cantidad: 30, costo_unit_real: 1.5, subtotal: 45 },
-    { id: 3, recepcion_id: 2, orden_detalle_id: 3, cantidad: 10, costo_unit_real: 6.1, subtotal: 61 },
-    { id: 4, recepcion_id: 2, orden_detalle_id: 4, cantidad: 20, costo_unit_real: 4.3, subtotal: 86 },
-    { id: 5, recepcion_id: 3, orden_detalle_id: 9, cantidad: 35, costo_unit_real: 6.5, subtotal: 227.5 },
-    { id: 6, recepcion_id: 3, orden_detalle_id: 10, cantidad: 25, costo_unit_real: 1.2, subtotal: 30 },
-    { id: 7, recepcion_id: 4, orden_detalle_id: 11, cantidad: 60, costo_unit_real: 0.65, subtotal: 39 },
-    { id: 8, recepcion_id: 4, orden_detalle_id: 12, cantidad: 20, costo_unit_real: 1.15, subtotal: 23 },
-    { id: 9, recepcion_id: 5, orden_detalle_id: 15, cantidad: 22, costo_unit_real: 8.0, subtotal: 176 },
-    { id: 10, recepcion_id: 5, orden_detalle_id: 16, cantidad: 18, costo_unit_real: 2.35, subtotal: 42.3 },
-    { id: 11, recepcion_id: 6, orden_detalle_id: 17, cantidad: 15, costo_unit_real: 5.3, subtotal: 79.5 },
-    { id: 12, recepcion_id: 6, orden_detalle_id: 18, cantidad: 30, costo_unit_real: 0.85, subtotal: 25.5 }
-  ]);
-
-  await knex('proveedor_precios_historial').insert([
-    { proveedor_id: 1, producto_id: 13, costo_unit: 2.9 },
-    { proveedor_id: 1, producto_id: 10, costo_unit: 1.5 },
-    { proveedor_id: 2, producto_id: 1, costo_unit: 6.1 },
-    { proveedor_id: 2, producto_id: 6, costo_unit: 4.3 },
-    { proveedor_id: 5, producto_id: 2, costo_unit: 6.5 },
-    { proveedor_id: 5, producto_id: 11, costo_unit: 1.2 },
-    { proveedor_id: 6, producto_id: 21, costo_unit: 0.65 },
-    { proveedor_id: 6, producto_id: 24, costo_unit: 1.15 },
-    { proveedor_id: 2, producto_id: 3, costo_unit: 8.0 },
-    { proveedor_id: 2, producto_id: 14, costo_unit: 2.35 },
-    { proveedor_id: 3, producto_id: 4, costo_unit: 5.3 },
-    { proveedor_id: 3, producto_id: 23, costo_unit: 0.85 }
-  ]);
-
-  await knex('cxp_movimientos').insert([
-    { id: 1, proveedor_id: 2, factura_id: 2, tipo: 'CARGO', monto: 147, documento_origen: 'FACTURA:F-1002', numero_documento: 'F-1002', fecha_emision: today, fecha_vencimiento: addDays(today, 12), estado: 'APLICADO', referencia: 'FACTURA:F-1002', observacion: 'Compra a credito' },
-    { id: 2, proveedor_id: 5, factura_id: 3, tipo: 'CARGO', monto: 257.5, documento_origen: 'FACTURA:F-1003', numero_documento: 'F-1003', fecha_emision: today, fecha_vencimiento: addDays(today, 7), estado: 'APLICADO', referencia: 'FACTURA:F-1003', observacion: 'Compra a credito' },
-    { id: 3, proveedor_id: 3, factura_id: 6, tipo: 'CARGO', monto: 105, documento_origen: 'FACTURA:F-1006', numero_documento: 'F-1006', fecha_emision: today, fecha_vencimiento: addDays(today, 7), estado: 'APLICADO', referencia: 'FACTURA:F-1006', observacion: 'Compra a credito' },
-    { id: 4, proveedor_id: 2, factura_id: 2, tipo: 'ABONO', monto: 47, documento_origen: 'FACTURA:F-1002', numero_documento: 'F-1002', fecha_emision: today, fecha_vencimiento: addDays(today, 12), estado: 'APLICADO', referencia: 'PAGO-001', observacion: 'Pago parcial' },
-    { id: 5, proveedor_id: 5, factura_id: 3, tipo: 'ABONO', monto: 257.5, documento_origen: 'FACTURA:F-1003', numero_documento: 'F-1003', fecha_emision: today, fecha_vencimiento: addDays(today, 7), estado: 'APLICADO', referencia: 'PAGO-002', observacion: 'Pago total' }
-  ]);
-
-  await knex('inventario_movimientos').insert([
-    { tipo: 'COMPRA', producto_id: 13, cantidad: 20, referencia: 'RECEPCION:1', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 10, cantidad: 30, referencia: 'RECEPCION:1', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 1, cantidad: 10, referencia: 'RECEPCION:2', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 6, cantidad: 20, referencia: 'RECEPCION:2', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 2, cantidad: 35, referencia: 'RECEPCION:3', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 11, cantidad: 25, referencia: 'RECEPCION:3', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 21, cantidad: 60, referencia: 'RECEPCION:4', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 24, cantidad: 20, referencia: 'RECEPCION:4', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 3, cantidad: 22, referencia: 'RECEPCION:5', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 14, cantidad: 18, referencia: 'RECEPCION:5', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 4, cantidad: 15, referencia: 'RECEPCION:6', signo: 1 },
-    { tipo: 'COMPRA', producto_id: 23, cantidad: 30, referencia: 'RECEPCION:6', signo: 1 }
-  ]);
-
-  await knex('caja_movimientos').insert([
-    {
-      id: 1,
-      turno_id: 1,
-      tipo: 'INGRESO_MANUAL',
-      sentido: 'INGRESO',
-      concepto: 'Ingreso manual inicial',
-      monto: 20,
-      metodo_pago: 'EFECTIVO',
-      documento_origen: 'CAJA_MANUAL:1',
-      modulo_origen: 'CAJA',
-      origen_id: null,
-      usuario_id: 2,
-      observacion: 'Ingreso manual inicial'
     },
     {
       id: 2,
-      turno_id: 1,
-      turno_id: 1,
-      tipo: 'VENTA_CONTADO',
-      sentido: 'INGRESO',
-      concepto: 'Venta #1',
-      monto: 25,
-      metodo_pago: 'EFECTIVO',
-      documento_origen: 'VENTA:1',
-      modulo_origen: 'VENTAS',
-      origen_id: 1,
-      usuario_id: 2,
-      observacion: 'Cobro contado venta #1'
+      nombre: 'Empaques del Norte',
+      telefono: '0991110002',
+      direccion: 'Parque Logístico B2',
+      observacion: 'Proveedor base para insumos de contado',
+      tiene_credito: 0,
+      dias_pago: 0,
+      activo: 1
+    }
+  ]);
+
+  await knex('productos').insert([
+    {
+      id: 1,
+      codigo: 'CANAL-RES-001',
+      nombre: 'Canal res entera',
+      categoria_id: 1,
+      unidad: 'KG',
+      unidad_medida: 'KG',
+      costo_promedio: 4.2,
+      precio_venta: 0,
+      precio_referencia: 0,
+      stock_actual: 95.5,
+      stock_minimo: 12,
+      activo: 1,
+      es_vendible: 0,
+      es_transformable: 1,
+      es_insumo: 0,
+      es_merma: 0
+    },
+    {
+      id: 2,
+      codigo: 'CARNE-SUAVE-001',
+      nombre: 'Carne suave premium',
+      categoria_id: 2,
+      unidad: 'LB',
+      unidad_medida: 'LB',
+      costo_promedio: 5.1,
+      precio_venta: 6.8,
+      precio_referencia: 6.8,
+      stock_actual: 45,
+      stock_minimo: 8,
+      activo: 1,
+      es_vendible: 1,
+      es_transformable: 1,
+      es_insumo: 0,
+      es_merma: 0
     },
     {
       id: 3,
-      turno_id: 1,
-      tipo: 'VENTA_CREDITO',
-      sentido: 'INGRESO',
-      concepto: 'Venta crédito #2',
-      monto: 60,
-      metodo_pago: 'CREDITO_CLIENTE',
-      documento_origen: 'VENTA:2',
-      modulo_origen: 'VENTAS',
-      origen_id: 2,
-      usuario_id: 2,
-      observacion: 'Venta crédito demo'
+      codigo: 'CARNE-MOLIDA-001',
+      nombre: 'Carne molida premium',
+      categoria_id: 2,
+      unidad: 'LB',
+      unidad_medida: 'LB',
+      costo_promedio: 4.9,
+      precio_venta: 6.2,
+      precio_referencia: 6.2,
+      stock_actual: 30,
+      stock_minimo: 6,
+      activo: 1,
+      es_vendible: 1,
+      es_transformable: 0,
+      es_insumo: 0,
+      es_merma: 0
     },
     {
       id: 4,
-      turno_id: 1,
-      tipo: 'VENTA_TRANSFERENCIA',
-      sentido: 'INGRESO',
-      concepto: 'Venta #3',
-      monto: 40,
-      metodo_pago: 'TRANSFERENCIA',
-      documento_origen: 'VENTA:3',
-      modulo_origen: 'VENTAS',
-      origen_id: 3,
-      usuario_id: 2,
-      observacion: 'Venta transferencia demo'
-    }
-  ]);
-
-  await knex('ventas').insert([
-    {
-      id: 1,
-      turno_id: 1,
-      usuario_id: 2,
-      tipo: 'MOSTRADOR',
-      estado: 'EMITIDA',
-      cliente_id: null,
-      subtotal: 25,
-      descuento_total: 0,
-      total: 25,
-      observacion: 'Venta demo contado'
+      codigo: 'CONDIMENTO-ESP-001',
+      nombre: 'Condimento especial',
+      categoria_id: 3,
+      unidad: 'UND',
+      unidad_medida: 'UND',
+      costo_promedio: 1.35,
+      precio_venta: 0,
+      precio_referencia: 0,
+      stock_actual: 24,
+      stock_minimo: 4,
+      activo: 1,
+      es_vendible: 0,
+      es_transformable: 0,
+      es_insumo: 1,
+      es_merma: 0
     },
     {
-      id: 2,
-      turno_id: 1,
-      usuario_id: 2,
-      tipo: 'MOSTRADOR',
-      estado: 'EMITIDA',
-      cliente_id: 2,
-      subtotal: 60,
-      descuento_total: 0,
-      total: 60,
-      observacion: '[MP:CREDITO_CLIENTE] Venta demo credito'
-    },
-    {
-      id: 3,
-      turno_id: 1,
-      usuario_id: 2,
-      tipo: 'MOSTRADOR',
-      estado: 'EMITIDA',
-      cliente_id: 3,
-      subtotal: 40,
-      descuento_total: 0,
-      total: 40,
-      observacion: '[MP:TRANSFERENCIA] Venta demo transferencia'
+      id: 5,
+      codigo: 'RECORTE-GRASO-001',
+      nombre: 'Recorte graso',
+      categoria_id: 4,
+      unidad: 'KG',
+      unidad_medida: 'KG',
+      costo_promedio: 0.8,
+      precio_venta: 0,
+      precio_referencia: 0,
+      stock_actual: 8.5,
+      stock_minimo: 0,
+      activo: 1,
+      es_vendible: 0,
+      es_transformable: 0,
+      es_insumo: 0,
+      es_merma: 1
     }
   ]);
 
-  await knex('venta_detalle').insert([
-    { id: 1, venta_id: 1, producto_id: 10, cantidad: 5, precio_unit: 2.2, total_linea: 11 },
-    { id: 2, venta_id: 1, producto_id: 17, cantidad: 4, precio_unit: 2.1, total_linea: 8.4 },
-    { id: 3, venta_id: 1, producto_id: 19, cantidad: 4, precio_unit: 1.4, total_linea: 5.6 },
-    { id: 4, venta_id: 2, producto_id: 1, cantidad: 4, precio_unit: 7.5, total_linea: 30 },
-    { id: 5, venta_id: 2, producto_id: 6, cantidad: 5, precio_unit: 6, total_linea: 30 },
-    { id: 6, venta_id: 3, producto_id: 15, cantidad: 4, precio_unit: 6, total_linea: 24 },
-    { id: 7, venta_id: 3, producto_id: 11, cantidad: 8, precio_unit: 2, total_linea: 16 }
-  ]);
-
-  await knex('venta_pagos').insert([
-    { venta_id: 1, tipo: 'CONTADO', monto: 25 },
-    { venta_id: 2, tipo: 'CREDITO', monto: 60 },
-    { venta_id: 3, tipo: 'CONTADO', monto: 40 }
-  ]);
-
-  await knex('inventario_movimientos').insert([
-    { tipo: 'SALIDA_VENTA', producto_id: 10, cantidad: 5, referencia: 'VENTA:1', signo: -1 },
-    { tipo: 'SALIDA_VENTA', producto_id: 17, cantidad: 4, referencia: 'VENTA:1', signo: -1 },
-    { tipo: 'SALIDA_VENTA', producto_id: 19, cantidad: 4, referencia: 'VENTA:1', signo: -1 },
-    { tipo: 'SALIDA_VENTA', producto_id: 1, cantidad: 4, referencia: 'VENTA:2', signo: -1 },
-    { tipo: 'SALIDA_VENTA', producto_id: 6, cantidad: 5, referencia: 'VENTA:2', signo: -1 },
-    { tipo: 'SALIDA_VENTA', producto_id: 15, cantidad: 4, referencia: 'VENTA:3', signo: -1 },
-    { tipo: 'SALIDA_VENTA', producto_id: 11, cantidad: 8, referencia: 'VENTA:3', signo: -1 }
-  ]);
-
-  await knex('cxc_movimientos').insert([
-    { id: 1, cliente_id: 2, venta_id: 2, tipo: 'CARGO', monto: 60, numero_documento: 'VENTA:2', fecha_emision: today, fecha_vencimiento: addDays(today, 14), referencia: 'VENTA:2', observacion: 'Venta a credito' },
-    { id: 2, cliente_id: 2, venta_id: 2, tipo: 'ABONO', monto: 10, numero_documento: 'VENTA:2', fecha_emision: today, fecha_vencimiento: addDays(today, 14), referencia: 'ABONO-SEED', observacion: 'Abono inicial demo aplicado a factura #2' }
-  ]);
-
-  await knex('auditoria_eventos').insert([
-    {
-      entidad: 'SEED',
-      entidad_id: '1',
-      accion: 'LOAD_DEMO',
-      detalle: JSON.stringify({
-        proveedores: 6,
-        clientes: 17,
-        productos: 25,
-        ordenes_compra: 10,
-        ventas: 3
-      })
-    }
-  ]);
-
-  const stockRows = await knex('productos').select('id', 'stock_actual');
-  const movementRows = await knex('inventario_movimientos')
-    .select('producto_id')
-    .select(knex.raw('SUM(CAST(cantidad AS REAL) * CAST(signo AS REAL)) as stock_movimientos'))
-    .groupBy('producto_id');
-  const movementMap = new Map(movementRows.map((row) => [Number(row.producto_id), Number(row.stock_movimientos || 0)]));
-  const ajustesIniciales = stockRows
+  const ajustesIniciales = (await knex('productos').select('id', 'stock_actual'))
     .map((row) => {
-      const diferencia = Number(row.stock_actual || 0) - Number(movementMap.get(Number(row.id)) || 0);
-      if (Math.abs(diferencia) < 0.0001) return null;
+      const producto = [
+        { id: 1, costo_promedio: 4.2, costo_total: 401.1, costo_total_centavos: 40110, cantidad_base: 9550000000000 },
+        { id: 2, costo_promedio: 5.1, costo_total: 229.5, costo_total_centavos: 22950, cantidad_base: 2041165665000 },
+        { id: 3, costo_promedio: 4.9, costo_total: 147, costo_total_centavos: 14700, cantidad_base: 1360777110000 },
+        { id: 4, costo_promedio: 1.35, costo_total: 32.4, costo_total_centavos: 3240, cantidad_base: 24 },
+        { id: 5, costo_promedio: 0.8, costo_total: 6.8, costo_total_centavos: 680, cantidad_base: 850000000000 }
+      ].find((item) => item.id === Number(row.id));
+      const cantidad = Number(row.stock_actual || 0);
+      if (cantidad <= 0 || !producto) return null;
       return {
         tipo: 'AJUSTE_SEED_INICIAL',
         producto_id: row.id,
-        cantidad: Math.abs(diferencia),
+        cantidad,
         referencia: 'SEED:STOCK_INICIAL',
-        signo: diferencia >= 0 ? 1 : -1
+        signo: 1,
+        saldo_resultante: cantidad,
+        cantidad_base: producto.cantidad_base,
+        saldo_resultante_base: producto.cantidad_base,
+        origen_tipo: 'SEED_INICIAL',
+        origen_id: null,
+        costo_unitario: producto.costo_promedio,
+        costo_total: producto.costo_total,
+        costo_total_centavos: producto.costo_total_centavos,
+        costo_origen_tipo: 'SEED_INICIAL'
       };
     })
     .filter(Boolean);
@@ -471,4 +240,25 @@ exports.seed = async function seed(knex) {
   if (ajustesIniciales.length > 0) {
     await knex('inventario_movimientos').insert(ajustesIniciales);
   }
+
+  const valorizacionInicial = [
+    { producto_id: 1, cantidad: 95.5, costo_unitario: 4.2, costo_total: 401.1, costo_total_centavos: 40110, cantidad_base: 9550000000000 },
+    { producto_id: 2, cantidad: 45, costo_unitario: 5.1, costo_total: 229.5, costo_total_centavos: 22950, cantidad_base: 2041165665000 },
+    { producto_id: 3, cantidad: 30, costo_unitario: 4.9, costo_total: 147, costo_total_centavos: 14700, cantidad_base: 1360777110000 },
+    { producto_id: 4, cantidad: 24, costo_unitario: 1.35, costo_total: 32.4, costo_total_centavos: 3240, cantidad_base: 24 },
+    { producto_id: 5, cantidad: 8.5, costo_unitario: 0.8, costo_total: 6.8, costo_total_centavos: 680, cantidad_base: 850000000000 }
+  ].map((row) => ({
+    producto_id: row.producto_id,
+    origen_tipo: 'SEED_INICIAL',
+    origen_id: null,
+    cantidad: row.cantidad,
+    cantidad_base: row.cantidad_base,
+    costo_unitario: row.costo_unitario,
+    costo_total: row.costo_total,
+    costo_total_centavos: row.costo_total_centavos,
+    costo_origen_tipo: 'SEED_INICIAL',
+    referencia: 'SEED:STOCK_INICIAL'
+  }));
+
+  await knex('inventario_valorizacion').insert(valorizacionInicial);
 };

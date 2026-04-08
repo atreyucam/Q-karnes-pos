@@ -25,7 +25,7 @@ async function runSuite(options = {}) {
     await ventasService.createVenta(
       {
         cliente_id: null,
-        items: [{ producto_id: 3, cantidad: 3, precio_unit: 1 }],
+        items: [{ producto_id: 1, cantidad: 1, precio_unit: 3 }],
         pagos: { contado: 3, credito: 0 },
         descuento_total: 0
       },

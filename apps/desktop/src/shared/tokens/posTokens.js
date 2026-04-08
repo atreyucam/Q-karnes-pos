@@ -1,3 +1,5 @@
+import { chartPalette, colors } from './colorTokens';
+
 export const posTokens = {
   typography: {
     fontSans: '"Inter", "Segoe UI", "Trebuchet MS", sans-serif',
@@ -11,24 +13,31 @@ export const posTokens = {
     grandTotal: '36px'
   },
   colors: {
-    brand: '#7a1f2b',
-    brandHover: '#611924',
-    cashier: '#15803d',
-    cashierHover: '#166534',
-    danger: '#b42318',
-    warning: '#b54708',
-    info: '#1d4ed8',
-    success: '#15803d',
-    background: '#f6f4ef',
-    backgroundAlt: '#efe9df',
-    surface: '#ffffff',
-    surfaceAlt: '#f3f4f6',
-    surfaceMuted: '#f5f5f4',
-    border: '#d6d3d1',
-    borderStrong: '#b8b2aa',
-    text: '#1f2937',
-    textMuted: '#6b7280',
-    focus: '#2563eb'
+    brand: colors.primary.DEFAULT,
+    brandHover: colors.primary.hover,
+    brandSoft: colors.primary.soft,
+    cashier: colors.success.DEFAULT,
+    cashierHover: colors.success.hover,
+    cashierSoft: colors.success.soft,
+    danger: colors.danger.DEFAULT,
+    dangerSoft: colors.danger.soft,
+    warning: colors.warning.DEFAULT,
+    warningSoft: colors.warning.soft,
+    info: colors.info.DEFAULT,
+    infoSoft: colors.info.soft,
+    success: colors.success.DEFAULT,
+    successSoft: colors.success.soft,
+    background: colors.neutral.background,
+    backgroundAlt: colors.neutral.surfaceAlt,
+    surface: colors.neutral.surface,
+    surfaceAlt: colors.neutral.surfaceAlt,
+    surfaceMuted: colors.neutral.background,
+    border: colors.neutral.border,
+    borderStrong: colors.neutral.borderStrong,
+    text: colors.text.DEFAULT,
+    textMuted: colors.text.muted,
+    textSubtle: colors.text.subtle,
+    focus: colors.primary.DEFAULT
   },
   radii: {
     sm: '10px',
@@ -50,12 +59,4 @@ export const posTokens = {
     sidebarCollapsed: '88px',
     topbarHeight: '68px'
   }
-};
-
-export const chartPalette = {
-  brand: posTokens.colors.brand,
-  cashier: posTokens.colors.cashier,
-  warning: posTokens.colors.warning,
-  info: posTokens.colors.info,
-  neutral: '#6b7280'
 };

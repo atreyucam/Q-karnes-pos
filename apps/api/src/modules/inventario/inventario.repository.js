@@ -21,7 +21,10 @@ async function getProductoById(id, trx = db) {
 }
 
 async function updateStockMinimo(id, stockMinimo, trx = db) {
-  await trx('productos').where({ id }).update({ stock_minimo: stockMinimo });
+  const payload = typeof stockMinimo === 'object' && stockMinimo !== null
+    ? stockMinimo
+    : { stock_minimo: stockMinimo };
+  await trx('productos').where({ id }).update(payload);
   return trx('productos').where({ id }).first();
 }
 
@@ -82,12 +85,28 @@ async function setConteoEstado(id, estado, trx = db) {
 }
 
 async function setProductoStock(id, stock, trx = db) {
-  await trx('productos').where({ id }).update({ stock_actual: stock });
+  const payload = typeof stock === 'object' && stock !== null ? stock : { stock_actual: stock };
+  await trx('productos').where({ id }).update(payload);
+}
+
+async function setProductoStockAndCost(id, stock, costoPromedio, trx = db) {
+  const tx = typeof stock === 'object' && stock !== null && costoPromedio && typeof costoPromedio === 'function'
+    ? costoPromedio
+    : trx;
+  const payload = typeof stock === 'object' && stock !== null
+    ? stock
+    : { stock_actual: stock, costo_promedio: costoPromedio };
+  await tx('productos').where({ id }).update(payload);
 }
 
 async function insertMovimientos(rows, trx = db) {
   if (!rows.length) return;
   await trx('inventario_movimientos').insert(rows);
+}
+
+async function insertValorizacion(rows, trx = db) {
+  if (!rows.length) return;
+  await trx('inventario_valorizacion').insert(rows);
 }
 
 async function listMermas(trx = db) {
@@ -121,7 +140,9 @@ module.exports = {
   getConteoDetalle,
   setConteoEstado,
   setProductoStock,
+  setProductoStockAndCost,
   insertMovimientos,
+  insertValorizacion,
   listMermas,
   createMerma,
   listMovimientos

@@ -3,6 +3,7 @@ import { PiCurrencyDollar, PiEye } from 'react-icons/pi';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
+  BackButton,
   Button,
   Card,
   DeactivateEntityDialogs,
@@ -80,6 +81,23 @@ export default function ProveedorDetallePage() {
     const start = (pagina - 1) * PAGE_SIZE;
     return facturasOrdenadas.slice(start, start + PAGE_SIZE);
   }, [facturasOrdenadas, pagina]);
+  const facturaResumenSeleccionada = useMemo(
+    () => facturas.find((factura) => Number(factura.id) === Number(facturaDetalle?.factura?.id)) || null,
+    [facturaDetalle?.factura?.id, facturas]
+  );
+  const facturaPendiente = useMemo(() => {
+    if (facturaResumenSeleccionada) return Number(facturaResumenSeleccionada.pendiente || 0);
+
+    const movimientos = facturaDetalle?.movimientos || [];
+    const cargos = movimientos
+      .filter((movimiento) => movimiento.tipo === 'CARGO')
+      .reduce((acc, movimiento) => acc + Number(movimiento.monto || 0), 0);
+    const abonos = movimientos
+      .filter((movimiento) => movimiento.tipo === 'ABONO')
+      .reduce((acc, movimiento) => acc + Number(movimiento.monto || 0), 0);
+    const base = cargos > 0 ? cargos : Number(facturaDetalle?.factura?.total || 0);
+    return Math.max(0, base - abonos);
+  }, [facturaDetalle?.factura?.total, facturaDetalle?.movimientos, facturaResumenSeleccionada]);
 
   useEffect(() => {
     setPagina(1);
@@ -136,14 +154,13 @@ export default function ProveedorDetallePage() {
 
   return (
     <div className="space-y-5">
+      <BackButton to="/proveedores">Volver</BackButton>
+
       <PageHeader
         title="Detalle proveedor"
         description="Facturas, saldo pendiente y pagos."
         actions={(
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => navigate('/proveedores')}>
-              Volver
-            </Button>
             {proveedorDetalle && (
               <Button
                 variant={proveedorDetalle.activo ? 'danger' : 'primary'}
@@ -321,7 +338,7 @@ export default function ProveedorDetallePage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Detalle factura proveedor</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Resumen de compra y movimientos asociados.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Resumen de compra, pagos y trazabilidad de la factura.</p>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={() => setModalFactura(false)}>
             X
@@ -329,78 +346,129 @@ export default function ProveedorDetallePage() {
         </div>
 
         {facturaDetalle?.factura && (
-          <div className="mt-4 grid gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-4 md:grid-cols-2">
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Factura</span>
-                <span className="font-semibold text-[var(--color-text)]">{facturaDetalle.factura.numero_factura}</span>
+          <Card className="mt-4 grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Proveedor</p>
+                <p className="text-[1.12rem] font-bold text-[var(--color-text)]">{proveedorDetalle?.nombre || '-'}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Fecha</span>
-                <span className="font-semibold text-[var(--color-text)]">{formatDateQuito(facturaDetalle.factura.fecha)}</span>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Telefono</p>
+                <p className="font-semibold text-[var(--color-text)]">{proveedorDetalle?.telefono || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Credito / dias</p>
+                <p className="font-semibold text-[var(--color-text)]">
+                  {proveedorDetalle?.tiene_credito ? 'SI' : 'NO'} / {Number(proveedorDetalle?.dias_pago || 0)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Factura</p>
+                <p className="font-semibold text-[var(--color-text)]">{facturaDetalle.factura.numero_factura}</p>
               </div>
             </div>
 
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Metodo</span>
-                <StatusBadge status={facturaDetalle.factura.metodo_pago} />
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Fecha emision</p>
+                <p className="font-semibold text-[var(--color-text)]">{formatDateQuito(facturaDetalle.factura.fecha)}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Total</span>
-                <span className="font-semibold text-[var(--color-text)]">{formatMoney(facturaDetalle.factura.total)}</span>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Observacion</p>
+                <p className="font-semibold text-[var(--color-text)]">{facturaDetalle.factura.observacion || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Método de pago</p>
+                <div className="pt-1">
+                  <StatusBadge status={facturaDetalle.factura.metodo_pago} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Pendiente residual</p>
+                <p className={`font-semibold ${facturaPendiente > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
+                  {formatMoney(facturaPendiente)}
+                </p>
               </div>
             </div>
-          </div>
+          </Card>
         )}
 
         <div className="mt-4 space-y-4">
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">Producto</TablaCelda>
-                <TablaCelda as="th">Cantidad</TablaCelda>
-                <TablaCelda as="th" className="text-right">C.Unit</TablaCelda>
-                <TablaCelda as="th" className="text-right">Subtotal</TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {(facturaDetalle?.items || []).map((item) => (
-                <TablaFila key={item.id}>
-                  <TablaCelda>{item.producto_codigo} - {item.producto_nombre}</TablaCelda>
-                  <TablaCelda>{formatQtyByUnit(item.cantidad, item.unidad_medida || item.unidad, { fixedLB: true })}</TablaCelda>
-                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(item.costo_unit_real)}</TablaCelda>
-                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(item.subtotal)}</TablaCelda>
-                </TablaFila>
-              ))}
-            </TablaCuerpo>
-          </Tabla>
+          {(facturaResumenSeleccionada?.orden_id || facturaResumenSeleccionada?.recepcion_id || facturaResumenSeleccionada?.fecha_vencimiento) && (
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Orden asociada</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--color-text)]">
+                  {facturaResumenSeleccionada?.orden_id ? `#${facturaResumenSeleccionada.orden_id}` : '-'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Recepción asociada</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--color-text)]">
+                  {facturaResumenSeleccionada?.recepcion_id ? `#${facturaResumenSeleccionada.recepcion_id}` : '-'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Vencimiento</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--color-text)]">
+                  {facturaResumenSeleccionada?.fecha_vencimiento ? formatDateQuito(facturaResumenSeleccionada.fecha_vencimiento) : '-'}
+                </p>
+              </div>
+            </div>
+          )}
 
-          {(facturaDetalle?.movimientos || []).length > 0 && (
+          <Card className="space-y-3 p-4">
+            <p className="font-semibold text-[var(--color-text)]">Items factura</p>
             <Tabla>
               <TablaCabecera>
                 <tr>
-                  <TablaCelda as="th">Fecha</TablaCelda>
-                  <TablaCelda as="th">Tipo</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Monto</TablaCelda>
-                  <TablaCelda as="th">Observacion</TablaCelda>
+                  <TablaCelda as="th">Producto</TablaCelda>
+                  <TablaCelda as="th">Cantidad</TablaCelda>
+                  <TablaCelda as="th" className="text-right">C.Unit</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Subtotal</TablaCelda>
                 </tr>
               </TablaCabecera>
               <TablaCuerpo>
-                {(facturaDetalle.movimientos || []).map((movimiento) => (
-                  <TablaFila key={movimiento.id}>
-                    <TablaCelda>{formatDateQuito(movimiento.fecha)}</TablaCelda>
-                    <TablaCelda>
-                      <StatusBadge status={movimiento.tipo === 'ABONO' ? 'PARCIAL' : 'CREDITO'}>
-                        {movimiento.tipo}
-                      </StatusBadge>
-                    </TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(movimiento.monto)}</TablaCelda>
-                    <TablaCelda>{movimiento.observacion || '-'}</TablaCelda>
+                {(facturaDetalle?.items || []).map((item) => (
+                  <TablaFila key={item.id}>
+                    <TablaCelda>{item.producto_codigo} - {item.producto_nombre}</TablaCelda>
+                    <TablaCelda>{formatQtyByUnit(item.cantidad, item.unidad_medida || item.unidad, { fixedLB: true })}</TablaCelda>
+                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(item.costo_unit_real)}</TablaCelda>
+                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(item.subtotal)}</TablaCelda>
                   </TablaFila>
                 ))}
               </TablaCuerpo>
             </Tabla>
+          </Card>
+
+          {(facturaDetalle?.movimientos || []).length > 0 && (
+            <Card className="space-y-3 p-4">
+              <p className="font-semibold text-[var(--color-text)]">Movimientos de pago</p>
+              <Tabla>
+                <TablaCabecera>
+                  <tr>
+                    <TablaCelda as="th">Fecha</TablaCelda>
+                    <TablaCelda as="th">Tipo</TablaCelda>
+                    <TablaCelda as="th" className="text-right">Monto</TablaCelda>
+                    <TablaCelda as="th">Observacion</TablaCelda>
+                  </tr>
+                </TablaCabecera>
+                <TablaCuerpo>
+                  {(facturaDetalle.movimientos || []).map((movimiento) => (
+                    <TablaFila key={movimiento.id}>
+                      <TablaCelda>{formatDateQuito(movimiento.fecha || movimiento.fecha_emision)}</TablaCelda>
+                      <TablaCelda>
+                        <StatusBadge status={movimiento.tipo === 'ABONO' ? 'PARCIAL' : 'CREDITO'}>
+                          {movimiento.tipo}
+                        </StatusBadge>
+                      </TablaCelda>
+                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(movimiento.monto)}</TablaCelda>
+                      <TablaCelda>{movimiento.observacion || movimiento.referencia || '-'}</TablaCelda>
+                    </TablaFila>
+                  ))}
+                </TablaCuerpo>
+              </Tabla>
+            </Card>
           )}
         </div>
       </Modal>

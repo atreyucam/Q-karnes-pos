@@ -1,75 +1,89 @@
 import { create } from 'zustand';
-import apiClient, { normalizeResponse, parseApiError } from '../lib/apiClient';
+import { parseApiError } from '../lib/apiClient';
+import { fetchReporte, sanitizeQueryParams } from '../services/reportesService';
 
-const endpointByReport = {
-  ventas: '/api/reportes/ventas',
-  ventasProducto: '/api/reportes/ventas-producto',
-  inventario: '/api/reportes/inventario',
-  caja: '/api/reportes/caja',
-  cxc: '/api/reportes/cxc',
-  cxp: '/api/reportes/cxp',
-  compras: '/api/reportes/compras'
-};
+export const REPORT_VIEW_KEYS = [
+  'ventasDia',
+  'ventasPeriodo',
+  'ventasPorProducto',
+  'inventarioActual',
+  'kardex',
+  'transformaciones',
+  'cajaDiaria'
+];
 
-const reportsWithDateRange = new Set(['ventas', 'ventasProducto', 'caja', 'compras']);
-
-function emptyReport() {
+function createAsyncView() {
   return {
-    resumen: {},
-    items: [],
-    filtros: {}
+    data: null,
+    error: null,
+    loading: false,
+    loaded: false,
+    lastParams: {}
   };
 }
 
-function normalizeReportData(data) {
-  return {
-    resumen: data?.resumen || {},
-    items: Array.isArray(data?.items) ? data.items : [],
-    filtros: data?.filtros || {}
-  };
+function createViewsState() {
+  return REPORT_VIEW_KEYS.reduce((accumulator, key) => {
+    accumulator[key] = createAsyncView();
+    return accumulator;
+  }, {});
 }
 
 export const useReportesStore = create((set, get) => ({
-  reportes: {
-    ventas: emptyReport(),
-    ventasProducto: emptyReport(),
-    inventario: emptyReport(),
-    caja: emptyReport(),
-    cxc: emptyReport(),
-    cxp: emptyReport(),
-    compras: emptyReport()
-  },
-  loading: false,
-  error: null,
-  async cargarReporte(reportKey, filters = {}) {
-    const endpoint = endpointByReport[reportKey];
-    if (!endpoint) throw new Error(`Reporte no soportado: ${reportKey}`);
+  views: createViewsState(),
+  async cargarReporte(reportKey, params = {}) {
+    if (!REPORT_VIEW_KEYS.includes(reportKey)) {
+      throw new Error(`Reporte no soportado: ${reportKey}`);
+    }
 
-    set({ loading: true, error: null });
+    const normalizedParams = sanitizeQueryParams(params);
+
+    set((state) => ({
+      views: {
+        ...state.views,
+        [reportKey]: {
+          ...state.views[reportKey],
+          loading: true,
+          error: null,
+          lastParams: normalizedParams
+        }
+      }
+    }));
+
     try {
-      const params = reportsWithDateRange.has(reportKey)
-        ? {
-            fecha_inicio: filters.fecha_inicio || undefined,
-            fecha_fin: filters.fecha_fin || undefined
-          }
-        : undefined;
-
-      const response = await apiClient.get(endpoint, params ? { params } : undefined);
-      const data = normalizeReportData(normalizeResponse(response.data));
+      const data = await fetchReporte(reportKey, normalizedParams);
 
       set((state) => ({
-        reportes: {
-          ...state.reportes,
-          [reportKey]: data
-        },
-        loading: false
+        views: {
+          ...state.views,
+          [reportKey]: {
+            data,
+            error: null,
+            loading: false,
+            loaded: true,
+            lastParams: normalizedParams
+          }
+        }
       }));
 
       return data;
     } catch (error) {
       const message = parseApiError(error);
-      set({ loading: false, error: message });
-      return get().reportes[reportKey] || emptyReport();
+
+      set((state) => ({
+        views: {
+          ...state.views,
+          [reportKey]: {
+            ...state.views[reportKey],
+            loading: false,
+            loaded: true,
+            error: message,
+            lastParams: normalizedParams
+          }
+        }
+      }));
+
+      return get().views[reportKey]?.data || null;
     }
   }
 }));

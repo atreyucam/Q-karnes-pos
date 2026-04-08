@@ -42,18 +42,32 @@ function run() {
   try {
     assert(productosPage.includes('title="Productos"'), 'La página Productos no define encabezado principal');
     assert(productosPage.includes('Precio de venta'), 'La página Productos no expone precio de venta');
-    assert(productosPage.includes('Costo promedio'), 'La página Productos no expone costo promedio');
-    add(2, 'La pantalla Productos muestra el catálogo comercial requerido', true);
+    assert(productosPage.includes('Stock visible'), 'La página Productos no expone stock visible');
+    assert(productosPage.includes('Costo visible'), 'La página Productos no expone costo visible');
+    assert(productosPage.includes('labelClassName()}>Rol<'), 'La página Productos no expone filtro por rol');
+    assert(productosPage.includes('<option value="KG">KG</option>'), 'La página Productos no permite seleccionar KG');
+    add(2, 'La pantalla Productos muestra tabla y filtros alineados al nuevo dominio', true);
   } catch (error) {
-    add(2, 'La pantalla Productos muestra el catálogo comercial requerido', false, error.message);
+    add(2, 'La pantalla Productos muestra tabla y filtros alineados al nuevo dominio', false, error.message);
+  }
+
+  try {
+    assert(productosPage.includes("label: 'Vendible'"), 'No se encontró badge o rol Vendible');
+    assert(productosPage.includes("label: 'Transformable'"), 'No se encontró badge o rol Transformable');
+    assert(productosPage.includes("label: 'Insumo'"), 'No se encontró badge o rol Insumo');
+    assert(productosPage.includes("label: 'Merma'"), 'No se encontró badge o rol Merma');
+    assert(productosPage.includes('Debe existir al menos un rol activo'), 'No se encontró ayuda visual de validación de roles');
+    add(3, 'La UI de productos muestra badges y reglas visuales de roles', true);
+  } catch (error) {
+    add(3, 'La UI de productos muestra badges y reglas visuales de roles', false, error.message);
   }
 
   try {
     assert(!nuevaVentaPage.includes('precio_unit:'), 'La venta todavía envía precio_unit al backend');
     assert(!nuevaVentaPage.includes('updateItemPrecioInput'), 'La venta todavía permite editar precio por línea');
-    add(3, 'La UI de ventas dejó el precio unitario como solo lectura', true);
+    add(4, 'La UI de ventas dejó el precio unitario como solo lectura', true);
   } catch (error) {
-    add(3, 'La UI de ventas dejó el precio unitario como solo lectura', false, error.message);
+    add(4, 'La UI de ventas dejó el precio unitario como solo lectura', false, error.message);
   }
 
   print(results);

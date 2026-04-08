@@ -1,4 +1,5 @@
 const { moneyRound } = require('../../helpers/money');
+const { moneyToCents, centsToMoney } = require('../../helpers/unitPolicy');
 
 const CASH_DIRECTION = {
   INGRESO: 'INGRESO',
@@ -63,6 +64,14 @@ function inferCashDirection(type) {
   return CASH_DIRECTION.INGRESO;
 }
 
+function affectsCashBalance(type) {
+  const resolvedType = normalizeCashMovementType(type);
+  return !(
+    resolvedType === CASH_MOVEMENT_TYPES.VENTA_TRANSFERENCIA
+    || resolvedType === CASH_MOVEMENT_TYPES.VENTA_CREDITO
+  );
+}
+
 function defaultModuleByType(type) {
   const resolvedType = normalizeCashMovementType(type);
   if (
@@ -103,12 +112,14 @@ function buildCashMovementPayload({
     sentido: inferCashDirection(resolvedType),
     concepto,
     monto: moneyRound(Math.abs(Number(monto || 0))),
+    monto_centavos: moneyToCents(Math.abs(Number(monto || 0)), 'monto'),
     metodo_pago: metodoPago || 'EFECTIVO',
     documento_origen: documentoOrigen || concepto,
     modulo_origen: moduloOrigen || defaultModuleByType(resolvedType),
     origen_id: origenId || null,
     usuario_id: actorId || null,
     observacion: observacion || null,
+    afecta_saldo: affectsCashBalance(resolvedType) ? 1 : 0,
     movimiento_relacionado_id: movimientoRelacionadoId || null
   };
 }
@@ -118,7 +129,9 @@ function summarizeTreasuryMovements(movimientos = []) {
     (acc, movimiento) => {
       const tipo = normalizeCashMovementType(movimiento.tipo);
       const sentido = movimiento.sentido || inferCashDirection(tipo);
-      const monto = moneyRound(Number(movimiento.monto || 0));
+      const monto = movimiento?.monto_centavos !== undefined && movimiento?.monto_centavos !== null
+        ? centsToMoney(Number(movimiento.monto_centavos || 0))
+        : moneyRound(Number(movimiento.monto || 0));
 
       if (tipo === CASH_MOVEMENT_TYPES.VENTA_CONTADO) acc.ventas_efectivo += monto;
       else if (tipo === CASH_MOVEMENT_TYPES.VENTA_TRANSFERENCIA) acc.ventas_transferencia += monto;
@@ -209,6 +222,7 @@ module.exports = {
   CASH_MOVEMENT_TYPES,
   buildCashMovementPayload,
   buildTurnoCashSnapshot,
+  affectsCashBalance,
   inferCashDirection,
   normalizeCashMovementType,
   summarizeTreasuryMovements

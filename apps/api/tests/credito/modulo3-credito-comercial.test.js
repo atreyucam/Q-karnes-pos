@@ -250,7 +250,7 @@ async function runSuite(options = {}) {
         },
         cajero
       ),
-      'Consumidor final'
+      'Cliente requerido'
     );
     add(10, 'Venta credito sin cliente falla', r.ok, r.error);
   }

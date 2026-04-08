@@ -91,7 +91,7 @@ export default function ComprasPage() {
     <div className="space-y-5">
       <PageHeader
         title="Órdenes de compra"
-        description="Crear orden no mueve stock. Solo la recepción confirmada ingresa inventario."
+        description="La orden solo registra intención de compra. El stock, costo visible y valorización se actualizan al recepcionar."
         actions={(
           <Button onClick={() => navigate('/compras/nueva')}>
             <PiPlus className="text-base" />
@@ -101,6 +101,9 @@ export default function ComprasPage() {
       />
 
       {error && <Alert tone="error">{error}</Alert>}
+      <Alert tone="info">
+        La orden no define costo final ni mete stock. Usa recepción para registrar costo real y actualizar inventario.
+      </Alert>
 
       <section className="ui-kpi-summary-shell">
         <div className="mb-3">
@@ -114,25 +117,25 @@ export default function ComprasPage() {
             icon={PiPackage}
             value={resumen.total}
             label="Total órdenes"
-            iconBg="color-mix(in oklab, #fecdd3 72%, white 28%)"
+            tone="danger"
           />
           <MetricTile
             icon={PiCalendarBlank}
             value={resumen.emitidas}
             label="Emitidas"
-            iconBg="color-mix(in oklab, #bfdbfe 72%, white 28%)"
+            tone="primary"
           />
           <MetricTile
             icon={PiPackage}
             value={resumen.parciales}
             label="Parciales"
-            iconBg="color-mix(in oklab, #a7f3d0 78%, white 22%)"
+            tone="success"
           />
           <MetricTile
             icon={PiCheckCircle}
             value={resumen.completas}
             label="Completas"
-            iconBg="color-mix(in oklab, #ddd6fe 74%, white 26%)"
+            tone="info"
           />
         </div>
       </section>
@@ -170,6 +173,7 @@ export default function ComprasPage() {
               <TablaCelda as="th">Proveedor</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
               <TablaCelda as="th">Estado</TablaCelda>
+              <TablaCelda as="th" className="text-right">Líneas</TablaCelda>
               <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -183,6 +187,9 @@ export default function ComprasPage() {
                   <TablaCelda>{formatDateQuito(orden.fecha_emision || orden.fecha)}</TablaCelda>
                   <TablaCelda>
                     <StatusBadge status={estadoMeta.badgeStatus}>{orden.estado_label || estadoMeta.label}</StatusBadge>
+                  </TablaCelda>
+                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                    {Number(orden.total_lineas || 0)}
                   </TablaCelda>
                   <TablaCelda>
                     <div className="flex justify-end gap-1">

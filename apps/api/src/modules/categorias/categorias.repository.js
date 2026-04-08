@@ -23,9 +23,22 @@ async function create(payload, trx = db) {
   return trx('categorias').where({ id }).first();
 }
 
+async function countProducts(id, trx = db) {
+  const row = await trx('productos')
+    .where({ categoria_id: id })
+    .count({ total: '*' })
+    .first();
+
+  return Number(row?.total || 0);
+}
+
 async function update(id, payload, trx = db) {
   await trx('categorias').where({ id }).update(payload);
   return trx('categorias').where({ id }).first();
+}
+
+async function remove(id, trx = db) {
+  return trx('categorias').where({ id }).del();
 }
 
 module.exports = {
@@ -33,5 +46,7 @@ module.exports = {
   getById,
   getByNombre,
   create,
-  update
+  countProducts,
+  update,
+  remove
 };

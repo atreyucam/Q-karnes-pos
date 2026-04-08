@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PiX } from 'react-icons/pi';
-import { useNavigate, useParams } from 'react-router-dom';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
+import { useNavigate } from 'react-router-dom';
 import { useVentasStore } from '../../stores/ventasStore';
 import {
   Alert,
@@ -15,22 +14,30 @@ import {
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
-  TablaCelda
+  TablaCelda,
+  Toast
 } from '../../ui';
 import FacturaModal from './FacturaModal';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
-import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { useVentaCatalogo } from './hooks/useVentaCatalogo';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { printSaleTicketDocument } from './printTicket';
+import { useCajaStore } from '../../stores/cajaStore';
+import {
+  PAYMENT_CODES,
+  buildVentaCreatePayload,
+  normalizePaymentMethods,
+  paymentAffectsCash,
+  paymentRequiresClient
+} from './ventaUtils';
 
 function round2(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 }
 
 function defaultQtyInput(unidad) {
-  return getUnidad(unidad) === 'UND' ? '1' : '1.00';
+  return getUnidad(unidad) === 'UND' ? '1' : '1.000';
 }
 
 function parseDecimal(value) {
@@ -50,23 +57,20 @@ function parseQtyByUnidad(value, unidad) {
 
 function formatStock(value, unidad) {
   const n = Number(value || 0);
-  return getUnidad(unidad) === 'UND' ? String(Math.trunc(n)) : n.toFixed(2);
+  return getUnidad(unidad) === 'UND'
+    ? String(Math.trunc(n))
+    : n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 }
 
 export default function NuevaVentaPage() {
   const navigate = useNavigate();
-  const { id: ventaIdParam } = useParams();
-  const isReadOnlyMode = Boolean(ventaIdParam);
-  const ventaId = ventaIdParam ? Number(ventaIdParam) : null;
   const crearVenta = useVentasStore((s) => s.crear);
-  const ventaDetalle = useVentasStore((s) => s.ventaDetalle);
-  const ticketVenta = useVentasStore((s) => s.ticket);
-  const detalleVenta = useVentasStore((s) => s.detalle);
   const cargarTicket = useVentasStore((s) => s.cargarTicket);
-  const loadingVenta = useVentasStore((s) => s.loading);
   const errorVenta = useVentasStore((s) => s.error);
   const configuracion = useConfiguracionStore((s) => s.configuracion);
   const metodosPago = useConfiguracionStore((s) => s.metodosPago);
+  const turnoActual = useCajaStore((s) => s.turnoActual);
+  const fetchTurnoActual = useCajaStore((s) => s.fetchTurnoActual);
   const {
     categorias,
     categoriaActiva,
@@ -77,177 +81,72 @@ export default function NuevaVentaPage() {
     debouncedSearch,
     loadingCatalogo,
     catalogError
-  } = useVentaCatalogo({ enabled: !isReadOnlyMode });
+  } = useVentaCatalogo();
 
   const [carrito, setCarrito] = useState([]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [modalFacturaOpen, setModalFacturaOpen] = useState(false);
   const [descuento, setDescuento] = useState('0');
-  const [selectedPaymentCode, setSelectedPaymentCode] = useState('EFECTIVO');
+  const [selectedPaymentCode, setSelectedPaymentCode] = useState(PAYMENT_CODES.EFECTIVO);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
-  const [successModal, setSuccessModal] = useState({ open: false, total: 0, progress: 100 });
+  const [successToast, setSuccessToast] = useState({ open: false, total: 0 });
   const [selectedProductoIndex, setSelectedProductoIndex] = useState(-1);
+  const [cajaRequiredModalOpen, setCajaRequiredModalOpen] = useState(false);
+  const [stockIssue, setStockIssue] = useState(null);
 
   const productRefs = useRef([]);
-  const currentVentaDetalle = !isReadOnlyMode || !ventaId || Number(ventaDetalle?.venta?.id) === ventaId ? ventaDetalle : null;
-  const currentTicketVenta = !isReadOnlyMode || !ventaId || Number(ticketVenta?.venta?.id) === ventaId ? ticketVenta : null;
 
   const enabledPaymentMethods = useMemo(() => {
-    const defaults = [
-      { codigo: 'EFECTIVO', nombre: 'Efectivo', habilitado: true, es_efectivo: true },
-      { codigo: 'TRANSFERENCIA', nombre: 'Transferencia', habilitado: true, es_efectivo: false },
-      { codigo: 'CREDITO_CLIENTE', nombre: 'Credito cliente', habilitado: true, es_efectivo: false }
-    ];
+    const methods = normalizePaymentMethods(metodosPago);
+    return methods.filter((method) => {
+      if (method.codigo === PAYMENT_CODES.CREDITO_CLIENTE) {
+        return Boolean(configuracion?.permitir_ventas_credito);
+      }
+      return true;
+    });
+  }, [configuracion?.permitir_ventas_credito, metodosPago]);
 
-    const source = metodosPago.length ? metodosPago : defaults;
-    return source.filter((method) => method.habilitado);
-  }, [metodosPago]);
+  const defaultCashPaymentCode = useMemo(
+    () => enabledPaymentMethods.find((method) => method.codigo === PAYMENT_CODES.EFECTIVO)?.codigo
+      || enabledPaymentMethods.find((method) => !paymentRequiresClient(method.codigo))?.codigo
+      || enabledPaymentMethods[0]?.codigo
+      || PAYMENT_CODES.EFECTIVO,
+    [enabledPaymentMethods]
+  );
 
-  const creditoHabilitado = Boolean(configuracion?.permitir_ventas_credito)
-    && enabledPaymentMethods.some((method) => method.codigo === 'CREDITO_CLIENTE');
-
-  const paymentOptions = useMemo(() => {
-    return enabledPaymentMethods
-      .filter((method) => {
-        if (method.codigo === 'CREDITO_CLIENTE') return Boolean(clienteSeleccionado) && creditoHabilitado;
-        return true;
-      })
-      .map((method) => ({
-        value: method.codigo,
-        label: method.nombre,
-        ventaMode: method.codigo === 'CREDITO_CLIENTE' ? 'CREDITO' : 'CONTADO',
-        isCash: Boolean(method.es_efectivo)
-      }));
-  }, [clienteSeleccionado, creditoHabilitado, enabledPaymentMethods]);
-
-  useEffect(() => {
-    if (isReadOnlyMode) return;
-    if (!paymentOptions.length) return;
-    if (!paymentOptions.some((option) => option.value === selectedPaymentCode)) {
-      setSelectedPaymentCode(paymentOptions[0].value);
-    }
-  }, [isReadOnlyMode, paymentOptions, selectedPaymentCode]);
-
-  useEffect(() => {
-    if (!isReadOnlyMode || !ventaId) return;
-    detalleVenta(ventaId);
-    cargarTicket(ventaId);
-  }, [cargarTicket, detalleVenta, isReadOnlyMode, ventaId]);
-
-  useEffect(() => {
-    if (!isReadOnlyMode || !currentVentaDetalle?.detalle) return;
-
-    setCarrito(
-      currentVentaDetalle.detalle.map((item) => {
-        const unidad = getUnidad(item.unidad_medida || item.unidad);
-        const cantidad = Number(item.cantidad || 0);
-        return {
-          producto_id: item.producto_id,
-          codigo: item.producto_codigo,
-          nombre: item.producto_nombre,
-          unidad_medida: unidad,
-          stock_actual: Number(item.stock_actual || cantidad),
-          cantidadInput: unidad === 'UND' ? String(Math.trunc(cantidad)) : Number(cantidad).toFixed(2),
-          precio_venta: round2(item.precio_unit || 0)
-        };
-      })
-    );
-    setClienteSeleccionado(currentVentaDetalle.venta?.cliente || null);
-    setDescuento(String(round2(currentVentaDetalle.venta?.descuento_total || 0)));
-  }, [currentVentaDetalle, isReadOnlyMode]);
-
-  useEffect(() => {
-    if (!isReadOnlyMode || !currentTicketVenta) return;
-
-    const ticketCode = String(currentTicketVenta.codigo_metodo_pago || '').trim().toUpperCase();
-    if (ticketCode) {
-      setSelectedPaymentCode(ticketCode);
-      return;
-    }
-
-    const metodo = String(currentTicketVenta.metodo_pago || '').trim().toUpperCase();
-    if (metodo === 'CREDITO') {
-      setSelectedPaymentCode('CREDITO_CLIENTE');
-      return;
-    }
-    if (metodo === 'TRANSFERENCIA') {
-      setSelectedPaymentCode('TRANSFERENCIA');
-      return;
-    }
-    setSelectedPaymentCode('EFECTIVO');
-  }, [currentTicketVenta, isReadOnlyMode]);
+  const paymentOptions = useMemo(
+    () => enabledPaymentMethods.map((method) => ({
+      codigo: method.codigo,
+      nombre: method.nombre,
+      es_efectivo: Boolean(method.es_efectivo),
+      requiere_cliente: paymentRequiresClient(method.codigo)
+    })),
+    [enabledPaymentMethods]
+  );
 
   const selectedPaymentOption = useMemo(
-    () => paymentOptions.find((option) => option.value === selectedPaymentCode) || null,
+    () => paymentOptions.find((option) => option.codigo === selectedPaymentCode) || null,
     [paymentOptions, selectedPaymentCode]
   );
 
-  const ventaClienteLabel = String(
-    currentTicketVenta?.cliente?.nombre
-      || currentVentaDetalle?.venta?.cliente_nombre
-      || clienteSeleccionado?.nombre
-      || ''
-  ).trim() || 'Consumidor final';
+  const cajaAbierta = Boolean(turnoActual?.id);
+  const paymentImpactsCash = useMemo(
+    () => paymentAffectsCash(selectedPaymentCode, enabledPaymentMethods),
+    [enabledPaymentMethods, selectedPaymentCode]
+  );
+  const requiresOpenCashShift = paymentImpactsCash && (configuracion?.exigir_caja_abierta_para_cobros ?? true);
 
-  const ventaFechaLabel = currentVentaDetalle?.venta?.fecha ? formatDateQuito(currentVentaDetalle.venta.fecha) : '-';
-  const ventaMetodoLabel = String(currentTicketVenta?.metodo_pago || selectedPaymentOption?.label || '-');
+  useEffect(() => {
+    fetchTurnoActual({ silent: true }).catch(() => {});
+  }, [fetchTurnoActual]);
 
-  const handleGoBack = () => {
-    if (window.history.length > 1) {
-      navigate(-1);
-      return;
+  useEffect(() => {
+    if (!paymentOptions.length) return;
+    if (!paymentOptions.some((option) => option.codigo === selectedPaymentCode)) {
+      setSelectedPaymentCode(paymentOptions[0].codigo);
     }
-    navigate('/ventas');
-  };
-
-  const carritoConEstado = useMemo(
-    () =>
-      carrito.map((item) => {
-        const unidad = item.unidad_medida;
-        const qtyValue = parseQtyByUnidad(item.cantidadInput, unidad);
-
-        let cantidadError = '';
-        if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
-          cantidadError = 'Cantidad invalida';
-        } else if (unidad === 'UND' && !Number.isInteger(qtyValue)) {
-          cantidadError = 'UND solo permite enteros';
-        } else if (!isReadOnlyMode && qtyValue > Number(item.stock_actual || 0)) {
-          cantidadError = 'Stock insuficiente';
-        }
-
-        const cantidad = !cantidadError ? (unidad === 'UND' ? Math.trunc(qtyValue) : round2(qtyValue)) : 0;
-        const precio = round2(item.precio_venta);
-
-        return {
-          ...item,
-          cantidad,
-          precio,
-          subtotal: round2(cantidad * precio),
-          cantidadError,
-          invalido: Boolean(cantidadError)
-        };
-      }),
-    [carrito, isReadOnlyMode]
-  );
-
-  const hasInvalidItems = carritoConEstado.some((item) => item.invalido);
-
-  const subtotal = useMemo(
-    () => round2(carritoConEstado.reduce((acc, item) => acc + item.subtotal, 0)),
-    [carritoConEstado]
-  );
-
-  const descuentoValue = useMemo(() => {
-    const value = parseDecimal(descuento);
-    if (!Number.isFinite(value) || value < 0) return 0;
-    return round2(value);
-  }, [descuento]);
-
-  const total = useMemo(
-    () => Math.max(0, round2(subtotal - descuentoValue)),
-    [subtotal, descuentoValue]
-  );
+  }, [paymentOptions, selectedPaymentCode]);
 
   useEffect(() => {
     if (!productosMostrados.length) {
@@ -267,105 +166,64 @@ export default function NuevaVentaPage() {
   }, [selectedProductoIndex]);
 
   useEffect(() => {
-    if (!successModal.open) return undefined;
+    if (!successToast.open) return undefined;
+    const timer = window.setTimeout(() => {
+      setSuccessToast((current) => (current.open ? { ...current, open: false } : current));
+    }, 2600);
+    return () => window.clearTimeout(timer);
+  }, [successToast.open]);
 
-    const duration = 3000;
-    const startedAt = Date.now();
-    const interval = window.setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, duration - elapsed);
-      const progress = (remaining / duration) * 100;
+  const carritoConEstado = useMemo(
+    () => carrito.map((item) => {
+      const unidad = getUnidad(item.unidad_medida);
+      const qtyValue = parseQtyByUnidad(item.cantidadInput, unidad);
 
-      if (remaining <= 0) {
-        window.clearInterval(interval);
-        setSuccessModal((current) => (
-          current.open
-            ? { ...current, open: false, progress: 0 }
-            : current
-        ));
-        return;
+      let cantidadError = '';
+      if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
+        cantidadError = 'Cantidad invalida';
+      } else if (unidad === 'UND' && !Number.isInteger(qtyValue)) {
+        cantidadError = 'UND solo permite enteros';
+      } else if (qtyValue > Number(item.stock_actual || 0)) {
+        cantidadError = 'Stock insuficiente';
       }
 
-      setSuccessModal((current) => (
-        current.open
-          ? { ...current, progress }
-          : current
-      ));
-    }, 50);
+      const cantidad = !cantidadError
+        ? (unidad === 'UND' ? Math.trunc(qtyValue) : round2(qtyValue))
+        : 0;
+      const precio = round2(item.precio_venta);
 
-    return () => window.clearInterval(interval);
-  }, [successModal.open]);
+      return {
+        ...item,
+        cantidad,
+        precio,
+        subtotal: round2(cantidad * precio),
+        cantidadError,
+        invalido: Boolean(cantidadError)
+      };
+    }),
+    [carrito]
+  );
 
-  const addProductoToCarrito = (producto) => {
-    const unidad = getUnidad(producto.unidad_medida || producto.unidad);
-    const qtyToAdd = 1;
-    const stockActual = Number(producto.stock_actual || 0);
+  const hasInvalidItems = carritoConEstado.some((item) => item.invalido);
+  const subtotal = useMemo(
+    () => round2(carritoConEstado.reduce((acc, item) => acc + item.subtotal, 0)),
+    [carritoConEstado]
+  );
+  const descuentoValue = useMemo(() => {
+    const value = parseDecimal(descuento);
+    if (!Number.isFinite(value) || value < 0) return 0;
+    return round2(value);
+  }, [descuento]);
+  const total = useMemo(
+    () => Math.max(0, round2(subtotal - descuentoValue)),
+    [descuentoValue, subtotal]
+  );
 
-    setLocalError('');
-    setCarrito((prev) => {
-      const existing = prev.find((item) => item.producto_id === producto.id);
-
-      if (existing) {
-        const existingQty = parseQtyByUnidad(existing.cantidadInput, unidad);
-        const newQty = (Number.isFinite(existingQty) ? existingQty : 0) + qtyToAdd;
-        if (newQty > stockActual) {
-          setLocalError(`Stock insuficiente para ${producto.codigo}`);
-          return prev;
-        }
-
-        return prev.map((item) =>
-          item.producto_id === producto.id
-            ? { ...item, cantidadInput: unidad === 'UND' ? String(newQty) : Number(newQty).toFixed(2) }
-            : item
-        );
-      }
-
-      if (qtyToAdd > stockActual) {
-        setLocalError(`Stock insuficiente para ${producto.codigo}`);
-        return prev;
-      }
-
-      return [
-        ...prev,
-        {
-          producto_id: producto.id,
-          codigo: producto.codigo,
-          nombre: producto.nombre,
-          unidad_medida: unidad,
-          stock_actual: stockActual,
-          cantidadInput: defaultQtyInput(unidad),
-          precio_venta: round2(producto.precio_venta || producto.precio_referencia || 0)
-        }
-      ];
-    });
-  };
-
-  const updateItemCantidadInput = (productoId, unidad, rawValue) => {
-    const normalized = sanitizeQtyInput(rawValue, unidad);
-    setCarrito((prev) =>
-      prev.map((item) =>
-        item.producto_id === productoId
-          ? { ...item, cantidadInput: normalized }
-          : item
-      )
-    );
-  };
-
-  const removeItem = (productoId) => {
-    setCarrito((prev) => prev.filter((item) => item.producto_id !== productoId));
-  };
-
-  const resetVentaDraft = () => {
-    setCarrito([]);
-    setClienteSeleccionado(null);
-    setDescuento('0');
-    setSelectedPaymentCode(paymentOptions[0]?.value || 'EFECTIVO');
-    setLocalError('');
-  };
-
-  const closeSuccessModal = () => {
-    setSuccessModal((current) => ({ ...current, open: false, progress: 0 }));
-  };
+  const ventaActionDisabled = submitting
+    || !carritoConEstado.length
+    || hasInvalidItems
+    || !paymentOptions.length
+    || (selectedPaymentOption?.requiere_cliente && !clienteSeleccionado);
 
   const handleSearchKeyDown = (event) => {
     if (!productosMostrados.length) return;
@@ -389,6 +247,91 @@ export default function NuevaVentaPage() {
     }
   };
 
+  const addProductoToCarrito = (producto) => {
+    const unidad = getUnidad(producto.unidad_medida || producto.unidad);
+    const qtyToAdd = unidad === 'UND' ? 1 : 1;
+    const stockActual = Number(producto.stock_actual || 0);
+
+    setLocalError('');
+    setCarrito((prev) => {
+      const existing = prev.find((item) => item.producto_id === producto.id);
+
+      if (existing) {
+        const existingQty = parseQtyByUnidad(existing.cantidadInput, unidad);
+        const newQty = round2((Number.isFinite(existingQty) ? existingQty : 0) + qtyToAdd);
+
+        if (newQty > stockActual) {
+          setStockIssue({
+            producto: `${producto.codigo} - ${producto.nombre}`,
+            disponible: formatStock(stockActual, unidad),
+            unidad
+          });
+          return prev;
+        }
+
+        return prev.map((item) => (
+          item.producto_id === producto.id
+            ? { ...item, cantidadInput: unidad === 'UND' ? String(newQty) : Number(newQty).toFixed(3) }
+            : item
+        ));
+      }
+
+      if (qtyToAdd > stockActual) {
+        setStockIssue({
+          producto: `${producto.codigo} - ${producto.nombre}`,
+          disponible: formatStock(stockActual, unidad),
+          unidad
+        });
+        return prev;
+      }
+
+      return [
+        ...prev,
+        {
+          producto_id: producto.id,
+          codigo: producto.codigo,
+          nombre: producto.nombre,
+          unidad_medida: unidad,
+          stock_actual: stockActual,
+          cantidadInput: defaultQtyInput(unidad),
+          precio_venta: round2(producto.precio_venta || producto.precio_referencia || 0)
+        }
+      ];
+    });
+  };
+
+  const updateItemCantidadInput = (productoId, unidad, rawValue) => {
+    const normalized = sanitizeQtyInput(rawValue, unidad);
+    setCarrito((prev) => prev.map((item) => (
+      item.producto_id === productoId
+        ? { ...item, cantidadInput: normalized }
+        : item
+    )));
+  };
+
+  const removeItem = (productoId) => {
+    setCarrito((prev) => prev.filter((item) => item.producto_id !== productoId));
+  };
+
+  const resetVentaDraft = () => {
+    setCarrito([]);
+    setClienteSeleccionado(null);
+    setDescuento('0');
+    setSelectedPaymentCode(defaultCashPaymentCode);
+    setLocalError('');
+  };
+
+  const closeSuccessToast = () => {
+    setSuccessToast((current) => ({ ...current, open: false }));
+  };
+
+  const handleClearCliente = () => {
+    setClienteSeleccionado(null);
+    if (paymentRequiresClient(selectedPaymentCode)) {
+      setSelectedPaymentCode(defaultCashPaymentCode);
+    }
+  };
+
   const submitVenta = async () => {
     setLocalError('');
 
@@ -398,43 +341,44 @@ export default function NuevaVentaPage() {
     }
 
     if (hasInvalidItems) {
+      const stockItem = carritoConEstado.find((item) => item.cantidadError === 'Stock insuficiente');
+      if (stockItem) {
+        setStockIssue({
+          producto: `${stockItem.codigo} - ${stockItem.nombre}`,
+          disponible: formatStock(stockItem.stock_actual, stockItem.unidad_medida),
+          unidad: stockItem.unidad_medida
+        });
+        return;
+      }
       setLocalError('Corrige cantidades invalidas en el carrito');
       return;
     }
 
-    if (!selectedPaymentCode || !selectedPaymentOption) {
+    if (!selectedPaymentOption) {
       setLocalError('Selecciona un metodo de pago');
       return;
     }
 
-    if (selectedPaymentOption.ventaMode === 'CREDITO') {
-      if (!creditoHabilitado) {
-        setLocalError('El credito cliente esta deshabilitado en la configuracion');
-        return;
-      }
-      if (!clienteSeleccionado) {
-        setLocalError('Selecciona un cliente antes de vender a credito');
-        return;
-      }
+    if (selectedPaymentOption.requiere_cliente && !clienteSeleccionado) {
+      setLocalError('Selecciona un cliente antes de registrar una venta a credito');
+      return;
     }
 
-    const contadoValue = selectedPaymentOption.ventaMode === 'CONTADO' ? total : 0;
-    const creditoValue = selectedPaymentOption.ventaMode === 'CREDITO' ? total : 0;
+    if (requiresOpenCashShift && !cajaAbierta) {
+      setCajaRequiredModalOpen(true);
+      return;
+    }
 
-    const payload = {
-      cliente_id: clienteSeleccionado?.id ?? null,
+    const payload = buildVentaCreatePayload({
+      clienteId: clienteSeleccionado?.id ?? null,
       items: carritoConEstado.map((item) => ({
         producto_id: item.producto_id,
         cantidad: item.cantidad
       })),
-      pagos: {
-        metodo: selectedPaymentOption.ventaMode,
-        codigo: selectedPaymentCode,
-        contado: contadoValue,
-        credito: creditoValue
-      },
-      descuento_total: descuentoValue
-    };
+      descuentoTotal: descuentoValue,
+      paymentCode: selectedPaymentCode,
+      total
+    });
 
     setSubmitting(true);
     try {
@@ -442,12 +386,12 @@ export default function NuevaVentaPage() {
       const result = await crearVenta(payload);
       const ventaId = result?.venta?.id;
       if (ventaId) {
-        const ticketResponse = await apiClient.get(`/api/ventas/${ventaId}/ticket`);
-        const ticketData = normalizeResponse(ticketResponse.data);
-        printSaleTicketDocument(ticketData, { metodoLabel: selectedPaymentOption.label });
+        const ticketData = await cargarTicket(ventaId);
+        printSaleTicketDocument(ticketData);
       }
       resetVentaDraft();
-      setSuccessModal({ open: true, total: totalVenta, progress: 100 });
+      await fetchTurnoActual({ silent: true }).catch(() => {});
+      setSuccessToast({ open: true, total: totalVenta });
     } catch (_) {
       // handled by store
     } finally {
@@ -457,36 +401,27 @@ export default function NuevaVentaPage() {
 
   return (
     <div className="sales-page-layout sales-page-shell flex h-full min-h-0 flex-col gap-4 overflow-hidden">
-      {isReadOnlyMode && (
-        <div className="shrink-0">
-          <Button type="button" variant="ghost" onClick={handleGoBack}>
-            ← Volver
-          </Button>
-        </div>
-      )}
-
       <PageHeader
-        title={isReadOnlyMode ? `Detalle de venta #${currentVentaDetalle?.venta?.id || ventaId || ''}` : 'Nueva venta'}
-        description={isReadOnlyMode ? 'Vista en modo lectura del comprobante registrado.' : 'Busca productos, arma el carrito y procesa el cobro.'}
+        title="Nueva venta"
+        description="Busca productos, arma el carrito y confirma el cobro usando el contrato vigente del backend."
         actions={(
           <div className="flex flex-wrap items-center gap-2">
-            <span className="ui-badge ui-badge-neutral px-3 py-1 text-sm">
-              Cliente: {ventaClienteLabel}
-            </span>
-            {!isReadOnlyMode && clienteSeleccionado && (
-              <Button type="button" variant="ghost" onClick={() => setClienteSeleccionado(null)}>
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+                Cliente
+              </p>
+              <p className={`mt-1 text-[var(--color-text)] ${clienteSeleccionado ? 'text-lg font-bold' : 'text-sm font-semibold'}`}>
+                {clienteSeleccionado?.nombre || 'Comprobante final'}
+              </p>
+            </div>
+            {clienteSeleccionado && (
+              <Button type="button" variant="secondary" onClick={handleClearCliente}>
                 Quitar cliente
               </Button>
             )}
-            {isReadOnlyMode ? (
-              <Button type="button" variant="secondary" onClick={() => currentTicketVenta && printSaleTicketDocument(currentTicketVenta)} disabled={!currentTicketVenta}>
-                Imprimir ticket
-              </Button>
-            ) : (
-              <Button type="button" onClick={() => setModalFacturaOpen(true)}>
-                Factura
-              </Button>
-            )}
+            <Button type="button" variant="primary" onClick={() => setModalFacturaOpen(true)}>
+              Cliente / factura
+            </Button>
           </div>
         )}
       />
@@ -497,150 +432,134 @@ export default function NuevaVentaPage() {
         </Alert>
       )}
 
-      {!isReadOnlyMode && !paymentOptions.length && (
+      {!paymentOptions.length && (
         <Alert tone="warning" className="shrink-0">
-          No hay metodos de pago compatibles habilitados para esta venta.
+          No hay metodos de pago habilitados para ventas en la configuracion actual.
         </Alert>
       )}
 
-      {isReadOnlyMode && loadingVenta && !currentVentaDetalle && (
-        <Alert tone="info" className="shrink-0">
-          Cargando detalle de la venta...
+      {selectedPaymentOption && (
+        <Alert tone={selectedPaymentOption.requiere_cliente || (!cajaAbierta && requiresOpenCashShift) ? 'warning' : 'info'} className="shrink-0">
+          {selectedPaymentOption.requiere_cliente
+            ? 'La venta a credito requiere cliente y no impacta caja fisica.'
+            : paymentImpactsCash
+              ? (cajaAbierta
+                ? 'El pago en efectivo impacta caja fisica y se registrara en el turno abierto.'
+                : 'El pago en efectivo requiere un turno de caja abierto.')
+              : 'Este metodo es informativo para caja: registra la venta pero no altera el saldo fisico.'}
         </Alert>
       )}
 
       <div className="flex-1 min-h-0 grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
         <Card className="min-h-0 p-4">
-          {isReadOnlyMode ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 space-y-3">
-                <p className="font-semibold text-[var(--color-text)]">Resumen de venta</p>
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 space-y-3">
+              <p className="font-semibold text-[var(--color-text)]">Categorias</p>
+
+              <div className="relative">
+                <Input
+                  className="pr-11"
+                  placeholder="Buscar por codigo o nombre"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                />
+                {searchTerm ? (
+                  <button
+                    type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
+                    onClick={() => setSearchTerm('')}
+                    aria-label="Limpiar busqueda"
+                  >
+                    <PiX className="text-lg" />
+                  </button>
+                ) : null}
               </div>
 
-              <div className="mt-2 flex-1 min-h-0 overflow-auto">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Cliente</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{ventaClienteLabel}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Fecha</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{ventaFechaLabel}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Método de pago</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{ventaMetodoLabel}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Referencia</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{currentVentaDetalle?.venta?.referencia || '-'}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 space-y-3">
-                <p className="font-semibold text-[var(--color-text)]">Categorias</p>
-
-                <div className="relative">
-                  <Input
-                    className="pr-11"
-                    placeholder="Buscar por codigo o nombre"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    onKeyDown={handleSearchKeyDown}
-                  />
-                  {searchTerm ? (
-                    <button
-                      type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-                      onClick={() => setSearchTerm('')}
-                      aria-label="Limpiar busqueda"
-                    >
-                      <PiX className="text-lg" />
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {categorias.map((categoria) => (
-                    <Button
-                      key={categoria.id}
-                      type="button"
-                      size="md"
-                      variant={categoriaActiva === categoria.id ? 'primary' : 'secondary'}
-                      className="min-h-11 rounded-xl px-4"
-                      onClick={() => setCategoriaActiva(categoria.id)}
-                    >
-                      {categoria.nombre}
-                    </Button>
-                  ))}
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-[var(--color-text)]">Productos</p>
-                  {debouncedSearch && <p className="text-xs text-[var(--color-text-muted)]">Resultados: {productosMostrados.length}</p>}
-                </div>
-
-                {loadingCatalogo && <p className="text-sm text-[var(--color-text-muted)]">Cargando productos...</p>}
+              <div className="flex flex-wrap gap-2">
+                {categorias.map((categoria) => (
+                  <Button
+                    key={categoria.id}
+                    type="button"
+                    size="md"
+                    variant={categoriaActiva === categoria.id ? 'primary' : 'secondary'}
+                    className="min-h-11 rounded-xl px-4"
+                    onClick={() => setCategoriaActiva(categoria.id)}
+                  >
+                    {categoria.nombre}
+                  </Button>
+                ))}
               </div>
 
-              <div className="flex-1 min-h-0 overflow-auto pt-2 pr-1">
-                {!loadingCatalogo && productosMostrados.length === 0 && (
-                  <p className="text-sm text-[var(--color-text-muted)]">No hay productos para este filtro.</p>
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-[var(--color-text)]">Productos</p>
+                {debouncedSearch && (
+                  <p className="text-xs text-[var(--color-text-muted)]">Resultados: {productosMostrados.length}</p>
                 )}
+              </div>
 
-                <div className="space-y-2">
-                  {productosMostrados.map((producto, index) => {
-                    const unidad = getUnidad(producto.unidad_medida || producto.unidad);
-                    const selected = index === selectedProductoIndex;
+              {loadingCatalogo && <p className="text-sm text-[var(--color-text-muted)]">Cargando productos...</p>}
+            </div>
 
-                    return (
-                      <button
-                        key={producto.id}
-                        type="button"
-                        ref={(node) => { productRefs.current[index] = node; }}
-                        onMouseEnter={() => setSelectedProductoIndex(index)}
-                        onClick={() => addProductoToCarrito(producto)}
-                        className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                          selected
-                            ? 'border-[var(--color-brand)] bg-[var(--color-brand-soft)]'
-                            : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[var(--color-text)]">
-                              {producto.codigo} - {producto.nombre}
+            <div className="flex-1 min-h-0 overflow-auto pt-2 pr-1">
+              {!loadingCatalogo && productosMostrados.length === 0 && (
+                <p className="text-sm text-[var(--color-text-muted)]">No hay productos para este filtro.</p>
+              )}
+
+              <div className="space-y-2">
+                {productosMostrados.map((producto, index) => {
+                  const unidad = getUnidad(producto.unidad_medida || producto.unidad);
+                  const selected = index === selectedProductoIndex;
+
+                  return (
+                    <button
+                      key={producto.id}
+                      type="button"
+                      ref={(node) => { productRefs.current[index] = node; }}
+                      onMouseEnter={() => setSelectedProductoIndex(index)}
+                      onClick={() => addProductoToCarrito(producto)}
+                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                        selected
+                          ? 'border-[var(--color-brand)] bg-[var(--color-brand-soft)]'
+                          : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--color-text)]">
+                            {producto.codigo} - {producto.nombre}
+                          </p>
+                          <p className="text-sm text-[var(--color-text-muted)]">
+                            {unidad} | Stock: {formatStock(producto.stock_actual, unidad)}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <p className="text-sm font-semibold text-[var(--color-text)]">
+                              {formatMoney(producto.precio_venta || producto.precio_referencia || 0)}
                             </p>
-                            <p className="text-sm text-[var(--color-text-muted)]">
-                              {unidad} | Stock: {formatStock(producto.stock_actual, unidad)}
-                            </p>
+                            <p className="text-xs text-[var(--color-text-muted)]">P. unit</p>
                           </div>
-
-                          <div className="flex items-center gap-3">
-                            <div className="text-right">
-                              <p className="text-sm font-semibold text-[var(--color-text)]">
-                                {formatMoney(producto.precio_referencia || producto.precio_venta || 0)}
-                              </p>
-                              <p className="text-xs text-[var(--color-text-muted)]">P. unit</p>
-                            </div>
-                            <Button type="button" variant="primary" size="sm" onClick={(event) => {
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={(event) => {
                               event.stopPropagation();
                               addProductoToCarrito(producto);
-                            }}>
-                              Agregar
-                            </Button>
-                          </div>
+                            }}
+                          >
+                            Agregar
+                          </Button>
                         </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          )}
+          </div>
         </Card>
 
         <Card className="min-h-0 p-4">
@@ -655,16 +574,16 @@ export default function NuevaVentaPage() {
                 <TablaCabecera>
                   <tr>
                     <TablaCelda as="th">Producto</TablaCelda>
-                    <TablaCelda as="th" className="w-[118px]">Cant</TablaCelda>
+                    <TablaCelda as="th" className="w-[120px]">Cant</TablaCelda>
                     <TablaCelda as="th" className="text-right">P. unit</TablaCelda>
                     <TablaCelda as="th" className="text-right">Subtotal</TablaCelda>
-                    {!isReadOnlyMode && <TablaCelda as="th" className="w-[64px] text-center">Accion</TablaCelda>}
+                    <TablaCelda as="th" className="w-[64px] text-center">Accion</TablaCelda>
                   </tr>
                 </TablaCabecera>
                 <TablaCuerpo>
                   {carritoConEstado.length === 0 && (
                     <TablaFila>
-                      <TablaCelda colSpan={isReadOnlyMode ? 4 : 5} className="text-center text-[var(--color-text-muted)]">
+                      <TablaCelda colSpan={5} className="text-center text-[var(--color-text-muted)]">
                         Sin productos en carrito
                       </TablaCelda>
                     </TablaFila>
@@ -678,55 +597,41 @@ export default function NuevaVentaPage() {
                         </div>
                       </TablaCelda>
                       <TablaCelda>
-                        {isReadOnlyMode ? (
-                          <div className="inline-flex min-w-[108px] items-center gap-2 px-1 py-2 text-sm font-semibold text-[var(--color-text)]">
-                            <span>{item.cantidadInput}</span>
-                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                              {item.unidad_medida}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="flex min-w-[108px] items-center gap-2">
-                            <Input
-                              type="text"
-                              inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
-                              className="w-[4.5rem] px-2 py-1 text-sm"
-                              value={item.cantidadInput}
-                              onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
-                            />
-                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                              {item.unidad_medida}
-                            </span>
-                          </div>
-                        )}
-                        {item.cantidadError && <p className="mt-1 text-[11px] text-[var(--color-danger)]">{item.cantidadError}</p>}
-                      </TablaCelda>
-                      <TablaCelda className="text-right">
-                        <div className="inline-flex min-w-[75px] justify-end px-1 py-2 text-right text-sm font-semibold text-[var(--color-text)]">
-                          {formatMoney(item.precio)}
+                        <div className="flex min-w-[108px] items-center gap-2">
+                          <Input
+                            type="text"
+                            inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
+                            className="w-[4.75rem] px-2 py-1 text-sm"
+                            value={item.cantidadInput}
+                            onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
+                          />
+                          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                            {item.unidad_medida}
+                          </span>
                         </div>
+                        {item.cantidadError && (
+                          <p className="mt-1 text-[11px] text-[var(--color-danger)]">{item.cantidadError}</p>
+                        )}
                       </TablaCelda>
                       <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                        <div className="inline-flex min-w-[75px] justify-end px-1 py-2 text-right text-sm font-semibold text-[var(--color-text)]">
-
-                        {formatMoney(item.subtotal)}
-                        </div>
+                        {formatMoney(item.precio)}
                       </TablaCelda>
-                      {!isReadOnlyMode && (
-                        <TablaCelda className="text-center">
-                          <Button
-                            type="button"
-                            variant="iconDanger"
-                            size="sm"
-                            className="font-bold"
-                            aria-label={`Quitar ${item.nombre}`}
-                            title="Quitar"
-                            onClick={() => removeItem(item.producto_id)}
-                          >
-                            <span className="text-xl font-extrabold leading-none text-current">×</span>
-                          </Button>
-                        </TablaCelda>
-                      )}
+                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                        {formatMoney(item.subtotal)}
+                      </TablaCelda>
+                      <TablaCelda className="text-center">
+                        <Button
+                          type="button"
+                          variant="iconDanger"
+                          size="sm"
+                          className="font-bold"
+                          aria-label={`Quitar ${item.nombre}`}
+                          title="Quitar"
+                          onClick={() => removeItem(item.producto_id)}
+                        >
+                          <span className="text-xl font-extrabold leading-none text-current">x</span>
+                        </Button>
+                      </TablaCelda>
                     </TablaFila>
                   ))}
                 </TablaCuerpo>
@@ -735,22 +640,27 @@ export default function NuevaVentaPage() {
 
             <div className="mt-3 shrink-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div className="grid gap-2">
                     <label className="text-sm font-medium text-[var(--color-text)]">Metodo de pago</label>
-                    {isReadOnlyMode ? (
-                      <div className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-2.5 text-sm font-medium text-[var(--color-text)]">
-                        {ventaMetodoLabel}
-                      </div>
-                    ) : (
-                      <Select value={selectedPaymentCode} onChange={(e) => setSelectedPaymentCode(e.target.value)} disabled={!paymentOptions.length}>
-                        {paymentOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                    )}
+                    <Select
+                      value={selectedPaymentCode}
+                      onChange={(e) => setSelectedPaymentCode(e.target.value)}
+                      disabled={!paymentOptions.length}
+                    >
+                      {paymentOptions.map((option) => (
+                        <option key={option.codigo} value={option.codigo}>
+                          {option.nombre}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <label className="text-sm font-medium text-[var(--color-text)]">Cliente</label>
+                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2.5 text-sm font-medium text-[var(--color-text)]">
+                      {clienteSeleccionado?.nombre || 'Comprobante final'}
+                    </div>
                   </div>
 
                   <div className="grid gap-2">
@@ -759,9 +669,23 @@ export default function NuevaVentaPage() {
                       type="text"
                       inputMode="decimal"
                       value={descuento}
-                      disabled={isReadOnlyMode}
                       onChange={(e) => setDescuento(sanitizeDecimalInput(e.target.value, 2))}
                     />
+                  </div>
+
+                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2.5 text-sm text-[var(--color-text-muted)]">
+                    <p>
+                      Metodo actual:{' '}
+                      <strong className="text-[var(--color-text)]">{selectedPaymentOption?.nombre || '-'}</strong>
+                    </p>
+                    <p className="mt-1">
+                      {paymentImpactsCash
+                        ? 'Afecta caja fisica.'
+                        : 'No afecta caja fisica, solo queda como referencia de cobro.'}
+                    </p>
+                    {selectedPaymentOption?.requiere_cliente ? (
+                      <p className="mt-1 text-[var(--color-warning)]">El credito exige cliente asociado.</p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -781,70 +705,79 @@ export default function NuevaVentaPage() {
                 </div>
               </div>
 
-              {isReadOnlyMode ? (
-                <div className="mt-3 flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={handleGoBack}>
-                    Volver
-                  </Button>
-                </div>
-              ) : (
-                <div className="mt-3 flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={resetVentaDraft}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="cashier"
-                    disabled={submitting || !carritoConEstado.length || hasInvalidItems || !paymentOptions.length}
-                    onClick={submitVenta}
-                  >
-                    {submitting ? 'Procesando...' : 'Cobrar'}
-                  </Button>
-                </div>
-              )}
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={resetVentaDraft}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  variant={paymentImpactsCash ? 'cashier' : 'primary'}
+                  disabled={ventaActionDisabled}
+                  onClick={submitVenta}
+                >
+                  {submitting ? 'Procesando...' : 'Cobrar'}
+                </Button>
+              </div>
             </div>
           </div>
         </Card>
       </div>
 
-      {!isReadOnlyMode && (
-        <FacturaModal
-          open={modalFacturaOpen}
-          onClose={() => setModalFacturaOpen(false)}
-          onSelectCliente={(cliente) => {
-            setClienteSeleccionado(cliente);
-            if (selectedPaymentCode === 'CREDITO_CLIENTE') return;
-            if (creditoHabilitado) setSelectedPaymentCode('CREDITO_CLIENTE');
-          }}
-        />
-      )}
+      <FacturaModal
+        open={modalFacturaOpen}
+        onClose={() => setModalFacturaOpen(false)}
+        onSelectCliente={(cliente) => {
+          setClienteSeleccionado(cliente);
+          setLocalError('');
+        }}
+      />
 
-      <Modal open={!isReadOnlyMode && successModal.open} onClose={closeSuccessModal} maxWidthClass="max-w-md" panelClassName="overflow-hidden p-0">
-        <div className="p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-xl font-semibold text-[var(--color-text)]">La venta ha sido exitosa</h3>
-              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                Se registró correctamente el cobro por <span className="font-semibold text-emerald-600">{formatMoney(successModal.total)}</span>.
-              </p>
-            </div>
-            <Button type="button" variant="ghost" size="sm" onClick={closeSuccessModal}>
-              X
-            </Button>
+      {successToast.open ? (
+        <div className="fixed bottom-5 right-5 z-[1100] max-w-sm">
+          <button type="button" className="block w-full border-0 bg-transparent p-0 text-left" onClick={closeSuccessToast}>
+            <Toast tone="success">
+              Venta aprobada correctamente por {formatMoney(successToast.total)}.
+            </Toast>
+          </button>
+        </div>
+      ) : null}
+
+      <Modal open={cajaRequiredModalOpen} onClose={() => setCajaRequiredModalOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Turno de caja requerido</h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              La venta en efectivo requiere un turno de caja abierto. Transferencia y credito pueden registrarse sin afectar caja fisica.
+            </p>
           </div>
-
-          <div className="mt-6 flex justify-end">
-            <Button type="button" variant="secondary" onClick={closeSuccessModal}>
-              Cerrar
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCajaRequiredModalOpen(false)}>
+              Entendido
+            </Button>
+            <Button onClick={() => navigate('/caja')}>
+              Ir a caja
             </Button>
           </div>
         </div>
+      </Modal>
 
-        <div className="h-3 w-full bg-emerald-100">
-          <div
-            className="h-full bg-emerald-500"
-            style={{ width: `${successModal.progress}%` }}
-          />
+      <Modal open={Boolean(stockIssue)} onClose={() => setStockIssue(null)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Stock insuficiente</h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              No hay stock suficiente para completar la venta del producto seleccionado.
+            </p>
+          </div>
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm text-[var(--color-text)]">
+            <p><strong>Producto:</strong> {stockIssue?.producto || '-'}</p>
+            <p><strong>Disponible:</strong> {stockIssue?.disponible || '0'} {stockIssue?.unidad || ''}</p>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setStockIssue(null)}>
+              Entendido
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>
