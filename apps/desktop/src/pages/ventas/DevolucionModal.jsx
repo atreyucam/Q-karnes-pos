@@ -23,6 +23,7 @@ import {
   moneyToCents,
   quantityToBase
 } from './ventaUtils';
+import useFormErrors from '../../shared/hooks/useFormErrors';
 
 function parseQtyByUnit(value, unidad) {
   if (getUnidad(unidad) === 'UND') {
@@ -63,6 +64,7 @@ export default function DevolucionModal({
     credito: ''
   });
   const [localError, setLocalError] = useState('');
+  const formErrors = useFormErrors();
 
   useEffect(() => {
     if (!open) return;
@@ -71,6 +73,7 @@ export default function DevolucionModal({
     setQtyByDetail({});
     setBreakdown({ contado: '', transferencia: '', credito: '' });
     setLocalError('');
+    formErrors.resetErrors();
   }, [open, ventaDetalle?.venta?.id]);
 
   const refundStatsMap = useMemo(
@@ -210,9 +213,11 @@ export default function DevolucionModal({
     setLocalError('');
 
     if (!motivo.trim()) {
+      formErrors.setErrors({ motivo: 'Este campo es obligatorio.' });
       setLocalError('El motivo de la devolucion es obligatorio.');
       return;
     }
+    formErrors.resetErrors();
 
     if (!selectedItems.length) {
       setLocalError('Ingresa al menos una cantidad para devolver.');
@@ -281,8 +286,8 @@ export default function DevolucionModal({
   return (
     <Modal open={open} onClose={onClose} maxWidthClass="max-w-6xl" panelClassName="p-5">
       <div className="space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">
               Devolucion venta #{ventaDetalle?.venta?.id || '-'}
             </h3>
@@ -290,7 +295,7 @@ export default function DevolucionModal({
               La devolucion usa el snapshot original de la venta. Puedes registrar un desglose manual o dejar que el backend lo distribuya automaticamente.
             </p>
           </div>
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={onClose}>
             X
           </Button>
         </div>
@@ -393,18 +398,23 @@ export default function DevolucionModal({
 
           <div className="space-y-4">
             <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <p className="font-semibold text-[var(--color-text)]">Motivo y observacion</p>
+              <p className="font-semibold text-[var(--color-text)]">Motivo y observación</p>
 
               <div className="mt-3 space-y-3">
                 <Input
+                  error={Boolean(formErrors.errors.motivo)}
                   value={motivo}
-                  onChange={(event) => setMotivo(event.target.value)}
-                  placeholder="Motivo de la devolucion"
+                  onChange={(event) => {
+                    formErrors.clearFieldError('motivo');
+                    setMotivo(event.target.value);
+                  }}
+                  placeholder="Motivo de la devolución"
                 />
+                {formErrors.errors.motivo ? <p className="text-sm text-[var(--color-danger)]">{formErrors.errors.motivo}</p> : null}
                 <Textarea
                   value={observacion}
                   onChange={(event) => setObservacion(event.target.value)}
-                  placeholder="Observacion operativa (opcional)"
+                  placeholder="Observación operativa (opcional)"
                   rows={4}
                 />
               </div>
@@ -413,13 +423,13 @@ export default function DevolucionModal({
             <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-semibold text-[var(--color-text)]">Desglose de devolucion</p>
+                  <p className="font-semibold text-[var(--color-text)]">Desglose de devolución</p>
                   <p className="text-sm text-[var(--color-text-muted)]">
-                    Opcional. Si dejas los campos vacios, el backend repartira el reembolso segun el saldo reversible de la venta.
+                    Opcional. Si dejas los campos vacíos, el backend repartirá el reembolso según el saldo reversible de la venta.
                   </p>
                 </div>
                 <Button type="button" variant="secondary" size="sm" onClick={() => setBreakdown({ contado: '', transferencia: '', credito: '' })}>
-                  Automatico
+                  Automático
                 </Button>
               </div>
 
@@ -478,7 +488,7 @@ export default function DevolucionModal({
 
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Credito</label>
+                    <label className="text-sm font-medium text-[var(--color-text)]">Crédito</label>
                     <span className="text-xs text-[var(--color-text-muted)]">Disponible: {formatMoney(centsToMoney(remainingBreakdown.credito_centavos))}</span>
                   </div>
                   <div className="flex gap-2">
@@ -527,7 +537,7 @@ export default function DevolucionModal({
             Cancelar
           </Button>
           <Button type="button" onClick={submit} disabled={submitting}>
-            {submitting ? 'Guardando...' : 'Registrar devolucion'}
+            {submitting ? 'Guardando...' : 'Registrar devolución'}
           </Button>
         </div>
       </div>

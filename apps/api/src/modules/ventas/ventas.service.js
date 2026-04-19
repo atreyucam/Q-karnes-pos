@@ -426,7 +426,7 @@ async function buildSaleComputation(items, trx) {
     });
 
     const precioUnitCentavos = moneyToCents(
-      item.precio_unit ?? product.precio_venta ?? product.precio_referencia ?? 0,
+      product.precio_venta ?? product.precio_referencia ?? 0,
       `items[${index}].precio_unit`
     );
     if (precioUnitCentavos <= 0) {

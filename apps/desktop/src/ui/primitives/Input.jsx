@@ -1,1 +1,1 @@
-export { Input as default } from '../../components/ui/Field';
+export { default } from '../../shared/ui/primitives/Input';

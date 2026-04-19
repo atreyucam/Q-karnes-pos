@@ -5,6 +5,8 @@ import {
   Button,
   Card,
   EmptyState,
+  Field,
+  FiltersBar,
   Input,
   LoadingState,
   MetricTile,
@@ -55,44 +57,43 @@ export default function VentasPorProductoReport() {
 
   return (
     <div className="space-y-5">
-      <Card className="space-y-4 p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha inicio
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_inicio}
-              onChange={(event) => setFilters((state) => ({ ...state, fecha_inicio: event.target.value }))}
-            />
-          </label>
+      <FiltersBar
+        actions={(
+          <>
+            <Button
+              variant="secondary"
+              className="w-full sm:w-auto"
+              onClick={() => {
+                const reset = defaultFilters();
+                setFilters(reset);
+                cargarReporte('ventasPorProducto', reset);
+              }}
+              disabled={view.loading}
+            >
+              Limpiar filtros
+            </Button>
+            <Button onClick={() => cargarReporte('ventasPorProducto', filters)} disabled={view.loading}>
+              Consultar
+            </Button>
+          </>
+        )}
+      >
+        <Field label="Fecha de inicio">
+          <Input
+            type="date"
+            value={filters.fecha_inicio}
+            onChange={(event) => setFilters((state) => ({ ...state, fecha_inicio: event.target.value }))}
+          />
+        </Field>
 
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha fin
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_fin}
-              onChange={(event) => setFilters((state) => ({ ...state, fecha_fin: event.target.value }))}
-            />
-          </label>
-
-          <Button onClick={() => cargarReporte('ventasPorProducto', filters)} disabled={view.loading}>
-            Consultar
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              const reset = defaultFilters();
-              setFilters(reset);
-              cargarReporte('ventasPorProducto', reset);
-            }}
-            disabled={view.loading}
-          >
-            Reiniciar
-          </Button>
-        </div>
-      </Card>
+        <Field label="Fecha de fin">
+          <Input
+            type="date"
+            value={filters.fecha_fin}
+            onChange={(event) => setFilters((state) => ({ ...state, fecha_fin: event.target.value }))}
+          />
+        </Field>
+      </FiltersBar>
 
       {view.error ? <Alert tone="error">{view.error}</Alert> : null}
       {view.loading && !data ? <LoadingState label="Consultando ventas por producto..." /> : null}

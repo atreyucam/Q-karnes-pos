@@ -17,6 +17,7 @@
     "test:ventas": "node scripts/ventas-frontend-tests.cjs",
     "test:caja": "node scripts/caja-frontend-tests.cjs",
     "test:productos": "node scripts/productos-pos-frontend-tests.cjs",
+    "test:ui-standardization": "node scripts/ui-standardization-tests.cjs",
     "test:sidebar:final": "node scripts/sidebar-final-tests.cjs",
     "test:reportes": "node scripts/reportes-graficos-tests.cjs",
     "test:auditoria": "node scripts/auditoria-frontend-tests.cjs",

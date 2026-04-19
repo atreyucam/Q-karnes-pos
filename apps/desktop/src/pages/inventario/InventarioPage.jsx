@@ -7,7 +7,8 @@ import {
   Card,
   ConfirmDialog,
   EmptyState,
-  IconButton,
+  Field,
+  FiltersBar,
   Input,
   LoadingState,
   MetricTile,
@@ -15,6 +16,8 @@ import {
   PageHeader,
   Paginador,
   Select,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
@@ -137,7 +140,7 @@ function InventoryProductPickerTable({
         <Input className="mt-2" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Código o nombre" />
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-[var(--color-border)]">
+      <div className="overflow-hidden rounded-xl border border-[var(--color-border)]">
         <Tabla>
           <TablaCabecera>
             <tr>
@@ -592,10 +595,29 @@ export default function InventarioPage() {
         </div>
 
         {tab === 'stock' && (
-          <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Categoría</label>
-              <Select className="mt-2" value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)}>
+          <FiltersBar
+            className="border-none bg-transparent p-0 shadow-none"
+            search={(
+              <Field label="Buscar">
+                <Input value={searchFiltro} onChange={(e) => setSearchFiltro(e.target.value)} placeholder="Código o nombre" />
+              </Field>
+            )}
+            actions={(
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full xl:w-auto"
+                onClick={() => {
+                  setCategoriaFiltro('');
+                  setSearchFiltro('');
+                }}
+              >
+                Limpiar filtros
+              </Button>
+            )}
+          >
+            <Field label="Categoría">
+              <Select value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)}>
                 <option value="">Todas</option>
                 {categorias.map((categoria) => (
                   <option key={categoria.id} value={categoria.id}>
@@ -603,12 +625,8 @@ export default function InventarioPage() {
                   </option>
                 ))}
               </Select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Buscar</label>
-              <Input className="mt-2" value={searchFiltro} onChange={(e) => setSearchFiltro(e.target.value)} placeholder="Código o nombre" />
-            </div>
-          </div>
+            </Field>
+          </FiltersBar>
         )}
 
         <Tabla>
@@ -703,10 +721,10 @@ export default function InventarioPage() {
                     <TablaCelda className="text-right">{formatInventoryQty(row.stock_minimo, row.unidad_medida || row.unidad)}</TablaCelda>
                     <TablaCelda>{resolveAlertLabel(row)}</TablaCelda>
                     <TablaCelda>
-                      <div className="flex justify-end">
-                        <IconButton
-                          variant="iconEdit"
-                          size="sm"
+                      <TableActions>
+                        <TableActionButton
+                          variant="warning"
+                          icon={<PiPencilSimple />}
                           aria-label={`Editar ${row.nombre}`}
                           title="Editar producto"
                           onClick={() => {
@@ -719,9 +737,9 @@ export default function InventarioPage() {
                             });
                           }}
                         >
-                          <PiPencilSimple className="text-lg" />
-                        </IconButton>
-                      </div>
+                          Editar
+                        </TableActionButton>
+                      </TableActions>
                     </TablaCelda>
                   </>
                 )}
@@ -755,21 +773,21 @@ export default function InventarioPage() {
                     <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{Number(row.diferencia_total || 0).toFixed(3)}</TablaCelda>
                     <TablaCelda>{row.observacion || '-'}</TablaCelda>
                     <TablaCelda>
-                      <div className="flex justify-end">
+                      <TableActions>
                         {row.estado === 'BORRADOR' ? (
-                          <IconButton
-                            variant="iconSuccess"
-                            size="sm"
+                          <TableActionButton
+                            variant="success"
+                            icon={<PiCheckCircle />}
                             aria-label={`Aplicar conteo ${row.id}`}
                             title="Aplicar conteo"
                             onClick={() => setConteoPendiente(row)}
                           >
-                            <PiCheckCircle className="text-lg" />
-                          </IconButton>
+                            Aplicar
+                          </TableActionButton>
                         ) : (
                           <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Aplicado</span>
                         )}
-                      </div>
+                      </TableActions>
                     </TablaCelda>
                   </>
                 )}
@@ -842,7 +860,7 @@ export default function InventarioPage() {
           />
         </div>
         {conteoProducto && (
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
             <p className="font-semibold text-[var(--color-text)]">
               Stock sistema: {formatInventoryQty(conteoProducto.stock_actual, conteoProducto.unidad_medida || conteoProducto.unidad, { appendUnit: true })}
             </p>
@@ -1010,12 +1028,12 @@ export default function InventarioPage() {
       />
 
       <Modal open={Boolean(productoEdit)} onClose={resetProductEdit} maxWidthClass="max-w-xl" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Editar producto</h3>
             <p className="text-sm text-[var(--color-text-muted)]">{productoEdit?.codigo} - {productoEdit?.nombre}</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" onClick={resetProductEdit}>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={resetProductEdit}>
             X
           </Button>
         </div>
@@ -1043,7 +1061,7 @@ export default function InventarioPage() {
             </div>
           </div>
 
-          <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 text-sm font-medium text-[var(--color-text)]">
+          <label className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 text-sm font-medium text-[var(--color-text)]">
             <input type="checkbox" checked={editForm.activo} onChange={(e) => setEditForm((state) => ({ ...state, activo: e.target.checked }))} />
             Activo
           </label>

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import logoEmpresa from '../../public/LogoEmpresa.png';
 import { Alert, Button, Input } from '../../ui';
 import { useAuthStore } from '../../stores/authStore';
+import useFormErrors from '../../shared/hooks/useFormErrors';
 
 function BrandMark() {
   return (
@@ -73,9 +74,14 @@ export default function LoginPage() {
 
   const [form, setForm] = useState({ usuario: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
+  const formErrors = useFormErrors();
 
   const onSubmit = async (e) => {
     e.preventDefault();
+    const nextErrors = {};
+    if (!form.usuario.trim()) nextErrors.usuario = 'Este campo es obligatorio.';
+    if (!form.password.trim()) nextErrors.password = 'Este campo es obligatorio.';
+    if (!formErrors.setErrors(nextErrors)) return;
     try {
       await login(form.usuario, form.password);
       navigate('/dashboard');
@@ -108,13 +114,18 @@ export default function LoginPage() {
                 <div className="relative">
                   <PiUser className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-lg text-text-subtle" />
                   <Input
+                    error={Boolean(formErrors.errors.usuario)}
                     className="h-14 rounded-2xl border-border bg-surface-alt pl-12 pr-4 text-base shadow-none focus:border-primary focus:bg-surface focus:ring-primary-soft"
                     value={form.usuario}
-                    onChange={(e) => setForm((s) => ({ ...s, usuario: e.target.value }))}
+                    onChange={(e) => {
+                      formErrors.clearFieldError('usuario');
+                      setForm((s) => ({ ...s, usuario: e.target.value }));
+                    }}
                     placeholder="Ingresa tu usuario"
                     autoComplete="username"
                   />
                 </div>
+                {formErrors.errors.usuario ? <p className="text-sm text-[var(--color-danger)]">{formErrors.errors.usuario}</p> : null}
               </label>
 
               <label className="block space-y-2">
@@ -123,9 +134,13 @@ export default function LoginPage() {
                   <PiLockKey className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-lg text-text-subtle" />
                   <Input
                     type={showPassword ? 'text' : 'password'}
+                    error={Boolean(formErrors.errors.password)}
                     className="h-14 rounded-2xl border-border bg-surface-alt pl-12 pr-12 text-base shadow-none focus:border-primary focus:bg-surface focus:ring-primary-soft"
                     value={form.password}
-                    onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))}
+                    onChange={(e) => {
+                      formErrors.clearFieldError('password');
+                      setForm((s) => ({ ...s, password: e.target.value }));
+                    }}
                     placeholder="Ingresa tu clave"
                     autoComplete="current-password"
                   />
@@ -138,6 +153,7 @@ export default function LoginPage() {
                     {showPassword ? <PiEyeClosed className="text-lg" /> : <PiEye className="text-lg" />}
                   </button>
                 </div>
+                {formErrors.errors.password ? <p className="text-sm text-[var(--color-danger)]">{formErrors.errors.password}</p> : null}
               </label>
 
               {error && <Alert tone="error">{error}</Alert>}
@@ -159,7 +175,7 @@ export default function LoginPage() {
               {showDemoHint && (
                 <div className="space-y-3 rounded-[24px] border border-border bg-background p-4 shadow-sm">
                   <div className="text-center text-xs font-semibold uppercase tracking-[0.08em] text-text-muted">
-                    Acceso rapido
+                    Acceso rápido
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <Button
@@ -195,7 +211,7 @@ export default function LoginPage() {
           <div className="relative flex h-full items-end px-14 pb-16">
             <div className="max-w-xl text-text-inverse">
               <h2 className="text-5xl font-extrabold tracking-[-0.05em] text-text-inverse">
-                Gestion eficiente para tu operacion
+                Gestión eficiente para tu operación
               </h2>
               <p className="mt-4 max-w-lg text-lg leading-8 text-text-inverse/90">
                 Controla ventas, inventario, compras y transformaciones en un solo flujo. Opera con rapidez y toma mejores decisiones desde caja.

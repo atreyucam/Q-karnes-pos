@@ -4,6 +4,8 @@ import {
   Button,
   Card,
   EmptyState,
+  Field,
+  FiltersBar,
   Input,
   LoadingState,
   Select,
@@ -48,60 +50,55 @@ export default function TransformacionesReport() {
 
   return (
     <div className="space-y-5">
-      <Card className="space-y-4 p-4">
-        <div className="grid gap-3 lg:grid-cols-3">
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha inicio
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_inicio}
-              onChange={(event) => setFilters((state) => ({ ...state, fecha_inicio: event.target.value }))}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha fin
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_fin}
-              onChange={(event) => setFilters((state) => ({ ...state, fecha_fin: event.target.value }))}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Estado
-            <Select
-              className="mt-1"
-              value={filters.estado}
-              onChange={(event) => setFilters((state) => ({ ...state, estado: event.target.value }))}
+      <FiltersBar
+        actions={(
+          <>
+            <Button
+              variant="secondary"
+              className="w-full sm:w-auto"
+              onClick={() => {
+                const reset = defaultFilters();
+                setFilters(reset);
+                cargarReporte('transformaciones', reset);
+              }}
+              disabled={view.loading}
             >
-              <option value="">Todos los estados</option>
-              <option value="APLICADA">Aplicada</option>
-              <option value="BORRADOR">Borrador</option>
-              <option value="ANULADA">Anulada</option>
-            </Select>
-          </label>
-        </div>
+              Limpiar filtros
+            </Button>
+            <Button onClick={() => cargarReporte('transformaciones', filters)} disabled={view.loading}>
+              Consultar
+            </Button>
+          </>
+        )}
+      >
+        <Field label="Fecha de inicio">
+          <Input
+            type="date"
+            value={filters.fecha_inicio}
+            onChange={(event) => setFilters((state) => ({ ...state, fecha_inicio: event.target.value }))}
+          />
+        </Field>
 
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => cargarReporte('transformaciones', filters)} disabled={view.loading}>
-            Consultar
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              const reset = defaultFilters();
-              setFilters(reset);
-              cargarReporte('transformaciones', reset);
-            }}
-            disabled={view.loading}
+        <Field label="Fecha de fin">
+          <Input
+            type="date"
+            value={filters.fecha_fin}
+            onChange={(event) => setFilters((state) => ({ ...state, fecha_fin: event.target.value }))}
+          />
+        </Field>
+
+        <Field label="Estado">
+          <Select
+            value={filters.estado}
+            onChange={(event) => setFilters((state) => ({ ...state, estado: event.target.value }))}
           >
-            Reiniciar
-          </Button>
-        </div>
-      </Card>
+            <option value="">Todos los estados</option>
+            <option value="APLICADA">Aplicada</option>
+            <option value="BORRADOR">Borrador</option>
+            <option value="ANULADA">Anulada</option>
+          </Select>
+        </Field>
+      </FiltersBar>
 
       {view.error ? <Alert tone="error">{view.error}</Alert> : null}
       {view.loading && !view.data ? <LoadingState label="Consultando transformaciones..." /> : null}

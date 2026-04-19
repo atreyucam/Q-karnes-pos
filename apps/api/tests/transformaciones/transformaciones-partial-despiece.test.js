@@ -177,9 +177,40 @@ async function runSuite(options = {}) {
       es_merma: true
     });
 
+    const padreTotalLb = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'PADRE-LB-TOTAL',
+      nombre: 'Canal LB Total',
+      unidad_medida: 'LB',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_transformable: true
+    });
+    const hijoTotalLb = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'HIJO-LB-TOTAL',
+      nombre: 'Resultado LB Total',
+      unidad_medida: 'LB',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_transformable: false
+    });
+    const mermaTotalLb = await createProducto(db, {
+      categoria_id: categoria.id,
+      codigo: 'MERMA-LB-TOTAL',
+      nombre: 'Merma LB Total',
+      unidad_medida: 'LB',
+      stock_actual: 0,
+      costo_promedio: 0,
+      es_vendible: false,
+      es_transformable: false,
+      es_merma: true
+    });
+
     await receiveStock(cajero, proveedor.id, padreLb.id, 100, 250, 'RCV-LB-001');
     await receiveStock(cajero, proveedor.id, padreKg.id, 50, 400, 'RCV-KG-001');
     await receiveStock(cajero, proveedor.id, padreUnd.id, 20, 100, 'RCV-UND-001');
+    await receiveStock(cajero, proveedor.id, padreTotalLb.id, 80, 102.8, 'RCV-LB-TOTAL-001');
 
     try {
       const before = await db('productos').where({ id: padreLb.id }).first();
@@ -283,14 +314,16 @@ async function runSuite(options = {}) {
       const borradorUnd = await transformacionesService.createBorrador(
         {
           tipo_proceso: 'DESPIECE',
+          referencia_lote: 'LOTE-UND-001',
+          modo_distribucion_costo: 'AUTOMATICA',
           observacion: 'Contrato v2 UND sin cantidad explícita',
-          producto_padre_id: padreUnd.id,
-          hijos: [
+          insumo: { producto_id: padreUnd.id },
+          resultados: [
             { producto_id: hijoUndA.id, cantidad: 8 },
             { producto_id: hijoUndB.id, cantidad: 5 }
           ],
-          merma: [
-            { tipo_merma: 'ROTURA', producto_id: mermaUnd.id, cantidad: 2, motivo: 'Merma UND' }
+          mermas: [
+            { tipo_merma: 'ROTURA', cantidad: 2, motivo: 'Merma UND' }
           ]
         },
         admin
@@ -305,6 +338,8 @@ async function runSuite(options = {}) {
       assert(Number(childUndAAfter.stock_actual) === 8, 'Debe ingresar stock del hijo UND A');
       assert(Number(childUndBAfter.stock_actual) === 5, 'Debe ingresar stock del hijo UND B');
       assert(Number(aplicadaUnd.data.metricas?.total_consumido || 0) === 15, 'Debe exponer total consumido en respuesta');
+      assert(aplicadaUnd.data.referencia_lote === 'LOTE-UND-001', 'Debe preservar referencia_lote');
+      assert(aplicadaUnd.data.distribucion_costo?.modo === 'AUTOMATICA', 'Debe preservar el modo de distribución');
       add(4, 'Soporta contrato v2 sin cantidad explícita y unidades UND', true);
     } catch (error) {
       add(4, 'Soporta contrato v2 sin cantidad explícita y unidades UND', false, error.message);
@@ -396,6 +431,64 @@ async function runSuite(options = {}) {
       add(8, 'Anula una transformación reversible restaurando inventario', true);
     } catch (error) {
       add(8, 'Anula una transformación reversible restaurando inventario', false, error.message);
+    }
+
+    try {
+      const manualDraft = await transformacionesService.createBorrador(
+        {
+          tipo_proceso: 'DESPIECE',
+          referencia_lote: 'LOTE-LB-009',
+          modo_distribucion_costo: 'MANUAL',
+          observacion: 'Manual con merma clasificada',
+          insumo: { producto_id: padreLb.id, cantidad: 15 },
+          resultados: [
+            { producto_id: hijoLbA.id, cantidad: 10, costo_total: 25 }
+          ],
+          mermas: [
+            { tipo_merma: 'RECORTE', cantidad: 5, motivo: 'Clasificación sin producto', costo_total: 12.5 }
+          ]
+        },
+        admin
+      );
+
+      const fetchedManual = await transformacionesService.getTransformacion(manualDraft.data.id);
+      assert(fetchedManual.data.referencia_lote === 'LOTE-LB-009', 'Debe devolver referencia_lote en detalle');
+      assert(fetchedManual.data.distribucion_costo?.modo === 'MANUAL', 'Debe reabrir con modo de distribución manual');
+      assert(fetchedManual.data.mermas[0].producto_id === null, 'Debe permitir merma sin producto');
+      assert(fetchedManual.data.mermas[0].clasificacion_sin_impacto_stock === true, 'Debe marcar merma como clasificatoria sin stock');
+      add(9, 'Persiste referencia, modo manual y merma sin producto', true);
+    } catch (error) {
+      add(9, 'Persiste referencia, modo manual y merma sin producto', false, error.message);
+    }
+
+    try {
+      const totalDraft = await transformacionesService.createBorrador(
+        {
+          tipo_proceso: 'DESPIECE',
+          observacion: 'Consumo total LB',
+          insumo: { producto_id: padreTotalLb.id },
+          resultados: [
+            { producto_id: hijoTotalLb.id, cantidad: 75 }
+          ],
+          mermas: [
+            { tipo_merma: 'RECORTE', producto_id: mermaTotalLb.id, cantidad: 5, motivo: 'Cierre total' }
+          ]
+        },
+        admin
+      );
+      const totalApplied = await transformacionesService.aplicarTransformacion(totalDraft.data.id, {}, admin);
+
+      const totalParent = await db('productos').where({ id: padreTotalLb.id }).first();
+      const totalChild = await db('productos').where({ id: hijoTotalLb.id }).first();
+
+      assert(Number(totalApplied.data.metricas?.total_consumido || 0) === 80, 'Debe consumir el total declarado por hijos + merma');
+      assert(Number(totalApplied.data.metricas?.stock_restante || 0) === 0, 'Debe dejar disponible final en 0');
+      assert(Number(totalParent.stock_actual) === 0, 'El padre debe quedar agotado tras consumo total');
+      assert(Number(totalChild.stock_actual) === 75, 'El resultado debe ingresar la cantidad completa');
+      assert(totalApplied.data.costos?.costo_total_padre_centavos === 10280, 'Debe distribuir costo solo sobre lo consumido');
+      add(10, 'Aplica consumo total y deja disponible final en cero', true);
+    } catch (error) {
+      add(10, 'Aplica consumo total y deja disponible final en cero', false, error.message);
     }
   } catch (fatalError) {
     add(999, 'Preparación de suite', false, fatalError.message);

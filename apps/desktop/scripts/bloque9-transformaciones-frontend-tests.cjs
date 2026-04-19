@@ -38,78 +38,129 @@ function run() {
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
-    assert(formPage.includes('Nueva transformación'), 'No renderiza la vista nueva de formulario');
-    assert(formPage.includes('Padre') && formPage.includes('Resultados (Hijos)') && formPage.includes('Merma') && formPage.includes('Distribución de costo') && formPage.includes('Resumen dinámico'), 'El formulario v2 está incompleto');
-    assert(!formPage.includes('Cantidad a despiezar'), 'El formulario sigue mostrando la captura manual de cantidad del padre');
-    add(2, 'Formulario v2 reemplaza el modelo anterior', true);
+    assert(formPage.includes('Nueva transformación guiada'), 'No renderiza la vista wizard');
+    assert(
+      formPage.includes("label: '1 Padre'") &&
+      formPage.includes("label: '2 Resultados'") &&
+      formPage.includes("label: '3 Merma'") &&
+      formPage.includes("label: '4 Distribución de costo'") &&
+      formPage.includes("label: '5 Confirmar'") &&
+      formPage.includes('Resumen dinámico'),
+      'El formulario wizard está incompleto'
+    );
+    assert(!formPage.includes('Cantidad a despiezar') && !formPage.includes('cantidad a transformar'), 'El formulario sigue pidiendo cantidad inicial del padre');
+    assert(formPage.includes('type="button" onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft}>Seleccionar padre</Button>'), 'El botón seleccionar padre ya no quedó en la acción principal');
+    add(2, 'Formulario wizard reemplaza el modelo anterior', true);
   } catch (error) {
-    add(2, 'Formulario v2 reemplaza el modelo anterior', false, error.message);
+    add(2, 'Formulario wizard reemplaza el modelo anterior', false, error.message);
   }
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     assert(formPage.includes('Selecciona un producto padre.'), 'Falta validación de producto padre obligatorio');
-    assert(formPage.includes('Agrega al menos un producto hijo.') && formPage.includes('Agrega al menos una merma.'), 'Faltan validaciones de hijos/merma obligatorios');
-    assert(formPage.includes('El total consumido no puede superar el stock disponible'), 'Falta validación de stock disponible');
-    add(3, 'Validaciones de cantidad y stock presentes', true);
+    assert(
+      formPage.includes('Agrega al menos un producto hijo para continuar.') &&
+      formPage.includes('Agrega al menos una merma para continuar.'),
+      'Faltan validaciones de hijos/merma obligatorios'
+    );
+    assert(
+      formPage.includes('Los resultados exceden el disponible para transformar') &&
+      formPage.includes('El consumido total no puede superar el disponible para transformar'),
+      'Faltan validaciones claras de stock disponible'
+    );
+    add(3, 'Validaciones guiadas de cantidad y stock presentes', true);
   } catch (error) {
-    add(3, 'Validaciones de cantidad y stock presentes', false, error.message);
+    add(3, 'Validaciones guiadas de cantidad y stock presentes', false, error.message);
   }
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
-    assert(formPage.includes('Agregar hijo') && formPage.includes('Agregar merma') && formPage.includes('Quitar'), 'Faltan acciones dinámicas para hijos o merma');
-    assert(formPage.includes('UND entero'), 'No comunica la restricción de UND entero');
-    assert(formPage.includes('Los productos marcados como merma no pueden registrarse como hijos.'), 'No valida exclusión de productos merma en hijos');
-    add(4, 'Edición dinámica de hijos y merma', true);
+    assert(formPage.includes('const hasConsumptionOverflow = totalConsumedBase > parentAvailableStockBase;'), 'No calcula overflow de consumo');
+    assert(formPage.includes("const invalidSteps = hasConsumptionOverflow ? [2] : [];"), 'No marca el paso 2 como inválido');
+    assert(formPage.includes('⚠ Resultados'), 'No refleja el paso inválido en el stepper');
+    assert(formPage.includes('No puedes continuar: el consumo excede el disponible del padre.'), 'No muestra mensaje claro por exceso');
+    assert(formPage.includes('const continueDisabled = saving || loading || !isEditableDraft || ((currentStep === 2 || currentStep === 3) && hasConsumptionOverflow);'), 'Continuar no se deshabilita por exceso');
+    add(4, 'Exceso deshabilita avance y marca el step inválido', true);
   } catch (error) {
-    add(4, 'Edición dinámica de hijos y merma', false, error.message);
+    add(4, 'Exceso deshabilita avance y marca el step inválido', false, error.message);
+  }
+
+  try {
+    const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
+    assert(formPage.includes('+ Agregar producto hijo') && formPage.includes('+ Agregar merma') && formPage.includes('Quitar'), 'Faltan acciones dinámicas para hijos o merma');
+    assert(formPage.includes('UND solo admite cantidades enteras.') || formPage.includes('sanitizeQtyInput'), 'No comunica ni controla la restricción de UND entero');
+    assert(formPage.includes('Los productos marcados como merma no pueden registrarse como hijos.'), 'No valida exclusión de productos merma en resultados');
+    assert(formPage.includes('FieldCallout'), 'No usa mensajes tipo nube de llamada en inputs');
+    add(5, 'Edición dinámica de resultados y merma', true);
+  } catch (error) {
+    add(5, 'Edición dinámica de resultados y merma', false, error.message);
   }
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     assert(formPage.includes('Automática') && formPage.includes('Manual'), 'No existe selector de distribución automática/manual');
     assert(formPage.includes('La distribución de costo no cuadra.'), 'Falta validación de distribución exacta de costo');
-    assert(formPage.includes('Costo padre consumido') && formPage.includes('Costo distribuido') && formPage.includes('Diferencia de costo'), 'No muestra resumen de costos');
-    add(5, 'Modo de costo y resumen financiero presentes', true);
+    assert(
+      formPage.includes('Costo total consumido') &&
+      formPage.includes('Costo distribuido') &&
+      formPage.includes('Diferencia de costo') &&
+      formPage.includes('text-4xl font-bold'),
+      'No muestra resumen de costos'
+    );
+    add(6, 'Modo de costo y resumen financiero presentes', true);
   } catch (error) {
-    add(5, 'Modo de costo y resumen financiero presentes', false, error.message);
+    add(6, 'Modo de costo y resumen financiero presentes', false, error.message);
   }
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
-    assert(formPage.includes('producto_padre_id') && formPage.includes('hijos: payloadChildren') && formPage.includes('merma: payloadMermas'), 'No construye payload v2');
-    assert(formPage.includes('cantidad_padre_consumida') && formPage.includes('payload.insumo = {'), 'No contempla compatibilidad con backend legado');
-    add(6, 'Payload frontend refleja contrato nuevo y legado', true);
+    assert(formPage.includes('modo_distribucion_costo: costMode'), 'No expone el modo de distribución en el payload');
+    assert(formPage.includes('resultados: payloadChildren') && formPage.includes('mermas: payloadMermas'), 'No construye el contrato canónico resultados/mermas');
+    assert(formPage.includes('referencia_lote: header.referencia_lote') && formPage.includes('tipo_merma: String(row.tipoMerma || \'\').trim()'), 'No envía referencia_lote o tipo_merma');
+    assert(!formPage.includes('row.producto_id ? { producto_id: Number(row.producto_id) } : {}'), 'La UI sigue enviando producto_id en mermas');
+    assert(!formPage.includes('producto_padre_id: Number(parent.producto_id)') && !formPage.includes('hijos: payloadChildren') && !formPage.includes('merma: payloadMermas'), 'Sigue enviando el payload híbrido legado');
+    add(7, 'Payload frontend usa contrato canónico sin híbridos', true);
   } catch (error) {
-    add(6, 'Payload frontend refleja contrato nuevo y legado', false, error.message);
+    add(7, 'Payload frontend usa contrato canónico sin híbridos', false, error.message);
   }
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
-    assert(formPage.includes('Guardar borrador'), 'No existe acción de guardar borrador');
+    assert(formPage.includes('Guardar lista para aplicar'), 'No existe acción de guardado con semántica cerrada');
     assert(formPage.includes('await editar(editId, buildPayload())') && formPage.includes('await crear(buildPayload())'), 'No ejecuta flujo de guardado');
-    assert(formPage.includes('Aplicar transformación') && formPage.includes('handleOpenApply') && formPage.includes('Confirmar y aplicar'), 'No existe flujo de aplicación');
-    add(7, 'Guardar y aplicar siguen operativos', true);
+    assert(formPage.includes('Aplicar ahora') && formPage.includes('handleOpenApply') && formPage.includes('Confirmar y aplicar'), 'No existe flujo de aplicación');
+    add(8, 'Guardar y aplicar siguen operativos', true);
   } catch (error) {
-    add(7, 'Guardar y aplicar siguen operativos', false, error.message);
+    add(8, 'Guardar y aplicar siguen operativos', false, error.message);
   }
 
   try {
     const detailPage = read('apps/desktop/src/pages/transformaciones/TransformacionDetallePage.jsx');
-    assert(detailPage.includes('Detalle transformación') && detailPage.includes('Costo distribuido') && detailPage.includes('Diferencia costo'), 'La vista detalle no refleja el nuevo resumen');
-    add(8, 'Vista detalle muestra métricas y costos v2', true);
+    assert(
+      detailPage.includes('Ver Kardex') &&
+      !detailPage.includes('Imprimir') &&
+      detailPage.includes('Transformación auditada') &&
+      detailPage.includes('Responsable') &&
+      detailPage.includes('Total del padre') &&
+      detailPage.includes('Stock restante') &&
+      detailPage.includes('Resultados generados') &&
+      detailPage.includes('Registro clasificatorio de merma') &&
+      detailPage.includes('Trazabilidad / movimientos') &&
+      detailPage.includes('Tipo movimiento'),
+      'La vista detalle no refleja la estructura operativa final'
+    );
+    add(9, 'Vista detalle muestra métricas y costos v2', true);
   } catch (error) {
-    add(8, 'Vista detalle muestra métricas y costos v2', false, error.message);
+    add(9, 'Vista detalle muestra métricas y costos v2', false, error.message);
   }
 
   try {
     const routes = read('apps/desktop/src/router/routes.jsx');
     assert(routes.includes("import TransformacionDetallePage"), 'Router no importa vista detalle dedicada');
     assert(routes.includes("{ path: '/transformaciones/:id', element: <TransformacionDetallePage /> }"), 'La ruta detalle no usa la pantalla dedicada');
-    add(9, 'Rutas separan edición y detalle', true);
+    add(10, 'Rutas separan edición y detalle', true);
   } catch (error) {
-    add(9, 'Rutas separan edición y detalle', false, error.message);
+    add(10, 'Rutas separan edición y detalle', false, error.message);
   }
 
   try {
@@ -117,17 +168,42 @@ function run() {
     const store = read('apps/desktop/src/stores/transformacionesStore.js');
     assert(navigation.includes('/transformaciones'), 'La navegación no expone el módulo');
     assert(store.includes('/api/transformaciones'), 'El store no integra endpoints del módulo');
-    add(10, 'Navegación y store conservan integración', true);
+    add(11, 'Navegación y store conservan integración', true);
   } catch (error) {
-    add(10, 'Navegación y store conservan integración', false, error.message);
+    add(11, 'Navegación y store conservan integración', false, error.message);
   }
 
   try {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
-    assert(formPage.includes('Confirmar aplicación') && formPage.includes('Total consumido:') && formPage.includes('Stock restante estimado:'), 'No existe modal de confirmación actualizado');
-    add(11, 'Modal de confirmación usa métricas derivadas', true);
+    assert(
+      formPage.includes('Confirmar aplicación') &&
+      formPage.includes('Disponible inicial:') &&
+      formPage.includes('Consumido total:') &&
+      formPage.includes('Disponible final:'),
+      'No existe modal de confirmación actualizado'
+    );
+    add(12, 'Modal de confirmación usa métricas derivadas', true);
   } catch (error) {
-    add(11, 'Modal de confirmación usa métricas derivadas', false, error.message);
+    add(12, 'Modal de confirmación usa métricas derivadas', false, error.message);
+  }
+
+  try {
+    const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
+    assert(formPage.includes('Stock disponible del padre'), 'No actualizó labels de stock del padre');
+    assert(formPage.includes('Saldo sin transformar'), 'No actualizó labels de saldo');
+    assert(formPage.includes('Clasificación de merma'), 'No dejó el encabezado claro para merma');
+    assert(!formPage.includes('Producto asociado') && !formPage.includes('Merma sin inventario (solo clasificatoria)'), 'La UI de merma sigue mostrando producto asociado');
+    assert(formPage.includes('✅ Consumo completo del padre'), 'No muestra badge de consumo completo');
+    assert(formPage.includes('currentStep !== 1'), 'El badge de consumo completo sigue apareciendo en paso 1');
+    assert(formPage.includes('md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)_minmax(0,2fr)]'), 'La grilla alineada de resultados/merma no está definida');
+    assert(formPage.includes('Tipo Corte'), 'El modal de hijo no agrega columna tipo corte');
+    assert(formPage.includes('aria-label="Cerrar modal"') && formPage.includes('>×</button>'), 'El modal no usa la X de cierre');
+    assert(formPage.includes('text-xs font-medium text-text-muted'), 'La presentación del precio en resultados no fue ajustada');
+    assert(formPage.includes("costMode === 'AUTOMATICA' ? <span className=\"font-semibold text-text\">{formatMoney(row.resolvedCost)}</span>"), 'Costo total automático no se muestra como texto');
+    assert(formPage.includes('placeholder="Recorte, hueso, grasa, etc."') && formPage.includes('placeholder="Motivo de merma"'), 'La captura inline de merma no quedó completa');
+    add(13, 'Labels, badge, grid y modal hijo reflejan ajustes UX', true);
+  } catch (error) {
+    add(13, 'Labels, badge, grid y modal hijo reflejan ajustes UX', false, error.message);
   }
 
   try {
@@ -135,9 +211,9 @@ function run() {
     assert(formPage.includes('isAdminUser'), 'No contempla bypass de autorización para sesión admin');
     const detailPage = read('apps/desktop/src/pages/transformaciones/TransformacionDetallePage.jsx');
     assert(detailPage.includes('isAdminUser'), 'Detalle no contempla bypass de autorización para sesión admin');
-    add(12, 'Bypass admin sigue vigente', true);
+    add(14, 'Bypass admin sigue vigente', true);
   } catch (error) {
-    add(12, 'Bypass admin sigue vigente', false, error.message);
+    add(14, 'Bypass admin sigue vigente', false, error.message);
   }
 
   print(results);

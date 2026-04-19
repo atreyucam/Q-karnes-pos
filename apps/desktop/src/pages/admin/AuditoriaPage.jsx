@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, PageHeader } from '../../shared/ui';
+import { PageHeader, Tabs } from '../../shared/ui';
 import AuditoriaResumen from './auditoria/AuditoriaResumen';
 import AuditoriaEventosView from './auditoria/AuditoriaEventosView';
 import AuditoriaHallazgosView from './auditoria/AuditoriaHallazgosView';
@@ -77,18 +77,12 @@ export default function AuditoriaPage() {
         description="Supervision operativa para detectar errores criticos, advertencias y trazabilidad faltante"
       />
 
-      <div className="flex flex-wrap gap-2">
-        {AUDITORIA_TABS.map((tab) => (
-          <Button
-            key={tab.key}
-            variant={tab.key === currentTab ? 'primary' : 'ghost'}
-            className={tab.key === currentTab ? '' : '!text-[var(--color-text-muted)]'}
-            onClick={() => setParams({ tab: tab.key })}
-          >
-            {tab.label}
-          </Button>
-        ))}
-      </div>
+      <Tabs
+        ariaLabel="Pestanas de auditoria"
+        items={AUDITORIA_TABS}
+        value={currentTab}
+        onChange={(tabKey) => setParams({ tab: tabKey })}
+      />
 
       <ActiveTab />
     </div>

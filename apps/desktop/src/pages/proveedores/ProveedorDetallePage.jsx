@@ -1,32 +1,48 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiCurrencyDollar, PiEye } from 'react-icons/pi';
+import { PiCurrencyDollar, PiEye, PiPencilSimple } from 'react-icons/pi';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   BackButton,
   Button,
   Card,
-  DeactivateEntityDialogs,
-  IconButton,
+  Field,
   Input,
   LoadingState,
   Modal,
   PageHeader,
   Paginador,
+  Select,
   StatusBadge,
+  Switch,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
-  TablaCelda
+  TablaCelda,
+  Textarea,
+  Toast
 } from '../../ui';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatQtyByUnit } from '../../lib/formatQty';
+import useFormErrors from '../../shared/hooks/useFormErrors';
 
 const PAGE_SIZE = 8;
+const emptyProveedorForm = {
+  id: null,
+  nombre: '',
+  telefono: '',
+  direccion: '',
+  observacion: '',
+  tiene_credito: true,
+  dias_pago: '15',
+  activo: true
+};
 
 export default function ProveedorDetallePage() {
   const { id } = useParams();
@@ -52,9 +68,15 @@ export default function ProveedorDetallePage() {
   const [referencia, setReferencia] = useState('');
   const [modalFactura, setModalFactura] = useState(false);
   const [facturaDetalle, setFacturaDetalle] = useState(null);
+  const [proveedorModal, setProveedorModal] = useState({ open: false, mode: 'edit' });
+  const [proveedorForm, setProveedorForm] = useState(emptyProveedorForm);
   const [confirmDeactivateOpen, setConfirmDeactivateOpen] = useState(false);
-  const [deactivateError, setDeactivateError] = useState('');
   const [deactivateLoading, setDeactivateLoading] = useState(false);
+  const [blockedDeactivateOpen, setBlockedDeactivateOpen] = useState(false);
+  const [statusToast, setStatusToast] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const proveedorFormErrors = useFormErrors();
+  const pagoFormErrors = useFormErrors();
 
   const proveedorId = Number(id);
 
@@ -103,16 +125,34 @@ export default function ProveedorDetallePage() {
     setPagina(1);
   }, [facturas.length]);
 
+  useEffect(() => {
+    if (!statusToast) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 2400);
+    const clearTimer = window.setTimeout(() => setStatusToast(''), 2580);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToast]);
+
   const onPagar = async () => {
     if (!modalPago) return;
+    const nextErrors = {};
+    const monto = Number(montoPago || 0);
+    if (!String(montoPago || '').trim()) nextErrors.monto = 'Este campo es obligatorio.';
+    else if (!(monto > 0)) nextErrors.monto = 'Ingresa un valor válido.';
+    if (!pagoFormErrors.setErrors(nextErrors)) return;
+
     await pagarCredito(proveedorId, {
       factura_id: modalPago.id,
-      monto: Number(montoPago || 0),
+      monto,
       referencia: referencia || null
     });
     setModalPago(null);
     setMontoPago('0');
     setReferencia('');
+    pagoFormErrors.resetErrors();
     loadData();
   };
 
@@ -122,17 +162,79 @@ export default function ProveedorDetallePage() {
     setModalFactura(true);
   };
 
+  const openEditModal = () => {
+    if (!proveedorDetalle) return;
+    setProveedorModal({ open: true, mode: 'edit' });
+    proveedorFormErrors.resetErrors();
+    setProveedorForm({
+      id: proveedorDetalle.id,
+      nombre: proveedorDetalle.nombre || '',
+      telefono: proveedorDetalle.telefono || '',
+      direccion: proveedorDetalle.direccion || '',
+      observacion: proveedorDetalle.observacion || '',
+      tiene_credito: Boolean(proveedorDetalle.tiene_credito),
+      dias_pago: String(Number(proveedorDetalle.dias_pago || 0)),
+      activo: Boolean(proveedorDetalle.activo)
+    });
+  };
+
+  const closeProveedorModal = () => {
+    setProveedorModal({ open: false, mode: 'edit' });
+    setProveedorForm(emptyProveedorForm);
+    proveedorFormErrors.resetErrors();
+  };
+
+  const onSaveProveedor = async () => {
+    const nextErrors = {};
+    if (!proveedorForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (proveedorForm.tiene_credito) {
+      const diasPago = Number(proveedorForm.dias_pago || 0);
+      if (!String(proveedorForm.dias_pago || '').trim()) nextErrors.dias_pago = 'Este campo es obligatorio.';
+      else if (!Number.isFinite(diasPago) || diasPago < 0) nextErrors.dias_pago = 'Ingresa un valor válido.';
+    }
+    if (!proveedorFormErrors.setErrors(nextErrors)) return;
+
+    const saldoPendiente = Number(resumenCxp?.saldo || 0);
+    const estabaActivo = Boolean(proveedorDetalle?.activo);
+    const quiereDesactivar = estabaActivo && !proveedorForm.activo;
+
+    if (quiereDesactivar && saldoPendiente > 0) {
+      setBlockedDeactivateOpen(true);
+      return;
+    }
+
+    const payload = {
+      nombre: proveedorForm.nombre.trim(),
+      telefono: proveedorForm.telefono.trim() || null,
+      direccion: proveedorForm.direccion.trim() || null,
+      observacion: proveedorForm.observacion.trim() || null,
+      tiene_credito: proveedorForm.tiene_credito,
+      dias_pago: proveedorForm.tiene_credito ? Number(proveedorForm.dias_pago || 0) : 0,
+      activo: proveedorForm.activo
+    };
+
+    await actualizar(proveedorId, payload);
+    closeProveedorModal();
+    await loadData();
+    setStatusToast('Proveedor actualizado.');
+  };
+
   const onToggleProveedor = async () => {
     if (!proveedorDetalle) return;
 
     if (proveedorDetalle.activo) {
+      if (Number(resumenCxp?.saldo || 0) > 0) {
+        setBlockedDeactivateOpen(true);
+        return;
+      }
       setConfirmDeactivateOpen(true);
       return;
     }
 
     try {
       await actualizar(proveedorId, { activo: true });
-      loadData();
+      await loadData();
+      setStatusToast('Proveedor ha sido activado.');
     } catch (_) {
       // store error already exposed in page alert
     }
@@ -143,10 +245,10 @@ export default function ProveedorDetallePage() {
     try {
       await actualizar(proveedorId, { activo: false });
       setConfirmDeactivateOpen(false);
-      loadData();
+      await loadData();
+      setStatusToast('Proveedor ha sido desactivado.');
     } catch (error) {
       setConfirmDeactivateOpen(false);
-      setDeactivateError(error.message || 'El sistema no permitio desactivar este proveedor.');
     } finally {
       setDeactivateLoading(false);
     }
@@ -154,20 +256,32 @@ export default function ProveedorDetallePage() {
 
   return (
     <div className="space-y-5">
+      {statusToast ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast>
+        </div>
+      ) : null}
+
       <BackButton to="/proveedores">Volver</BackButton>
 
       <PageHeader
-        title="Detalle proveedor"
+        title="Detalle del proveedor"
         description="Facturas, saldo pendiente y pagos."
         actions={(
           <div className="flex flex-wrap gap-2">
             {proveedorDetalle && (
-              <Button
-                variant={proveedorDetalle.activo ? 'danger' : 'primary'}
-                onClick={onToggleProveedor}
-              >
-                {proveedorDetalle.activo ? 'Desactivar proveedor' : 'Activar proveedor'}
-              </Button>
+              <>
+                <Button variant="secondary" onClick={openEditModal}>
+                  <PiPencilSimple className="text-base" />
+                  Editar
+                </Button>
+                <Button
+                  variant={proveedorDetalle.activo ? 'danger' : 'primary'}
+                  onClick={onToggleProveedor}
+                >
+                  {proveedorDetalle.activo ? 'Desactivar proveedor' : 'Activar proveedor'}
+                </Button>
+              </>
             )}
           </div>
         )}
@@ -184,11 +298,11 @@ export default function ProveedorDetallePage() {
                 <span className="font-semibold text-[var(--color-text)]">{proveedorDetalle.nombre}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Telefono</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Teléfono</span>
                 <span className="font-semibold text-[var(--color-text)]">{proveedorDetalle.telefono || '-'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Direccion</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Dirección</span>
                 <span className="text-[var(--color-text)]">{proveedorDetalle.direccion || '-'}</span>
               </div>
             </div>
@@ -199,9 +313,9 @@ export default function ProveedorDetallePage() {
                 <StatusBadge status={proveedorDetalle.activo ? 'ACTIVO' : 'INACTIVO'} />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Credito / dias</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Crédito / días</span>
                 <StatusBadge tone={proveedorDetalle.tiene_credito ? 'warning' : 'neutral'}>
-                  {proveedorDetalle.tiene_credito ? `${Number(proveedorDetalle.dias_pago || 0)} dias` : 'Sin credito'}
+                  {proveedorDetalle.tiene_credito ? `${Number(proveedorDetalle.dias_pago || 0)} días` : 'Sin crédito'}
                 </StatusBadge>
               </div>
               <div className="flex items-center gap-2">
@@ -224,9 +338,9 @@ export default function ProveedorDetallePage() {
         <Tabla>
           <TablaCabecera>
             <tr>
-              <TablaCelda as="th">N factura</TablaCelda>
+              <TablaCelda as="th">N.º factura</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
-              <TablaCelda as="th">Metodo</TablaCelda>
+              <TablaCelda as="th">Método</TablaCelda>
               <TablaCelda as="th" className="text-right">Total</TablaCelda>
               <TablaCelda as="th" className="text-right">Pendiente</TablaCelda>
               <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
@@ -248,21 +362,21 @@ export default function ProveedorDetallePage() {
                     {formatMoney(pendiente)}
                   </TablaCelda>
                   <TablaCelda>
-                    <div className="flex justify-end gap-1">
-                      <IconButton
-                        variant="iconView"
-                        size="sm"
+                    <TableActions>
+                      <TableActionButton
+                        variant="neutral"
+                        icon={<PiEye />}
                         aria-label="Ver factura"
                         title="Ver factura"
                         onClick={() => onVerFactura(factura.id)}
                       >
-                        <PiEye className="text-lg" />
-                      </IconButton>
-                      <IconButton
-                        variant="iconSecondary"
-                        size="sm"
+                        Ver
+                      </TableActionButton>
+                      <TableActionButton
+                        variant="secondary"
+                        icon={<PiCurrencyDollar />}
                         aria-label="Pagar credito"
-                        title={sinPendiente ? 'Sin saldo pendiente' : 'Pagar credito'}
+                        title={sinPendiente ? 'Sin saldo pendiente' : 'Pagar crédito'}
                         disabled={factura.metodo_pago !== 'CREDITO' || sinPendiente}
                         onClick={() => {
                           setModalPago(factura);
@@ -270,9 +384,9 @@ export default function ProveedorDetallePage() {
                           setReferencia('');
                         }}
                       >
-                        <PiCurrencyDollar className="text-lg" />
-                      </IconButton>
-                    </div>
+                        Pagar
+                      </TableActionButton>
+                    </TableActions>
                   </TablaCelda>
                 </TablaFila>
               );
@@ -293,13 +407,115 @@ export default function ProveedorDetallePage() {
 
       {loading && <LoadingState label="Cargando proveedor..." />}
 
+      <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Editar proveedor</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, crédito y estado.</p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeProveedorModal}>
+            X
+          </Button>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Field label="Nombre" required error={proveedorFormErrors.errors.nombre}>
+            <Input
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.nombre}
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('nombre');
+                setProveedorForm((prev) => ({ ...prev, nombre: e.target.value }));
+              }}
+              placeholder="Pronaca"
+            />
+          </Field>
+
+          <Field label="Teléfono">
+            <Input
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.telefono}
+              onChange={(e) => setProveedorForm((prev) => ({ ...prev, telefono: e.target.value }))}
+              placeholder="0990000000"
+            />
+          </Field>
+
+          <Field label="Dirección" className="md:col-span-2">
+            <Input
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.direccion}
+              onChange={(e) => setProveedorForm((prev) => ({ ...prev, direccion: e.target.value }))}
+              placeholder="Sector / calle"
+            />
+          </Field>
+
+          <Field
+            label="Días de pago"
+            hint="Solo aplica cuando el proveedor trabaja a crédito."
+            error={proveedorFormErrors.errors.dias_pago}
+            className="md:col-span-2"
+          >
+            <Input
+              className={
+                !proveedorForm.tiene_credito
+                  ? 'bg-[var(--color-surface-muted)] text-[var(--color-text-subtle)]'
+                  : 'bg-[var(--color-surface)]'
+              }
+              value={proveedorForm.dias_pago}
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('dias_pago');
+                setProveedorForm((prev) => ({ ...prev, dias_pago: e.target.value }));
+              }}
+              disabled={!proveedorForm.tiene_credito}
+              placeholder="15"
+            />
+          </Field>
+
+          <Field label="Observación" className="md:col-span-2">
+            <Textarea
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.observacion}
+              onChange={(e) => setProveedorForm((prev) => ({ ...prev, observacion: e.target.value }))}
+              placeholder="Notas internas"
+            />
+          </Field>
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+            <Switch
+              checked={proveedorForm.tiene_credito}
+              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, tiene_credito: checked }))}
+              label="Tiene crédito"
+              description="Habilita compras a crédito y saldo pendiente."
+            />
+          </div>
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+            <Switch
+              checked={proveedorForm.activo}
+              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, activo: checked }))}
+              label="Proveedor activo"
+              description="Si está inactivo no aparece para nuevas órdenes."
+            />
+          </div>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={closeProveedorModal}>
+            Cancelar
+          </Button>
+          <Button onClick={onSaveProveedor}>
+            Guardar proveedor
+          </Button>
+        </div>
+      </Modal>
+
       <Modal open={Boolean(modalPago)} onClose={() => setModalPago(null)} maxWidthClass="max-w-3xl" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Pagar credito</h3>
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Pagar crédito</h3>
             <p className="text-sm text-[var(--color-text-muted)]">Factura {modalPago?.numero_factura}</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setModalPago(null)}>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setModalPago(null)}>
             X
           </Button>
         </div>
@@ -314,14 +530,20 @@ export default function ProveedorDetallePage() {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Monto</label>
-            <Input className="mt-2" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} placeholder="Monto a pagar" />
-          </div>
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Referencia</label>
+          <Field label="Monto" required error={pagoFormErrors.errors.monto}>
+            <Input
+              className="mt-2"
+              value={montoPago}
+              onChange={(e) => {
+                pagoFormErrors.clearFieldError('monto');
+                setMontoPago(e.target.value);
+              }}
+              placeholder="Monto a pagar"
+            />
+          </Field>
+          <Field label="Referencia">
             <Input className="mt-2" value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Referencia (opcional)" />
-          </div>
+          </Field>
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
@@ -359,7 +581,7 @@ export default function ProveedorDetallePage() {
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Credito / dias</p>
                 <p className="font-semibold text-[var(--color-text)]">
-                  {proveedorDetalle?.tiene_credito ? 'SI' : 'NO'} / {Number(proveedorDetalle?.dias_pago || 0)}
+                  {proveedorDetalle?.tiene_credito ? 'Sí' : 'No'} / {Number(proveedorDetalle?.dias_pago || 0)}
                 </p>
               </div>
               <div>
@@ -370,11 +592,11 @@ export default function ProveedorDetallePage() {
 
             <div className="space-y-3">
               <div>
-                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Fecha emision</p>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Fecha de emisión</p>
                 <p className="font-semibold text-[var(--color-text)]">{formatDateQuito(facturaDetalle.factura.fecha)}</p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Observacion</p>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Observación</p>
                 <p className="font-semibold text-[var(--color-text)]">{facturaDetalle.factura.observacion || '-'}</p>
               </div>
               <div>
@@ -450,7 +672,7 @@ export default function ProveedorDetallePage() {
                     <TablaCelda as="th">Fecha</TablaCelda>
                     <TablaCelda as="th">Tipo</TablaCelda>
                     <TablaCelda as="th" className="text-right">Monto</TablaCelda>
-                    <TablaCelda as="th">Observacion</TablaCelda>
+                    <TablaCelda as="th">Observación</TablaCelda>
                   </tr>
                 </TablaCabecera>
                 <TablaCuerpo>
@@ -473,16 +695,51 @@ export default function ProveedorDetallePage() {
         </div>
       </Modal>
 
-      <DeactivateEntityDialogs
-        confirmOpen={confirmDeactivateOpen}
-        entityLabel={proveedorDetalle ? `al proveedor ${proveedorDetalle.nombre}` : 'este proveedor'}
-        onCloseConfirm={() => setConfirmDeactivateOpen(false)}
-        onConfirm={onConfirmDeactivate}
-        confirmLoading={deactivateLoading}
-        blockedOpen={Boolean(deactivateError)}
-        blockedMessage={deactivateError}
-        onCloseBlocked={() => setDeactivateError('')}
-      />
+      <Modal open={blockedDeactivateOpen} onClose={() => setBlockedDeactivateOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+              <h3 className="ui-panel-title">No se puede desactivar</h3>
+              <p className="ui-panel-description">
+                {proveedorDetalle ? `No puedes desactivar a ${proveedorDetalle.nombre} porque tiene saldo pendiente.` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--color-danger-soft)] bg-[color-mix(in_oklab,var(--color-danger-soft)_82%,white_18%)] p-3 text-sm text-[var(--color-text)]">
+            Saldo pendiente actual:{' '}
+            <strong className="text-[var(--color-danger)]">{formatMoney(resumenCxp?.saldo || 0)}</strong>
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" variant="danger" onClick={() => setBlockedDeactivateOpen(false)}>
+              Entendido
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={confirmDeactivateOpen} onClose={() => setConfirmDeactivateOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+              <h3 className="ui-panel-title">Confirmar desactivacion</h3>
+            </div>
+            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setConfirmDeactivateOpen(false)}>
+              X
+            </Button>
+          </div>
+          <p className="text-sm text-[var(--color-text-muted)]">
+            {proveedorDetalle ? `Vas a desactivar al proveedor ${proveedorDetalle.nombre}.` : ''}
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setConfirmDeactivateOpen(false)} disabled={deactivateLoading}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="danger" onClick={onConfirmDeactivate} disabled={deactivateLoading}>
+              {deactivateLoading ? 'Desactivando...' : 'Sí, desactivar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

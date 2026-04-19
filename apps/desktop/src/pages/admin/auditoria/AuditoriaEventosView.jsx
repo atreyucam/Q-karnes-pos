@@ -4,6 +4,8 @@ import {
   Button,
   Card,
   EmptyState,
+  Field,
+  FiltersBar,
   Input,
   LoadingState,
   Select,
@@ -32,73 +34,13 @@ export default function AuditoriaEventosView() {
 
   return (
     <div className="space-y-5">
-      <Card className="space-y-4 p-4">
-        <div className="grid gap-3 lg:grid-cols-5">
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha inicio
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_inicio}
-              onChange={(event) => setFilters((state) => ({ ...state, fecha_inicio: event.target.value }))}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha fin
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_fin}
-              onChange={(event) => setFilters((state) => ({ ...state, fecha_fin: event.target.value }))}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Usuario
-            <Input
-              className="mt-1"
-              value={filters.usuario}
-              placeholder="Nombre o login"
-              onChange={(event) => setFilters((state) => ({ ...state, usuario: event.target.value }))}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Modulo
-            <Select
-              className="mt-1"
-              value={filters.modulo}
-              onChange={(event) => setFilters((state) => ({ ...state, modulo: event.target.value }))}
-            >
-              {MODULE_OPTIONS.map((option) => (
-                <option key={option.value || 'all'} value={option.value}>{option.label}</option>
-              ))}
-            </Select>
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Tipo evento
-            <Select
-              className="mt-1"
-              value={filters.tipo_evento}
-              onChange={(event) => setFilters((state) => ({ ...state, tipo_evento: event.target.value }))}
-            >
-              {TIPO_EVENTO_OPTIONS.map((option) => (
-                <option key={option.value || 'all'} value={option.value}>{option.label}</option>
-              ))}
-            </Select>
-          </label>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-[var(--color-text-muted)]">
-            Eventos encontrados: <span className="font-semibold text-[var(--color-text)]">{eventosState.meta.total || rows.length}</span>
-          </p>
-
-          <div className="flex gap-2">
+      <FiltersBar
+        description={`Eventos encontrados: ${eventosState.meta.total || rows.length}`}
+        actions={(
+          <>
             <Button
-              variant="ghost"
+              variant="secondary"
+              className="w-full sm:w-auto"
               onClick={() => {
                 const reset = getDefaultAuditFilters();
                 setFilters(reset);
@@ -111,9 +53,56 @@ export default function AuditoriaEventosView() {
             <Button onClick={() => cargarEventos(filters)} disabled={eventosState.loading}>
               Consultar
             </Button>
-          </div>
-        </div>
-      </Card>
+          </>
+        )}
+        secondaryMinWidth={190}
+      >
+        <Field label="Fecha de inicio">
+          <Input
+            type="date"
+            value={filters.fecha_inicio}
+            onChange={(event) => setFilters((state) => ({ ...state, fecha_inicio: event.target.value }))}
+          />
+        </Field>
+
+        <Field label="Fecha de fin">
+          <Input
+            type="date"
+            value={filters.fecha_fin}
+            onChange={(event) => setFilters((state) => ({ ...state, fecha_fin: event.target.value }))}
+          />
+        </Field>
+
+        <Field label="Usuario">
+          <Input
+            value={filters.usuario}
+            placeholder="Nombre o login"
+            onChange={(event) => setFilters((state) => ({ ...state, usuario: event.target.value }))}
+          />
+        </Field>
+
+        <Field label="Módulo">
+          <Select
+            value={filters.modulo}
+            onChange={(event) => setFilters((state) => ({ ...state, modulo: event.target.value }))}
+          >
+            {MODULE_OPTIONS.map((option) => (
+              <option key={option.value || 'all'} value={option.value}>{option.label}</option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="Tipo evento">
+          <Select
+            value={filters.tipo_evento}
+            onChange={(event) => setFilters((state) => ({ ...state, tipo_evento: event.target.value }))}
+          >
+            {TIPO_EVENTO_OPTIONS.map((option) => (
+              <option key={option.value || 'all'} value={option.value}>{option.label}</option>
+            ))}
+          </Select>
+        </Field>
+      </FiltersBar>
 
       {eventosState.error ? <Alert tone="error">{eventosState.error}</Alert> : null}
       {eventosState.loading && !eventosState.loaded ? <LoadingState label="Consultando eventos de auditoria..." /> : null}

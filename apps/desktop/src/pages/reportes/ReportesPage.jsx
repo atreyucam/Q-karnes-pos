@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, PageHeader } from '../../shared/ui';
+import { PageHeader, Tabs } from '../../shared/ui';
 import CajaDiariaReport from './CajaDiariaReport';
 import InventarioActualReport from './InventarioActualReport';
 import KardexReport from './KardexReport';
@@ -42,18 +42,12 @@ export default function ReportesPage() {
         description="Analisis financiero y operativo del negocio usando el backend como fuente unica de verdad"
       />
 
-      <div className="flex flex-wrap gap-2">
-        {REPORT_TABS.map((tab) => (
-          <Button
-            key={tab.key}
-            variant={tab.key === currentTab ? 'primary' : 'ghost'}
-            className={tab.key === currentTab ? '' : '!text-[var(--color-text-muted)]'}
-            onClick={() => setParams({ tab: tab.key })}
-          >
-            {tab.label}
-          </Button>
-        ))}
-      </div>
+      <Tabs
+        ariaLabel="Pestanas de reportes"
+        items={REPORT_TABS}
+        value={currentTab}
+        onChange={(tabKey) => setParams({ tab: tabKey })}
+      />
 
       <ActiveReport />
     </div>

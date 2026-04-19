@@ -1,1 +1,1 @@
-export { default } from '../../components/ui/Modal';
+export { default } from '../../shared/ui/overlays/Modal';

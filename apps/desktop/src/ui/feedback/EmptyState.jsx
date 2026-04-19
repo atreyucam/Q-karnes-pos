@@ -1,1 +1,1 @@
-export { default } from '../../components/ui/EmptyState';
+export { default } from '../../shared/ui/feedback/EmptyState';

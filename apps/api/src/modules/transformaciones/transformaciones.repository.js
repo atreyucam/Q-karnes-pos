@@ -72,6 +72,7 @@ async function listTransformaciones(filters = {}, trx = db) {
       't.estado',
       't.fecha',
       't.tipo_proceso',
+      't.modo_distribucion_costo',
       't.observacion',
       't.referencia_lote',
       't.actor_usuario_id',
@@ -312,7 +313,12 @@ async function listMovimientosByReferencias(referencias = [], trx = db) {
   if (!referencias.length) return [];
   return trx('inventario_movimientos as m')
     .join('productos as p', 'p.id', 'm.producto_id')
-    .select('m.*', 'p.codigo as producto_codigo', 'p.nombre as producto_nombre')
+    .select(
+      'm.*',
+      'p.codigo as producto_codigo',
+      'p.nombre as producto_nombre',
+      'p.unidad_medida as producto_unidad_medida'
+    )
     .whereIn('m.referencia', referencias)
     .orderBy('m.id', 'asc');
 }

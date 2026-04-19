@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { PiMagnifyingGlass, PiPlus } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import { parseApiError } from '../../lib/apiClient';
-import { Alert, BackButton, Button, EmptyState, Input, Modal, Paginador, Select, Tabla, TablaCabecera, TablaCuerpo, TablaCelda, TablaFila, Toast } from '../../ui';
+import { Alert, BackButton, Button, EmptyState, Field, Input, Modal, Paginador, Select, Tabla, TablaCabecera, TablaCuerpo, TablaCelda, TablaFila, Toast } from '../../ui';
 import { useComprasStore } from '../../stores/comprasStore';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoService';
+import useFormErrors from '../../shared/hooks/useFormErrors';
 
 const emptyProveedorForm = { nombre: '', telefono: '', direccion: '', dias_pago: '15' };
 const emptyProductoForm = { nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' };
@@ -74,6 +75,8 @@ export default function CompraNuevaPage() {
   const [proveedorNuevo, setProveedorNuevo] = useState(emptyProveedorForm);
   const [productoNuevo, setProductoNuevo] = useState(emptyProductoForm);
   const [productToast, setProductToast] = useState('');
+  const proveedorFormErrors = useFormErrors();
+  const productoFormErrors = useFormErrors();
 
   const proveedorSeleccionado = useMemo(() => proveedores.find((p) => Number(p.id) === Number(proveedorId)) || null, [proveedorId, proveedores]);
   const lineErrors = errorMeta?.details?.lines || [];
@@ -178,7 +181,9 @@ export default function CompraNuevaPage() {
 
   const onCrearProveedor = async () => {
     setLocalError('');
-    if (!proveedorNuevo.nombre.trim()) return setLocalError('El nombre del proveedor es obligatorio.');
+    const nextErrors = {};
+    if (!proveedorNuevo.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (!proveedorFormErrors.setErrors(nextErrors)) return;
     const created = await crearProveedor({
       nombre: proveedorNuevo.nombre.trim(),
       telefono: proveedorNuevo.telefono.trim() || null,
@@ -200,7 +205,9 @@ export default function CompraNuevaPage() {
 
   const onCrearProducto = async () => {
     setLocalError('');
-    if (!productoNuevo.nombre.trim()) return setLocalError('El nombre del producto es obligatorio.');
+    const nextErrors = {};
+    if (!productoNuevo.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (!productoFormErrors.setErrors(nextErrors)) return;
     const created = await crearProducto({
       nombre: productoNuevo.nombre.trim(),
       categoria_id: productoNuevo.categoria_id ? Number(productoNuevo.categoria_id) : null,
@@ -226,7 +233,7 @@ export default function CompraNuevaPage() {
 
         <div className="mt-5 space-y-1">
           <h1 className="text-[2rem] font-bold tracking-[-0.02em] text-[var(--color-text)]">Nueva orden de compra</h1>
-          <p className="text-base text-[var(--color-text-muted)]">Registra proveedor, fecha y detalle de orden. Guardar orden no ingresa stock.</p>
+          <p className="text-base text-[var(--color-text-muted)]">Registra proveedor, fecha y detalle de la orden. Guardar orden no ingresa stock.</p>
         </div>
 
         <div className="mt-6 space-y-4">
@@ -247,13 +254,13 @@ export default function CompraNuevaPage() {
           <div className="space-y-4 border-b border-[var(--color-border)] pb-6">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
               <div>
-                <label className={labelClassName()}>Proveedor</label>
+              <label className={labelClassName()}>Proveedor</label>
                 <div className="mt-2 flex gap-2">
                   <Input
                     readOnly
                     className="flex-1"
                     value={proveedorSeleccionado ? proveedorSeleccionado.nombre : ''}
-                    placeholder="Seleccionar proveedor"
+                    placeholder="Selecciona un proveedor"
                     onClick={() => setShowProveedorPicker(true)}
                   />
                   <Button type="button" variant="ghost" className="shrink-0" onClick={() => setShowProveedorPicker(true)}>
@@ -305,7 +312,7 @@ export default function CompraNuevaPage() {
                           <EmptyState
                             className="max-w-md text-center"
                             title="Sin productos en la orden"
-                            description="Presiona agregar producto para empezar a construir la orden."
+                            description="Presiona Agregar producto para empezar a construir la orden."
                           />
                         </div>
                       </TablaCelda>
@@ -382,12 +389,12 @@ export default function CompraNuevaPage() {
 
       <Modal open={showProveedorPicker} onClose={() => setShowProveedorPicker(false)} maxWidthClass="max-w-5xl" panelClassName="p-5">
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
               <h3 className="text-lg font-semibold text-[var(--color-text)]">Seleccionar proveedor</h3>
               <p className="text-sm text-[var(--color-text-muted)]">Busca y selecciona un proveedor disponible.</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setShowProveedorPicker(false)}>X</Button>
+            <Button variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setShowProveedorPicker(false)}>X</Button>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -437,31 +444,34 @@ export default function CompraNuevaPage() {
 
       <Modal open={showProveedorCreate} onClose={() => setShowProveedorCreate(false)} maxWidthClass="max-w-3xl" panelClassName="p-5">
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
               <h3 className="text-lg font-semibold text-[var(--color-text)]">Agregar proveedor</h3>
               <p className="text-sm text-[var(--color-text-muted)]">Alta rápida desde la orden.</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setShowProveedorCreate(false)}>X</Button>
+            <Button variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setShowProveedorCreate(false)}>X</Button>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <label className={labelClassName()}>Nombre del proveedor</label>
-              <Input className="mt-2" value={proveedorNuevo.nombre} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, nombre: e.target.value }))} />
-            </div>
-            <div>
-              <label className={labelClassName()}>Teléfono de contacto</label>
+            <Field label="Nombre del proveedor" required error={proveedorFormErrors.errors.nombre}>
+              <Input
+                className="mt-2"
+                value={proveedorNuevo.nombre}
+                onChange={(e) => {
+                  proveedorFormErrors.clearFieldError('nombre');
+                  setProveedorNuevo((prev) => ({ ...prev, nombre: e.target.value }));
+                }}
+              />
+            </Field>
+            <Field label="Teléfono de contacto">
               <Input className="mt-2" value={proveedorNuevo.telefono} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, telefono: e.target.value }))} />
-            </div>
-            <div className="md:col-span-2">
-              <label className={labelClassName()}>Dirección del proveedor</label>
+            </Field>
+            <Field label="Dirección del proveedor" className="md:col-span-2">
               <Input className="mt-2" value={proveedorNuevo.direccion} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, direccion: e.target.value }))} />
-            </div>
-            <div>
-              <label className={labelClassName()}>Días de pago crédito</label>
+            </Field>
+            <Field label="Días de pago a crédito">
               <Input className="mt-2" value={proveedorNuevo.dias_pago} onChange={(e) => setProveedorNuevo((prev) => ({ ...prev, dias_pago: e.target.value }))} />
-            </div>
+            </Field>
           </div>
 
           <div className="flex justify-end gap-2">
@@ -473,12 +483,12 @@ export default function CompraNuevaPage() {
 
       <Modal open={showProductoPicker} onClose={() => setShowProductoPicker(false)} maxWidthClass="sm:max-w-[min(1120px,calc(100vw-1rem))]" panelClassName="p-0">
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 py-4">
-            <div>
+          <div className="ui-modal-header px-5 py-4">
+            <div className="ui-modal-header-copy">
               <h3 className="text-lg font-semibold text-[var(--color-text)]">Agregar producto</h3>
               <p className="text-sm text-[var(--color-text-muted)]">Busca y selecciona un producto para la orden.</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setShowProductoPicker(false)}>X</Button>
+            <Button variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setShowProductoPicker(false)}>X</Button>
           </div>
 
           <div className="shrink-0 px-5 py-4">
@@ -540,38 +550,41 @@ export default function CompraNuevaPage() {
 
       <Modal open={showProductoCreate} onClose={() => setShowProductoCreate(false)} maxWidthClass="max-w-3xl" panelClassName="p-5">
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
               <h3 className="text-lg font-semibold text-[var(--color-text)]">Crear producto</h3>
               <p className="text-sm text-[var(--color-text-muted)]">Alta rápida desde la orden.</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setShowProductoCreate(false)}>X</Button>
+            <Button variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setShowProductoCreate(false)}>X</Button>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <label className={labelClassName()}>Nombre descriptivo</label>
-              <Input className="mt-2" value={productoNuevo.nombre} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, nombre: e.target.value }))} />
-            </div>
-            <div>
-              <label className={labelClassName()}>Categoría</label>
+            <Field label="Nombre descriptivo" required error={productoFormErrors.errors.nombre}>
+              <Input
+                className="mt-2"
+                value={productoNuevo.nombre}
+                onChange={(e) => {
+                  productoFormErrors.clearFieldError('nombre');
+                  setProductoNuevo((prev) => ({ ...prev, nombre: e.target.value }));
+                }}
+              />
+            </Field>
+            <Field label="Categoría">
               <Select className="mt-2" value={productoNuevo.categoria_id} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, categoria_id: e.target.value }))}>
                 <option value="">Selecciona categoría</option>
                 {categorias.map((categoria) => <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>)}
               </Select>
-            </div>
-            <div>
-              <label className={labelClassName()}>Unidad de medida</label>
+            </Field>
+            <Field label="Unidad de medida">
               <Select className="mt-2" value={productoNuevo.unidad_medida} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, unidad_medida: e.target.value }))}>
                 <option value="UND">UND</option>
                 <option value="KG">KG</option>
                 <option value="LB">LB</option>
               </Select>
-            </div>
-            <div>
-              <label className={labelClassName()}>Precio de venta</label>
+            </Field>
+            <Field label="Precio de venta">
               <Input className="mt-2" value={productoNuevo.precio_referencia} onChange={(e) => setProductoNuevo((prev) => ({ ...prev, precio_referencia: sanitizeDecimalInput(e.target.value, 2) }))} />
-            </div>
+            </Field>
           </div>
 
           <div className="flex justify-end gap-2">

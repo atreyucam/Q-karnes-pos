@@ -18,9 +18,9 @@ export default function DeactivateEntityDialogs({
         open={confirmOpen}
         onClose={onCloseConfirm}
         onConfirm={onConfirm}
-        title="Confirmar desactivacion"
-        description={`Vas a desactivar ${entityLabel}. Si el registro sigue en uso, el sistema puede bloquear esta accion.`}
-        confirmLabel={confirmLoading ? 'Desactivando...' : 'Si, desactivar'}
+        title="Confirmar desactivación"
+        description={`Vas a desactivar ${entityLabel}. Si el registro sigue en uso, el sistema puede bloquear esta acción.`}
+        confirmLabel={confirmLoading ? 'Desactivando...' : 'Sí, desactivar'}
         cancelLabel="Cancelar"
         confirmVariant="danger"
       />
@@ -30,7 +30,7 @@ export default function DeactivateEntityDialogs({
           <div>
             <h3 className="ui-panel-title">No se pudo desactivar</h3>
             <p className="ui-panel-description">
-              {blockedMessage || 'El sistema bloqueo la desactivacion de este registro.'}
+              {blockedMessage || 'El sistema bloqueó la desactivación de este registro.'}
             </p>
           </div>
           <div className="flex justify-end">

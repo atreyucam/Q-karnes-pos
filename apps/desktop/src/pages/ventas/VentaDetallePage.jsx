@@ -25,6 +25,7 @@ import { formatQtyByUnit, getUnidad } from '../../lib/formatQty';
 import { printSaleTicketDocument } from './printTicket';
 import DevolucionModal from './DevolucionModal';
 import { SALE_STATUS } from './ventaUtils';
+import useFormErrors from '../../shared/hooks/useFormErrors';
 
 function resolvePaymentTypeLabel(row) {
   const tipo = String(row?.tipo || '').trim().toUpperCase();
@@ -70,6 +71,7 @@ export default function VentaDetallePage() {
     usuario: '',
     password: ''
   });
+  const anulacionFormErrors = useFormErrors();
 
   const loadContext = async () => {
     await Promise.all([
@@ -158,19 +160,25 @@ export default function VentaDetallePage() {
 
   const handleSubmitAnulacion = async () => {
     setLocalError('');
+    const nextErrors = {};
 
     if (!anulacionForm.motivo.trim()) {
-      setLocalError('El motivo es obligatorio para anular la venta.');
-      return;
+      nextErrors.motivo = 'Este campo es obligatorio.';
     }
 
     if (!anulacionForm.novedad.trim()) {
-      setLocalError('La novedad es obligatoria para registrar la anulacion.');
-      return;
+      nextErrors.novedad = 'Este campo es obligatorio.';
     }
 
-    if (!isAdmin && (!anulacionForm.usuario.trim() || !anulacionForm.password)) {
-      setLocalError('Como cajero debes ingresar credenciales ADMIN para anular.');
+    if (!isAdmin) {
+      if (!anulacionForm.usuario.trim()) nextErrors.usuario = 'Este campo es obligatorio.';
+      if (!anulacionForm.password.trim()) nextErrors.password = 'Este campo es obligatorio.';
+    }
+
+    if (!anulacionFormErrors.setErrors(nextErrors)) {
+      if (!isAdmin && (nextErrors.usuario || nextErrors.password)) {
+        setLocalError('Como cajero debes ingresar credenciales de administrador para anular.');
+      }
       return;
     }
 
@@ -485,14 +493,14 @@ export default function VentaDetallePage() {
 
       <Modal open={anulacionOpen} onClose={() => setAnulacionOpen(false)} maxWidthClass="max-w-2xl" panelClassName="p-5">
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
               <h3 className="text-lg font-semibold text-[var(--color-text)]">Anular venta #{venta?.id || ventaId}</h3>
               <p className="text-sm text-[var(--color-text-muted)]">
-                La anulacion revierte inventario, caja y credito cuando el backend lo permite.
+                La anulación revierte inventario, caja y crédito cuando el backend lo permite.
               </p>
             </div>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setAnulacionOpen(false)}>
+            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setAnulacionOpen(false)}>
               X
             </Button>
           </div>
@@ -505,37 +513,57 @@ export default function VentaDetallePage() {
 
           {needsCashShiftForAnular ? (
             <Alert tone="warning">
-              La venta tiene efectivo reversible y necesita caja abierta para completar la anulacion.
+              La venta tiene efectivo reversible y necesita caja abierta para completar la anulación.
             </Alert>
           ) : null}
 
           <div className="space-y-3">
             <Input
               value={anulacionForm.motivo}
-              onChange={(event) => setAnulacionForm((current) => ({ ...current, motivo: event.target.value }))}
-              placeholder="Motivo de la anulacion"
+              error={Boolean(anulacionFormErrors.errors.motivo)}
+              onChange={(event) => {
+                anulacionFormErrors.clearFieldError('motivo');
+                setAnulacionForm((current) => ({ ...current, motivo: event.target.value }));
+              }}
+              placeholder="Motivo de la anulación"
             />
+            {anulacionFormErrors.errors.motivo ? <p className="text-sm text-[var(--color-danger)]">{anulacionFormErrors.errors.motivo}</p> : null}
             <Textarea
               value={anulacionForm.novedad}
-              onChange={(event) => setAnulacionForm((current) => ({ ...current, novedad: event.target.value }))}
+              error={Boolean(anulacionFormErrors.errors.novedad)}
+              onChange={(event) => {
+                anulacionFormErrors.clearFieldError('novedad');
+                setAnulacionForm((current) => ({ ...current, novedad: event.target.value }));
+              }}
               placeholder="Novedad operativa obligatoria"
               rows={4}
             />
+            {anulacionFormErrors.errors.novedad ? <p className="text-sm text-[var(--color-danger)]">{anulacionFormErrors.errors.novedad}</p> : null}
           </div>
 
           {!isAdmin ? (
             <div className="grid gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 md:grid-cols-2">
               <Input
                 value={anulacionForm.usuario}
-                onChange={(event) => setAnulacionForm((current) => ({ ...current, usuario: event.target.value }))}
+                error={Boolean(anulacionFormErrors.errors.usuario)}
+                onChange={(event) => {
+                  anulacionFormErrors.clearFieldError('usuario');
+                  setAnulacionForm((current) => ({ ...current, usuario: event.target.value }));
+                }}
                 placeholder="Usuario ADMIN"
               />
               <Input
                 type="password"
                 value={anulacionForm.password}
-                onChange={(event) => setAnulacionForm((current) => ({ ...current, password: event.target.value }))}
+                error={Boolean(anulacionFormErrors.errors.password)}
+                onChange={(event) => {
+                  anulacionFormErrors.clearFieldError('password');
+                  setAnulacionForm((current) => ({ ...current, password: event.target.value }));
+                }}
                 placeholder="Clave ADMIN"
               />
+              {anulacionFormErrors.errors.usuario ? <p className="text-sm text-[var(--color-danger)] md:col-span-2">{anulacionFormErrors.errors.usuario}</p> : null}
+              {anulacionFormErrors.errors.password ? <p className="text-sm text-[var(--color-danger)] md:col-span-2">{anulacionFormErrors.errors.password}</p> : null}
             </div>
           ) : null}
 
@@ -544,7 +572,7 @@ export default function VentaDetallePage() {
               Cancelar
             </Button>
             <Button type="button" variant="danger" onClick={handleSubmitAnulacion} disabled={submittingAnulacion}>
-              {submittingAnulacion ? 'Anulando...' : 'Confirmar anulacion'}
+              {submittingAnulacion ? 'Anulando...' : 'Confirmar anulación'}
             </Button>
           </div>
         </div>

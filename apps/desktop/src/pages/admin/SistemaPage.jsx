@@ -3,16 +3,20 @@ import {
   Alert,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
+  Field,
   Input,
   LoadingState,
   PageHeader,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
   TablaCelda
-} from '../../ui';
+} from '../../shared/ui';
 import { useSistemaStore } from '../../stores/sistemaStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 
@@ -42,6 +46,9 @@ export default function SistemaPage() {
 
   const [backupLabel, setBackupLabel] = useState('manual');
   const [success, setSuccess] = useState('');
+  const [restoreDialog, setRestoreDialog] = useState(null);
+  const [restoreConfirmation, setRestoreConfirmation] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
     cargarTodo().catch(() => {});
@@ -66,23 +73,20 @@ export default function SistemaPage() {
     }
   };
 
-  const onScheduleRestore = async (filename) => {
-    const typed = window.prompt(
-      `Para programar la restauración desde ${filename}, escriba RESTAURAR`
-    );
-    if (typed !== 'RESTAURAR') return;
-
+  const onConfirmRestore = async () => {
+    if (!restoreDialog) return;
     setSuccess('');
-    const result = await programarRestauracion(filename);
+    const result = await programarRestauracion(restoreDialog);
+    setRestoreDialog(null);
+    setRestoreConfirmation('');
     setSuccess(result.mensaje || 'Restauración programada');
   };
 
-  const onDeleteBackup = async (filename) => {
-    const confirmed = window.confirm(`¿Eliminar el backup ${filename}? Esta acción no se puede deshacer.`);
-    if (!confirmed) return;
-
+  const onConfirmDeleteBackup = async () => {
+    if (!deleteTarget) return;
     setSuccess('');
-    const result = await eliminarBackup(filename);
+    const result = await eliminarBackup(deleteTarget);
+    setDeleteTarget(null);
     setSuccess(`Backup eliminado: ${result.filename}`);
   };
 
@@ -190,15 +194,13 @@ export default function SistemaPage() {
           </div>
 
           <div className="flex flex-wrap items-end gap-2">
-            <label className="text-sm font-medium text-[var(--color-text)]">
-              Etiqueta
+            <Field label="Etiqueta" className="min-w-[200px]">
               <Input
-                className="mt-1"
                 value={backupLabel}
                 onChange={(event) => setBackupLabel(event.target.value)}
                 placeholder="manual"
               />
-            </label>
+            </Field>
             <Button onClick={onCreateBackup} disabled={working}>
               {working ? 'Procesando...' : 'Crear backup'}
             </Button>
@@ -234,23 +236,25 @@ export default function SistemaPage() {
                   <TablaCelda>{formatDateQuito(backup.mtime)}</TablaCelda>
                   <TablaCelda>{formatBytes(backup.sizeBytes)}</TablaCelda>
                   <TablaCelda>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => onScheduleRestore(backup.filename)}
+                    <TableActions align="start">
+                      <TableActionButton
+                        variant="success"
+                        onClick={() => {
+                          setRestoreDialog(backup.filename);
+                          setRestoreConfirmation('');
+                        }}
                         disabled={working}
                       >
                         Restaurar
-                      </Button>
-                      <Button
-                        size="sm"
+                      </TableActionButton>
+                      <TableActionButton
                         variant="danger"
-                        onClick={() => onDeleteBackup(backup.filename)}
+                        onClick={() => setDeleteTarget(backup.filename)}
                         disabled={working || backup.filename === backups?.pending_restore?.source_backup?.filename}
                       >
                         Eliminar
-                      </Button>
-                    </div>
+                      </TableActionButton>
+                    </TableActions>
                   </TablaCelda>
                 </TablaFila>
               ))}
@@ -258,6 +262,43 @@ export default function SistemaPage() {
           </Tabla>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={Boolean(restoreDialog)}
+        onClose={() => {
+          setRestoreDialog(null);
+          setRestoreConfirmation('');
+        }}
+        onConfirm={onConfirmRestore}
+        title="Programar restauración"
+        description={restoreDialog ? `Para restaurar desde ${restoreDialog}, escriba RESTAURAR.` : ''}
+        confirmLabel={working ? 'Programando...' : 'Programar restauración'}
+        confirmVariant="warning"
+        confirmDisabled={restoreConfirmation !== 'RESTAURAR'}
+        confirmLoading={working}
+      >
+        <Field
+          label="Confirmación requerida"
+          hint="Esta acción deja una restauración pendiente para el siguiente reinicio de la aplicación."
+        >
+          <Input
+            value={restoreConfirmation}
+            onChange={(event) => setRestoreConfirmation(event.target.value.toUpperCase())}
+            placeholder="RESTAURAR"
+          />
+        </Field>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={onConfirmDeleteBackup}
+        title="Eliminar backup"
+        description={deleteTarget ? `¿Eliminar el backup ${deleteTarget}? Esta acción no se puede deshacer.` : ''}
+        confirmLabel={working ? 'Eliminando...' : 'Eliminar'}
+        confirmVariant="danger"
+        confirmLoading={working}
+      />
     </div>
   );
 }

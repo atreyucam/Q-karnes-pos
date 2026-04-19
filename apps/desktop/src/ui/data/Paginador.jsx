@@ -1,1 +1,1 @@
-export { default } from '../../components/ui/Paginador';
+export { default } from '../../shared/ui/data-display/Paginador';

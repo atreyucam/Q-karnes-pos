@@ -744,11 +744,13 @@ export default function NuevaVentaPage() {
 
       <Modal open={cajaRequiredModalOpen} onClose={() => setCajaRequiredModalOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
         <div className="space-y-4">
-          <div>
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Turno de caja requerido</h3>
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">
               La venta en efectivo requiere un turno de caja abierto. Transferencia y credito pueden registrarse sin afectar caja fisica.
             </p>
+            </div>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setCajaRequiredModalOpen(false)}>
@@ -763,11 +765,13 @@ export default function NuevaVentaPage() {
 
       <Modal open={Boolean(stockIssue)} onClose={() => setStockIssue(null)} maxWidthClass="max-w-lg" panelClassName="p-5">
         <div className="space-y-4">
-          <div>
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Stock insuficiente</h3>
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">
               No hay stock suficiente para completar la venta del producto seleccionado.
             </p>
+            </div>
           </div>
           <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm text-[var(--color-text)]">
             <p><strong>Producto:</strong> {stockIssue?.producto || '-'}</p>

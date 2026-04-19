@@ -1,7 +1,7 @@
 export const uiClassTokens = {
   page: {
     section: '-mx-4 -mb-4 min-h-screen bg-background px-4 pb-4 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6 lg:-mx-8 lg:-mb-8 lg:px-8 lg:pb-8',
-    container: 'mx-auto max-w-[1400px] rounded-3xl border border-border bg-surface p-4 shadow-posSm sm:p-6 lg:p-8',
+    container: 'mx-auto max-w-[1400px] rounded-[22px] border border-border bg-surface p-4 shadow-posSm sm:p-6 lg:p-8',
     title: 'text-2xl font-bold text-text',
     subtitle: 'text-text-muted',
     header: {
@@ -9,14 +9,14 @@ export const uiClassTokens = {
     }
   },
   card: {
-    base: 'rounded-2xl border border-border bg-surface',
-    header: 'rounded-t-2xl border-b border-border bg-background px-4 py-4',
+    base: 'rounded-xl border border-border bg-surface',
+    header: 'rounded-t-xl border-b border-border bg-background px-4 py-4',
     headerTitle: 'text-lg font-bold text-text',
     headerSubtitle: 'text-sm text-text-muted',
     body: 'p-4'
   },
   table: {
-    wrapper: 'overflow-hidden rounded-2xl border border-border bg-surface shadow-posSm',
+    wrapper: 'overflow-hidden rounded-xl border border-border bg-surface shadow-posSm',
     base: 'w-full text-left text-sm text-text-muted',
     headRow: 'border-b border-border bg-background text-xs font-bold uppercase tracking-wider text-text-muted',
     headCell: 'px-6 py-3',
@@ -26,7 +26,7 @@ export const uiClassTokens = {
     empty: 'py-16 text-center'
   },
   button: {
-    base: 'inline-flex cursor-pointer items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
+    base: 'inline-flex cursor-pointer items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
     primary: 'bg-primary text-text-inverse hover:bg-primary-hover active:bg-primary-hover',
     secondary: 'border border-border bg-surface text-text hover:bg-background active:bg-surface-alt',
     danger: 'bg-danger text-text-inverse hover:bg-danger-hover active:bg-danger-hover',
@@ -42,25 +42,30 @@ export const uiClassTokens = {
     warningOutline: 'border border-warning bg-surface text-warning hover:bg-warning-soft shadow-none',
     dangerOutline: 'border border-danger bg-surface text-danger hover:bg-danger-soft shadow-none',
     iconDanger: 'border border-danger bg-danger text-text-inverse hover:opacity-95 shadow-none',
-    tableAction: '!px-3 !py-1.5 text-xs border-border',
+    tableActionBase: '!h-8 !rounded-md !px-3 !py-1.5 text-xs font-semibold shadow-none',
+    tableActionNeutral: 'border border-border bg-surface text-text hover:bg-background',
+    tableActionWarning: 'border border-warning/40 bg-warning-soft text-warning hover:border-warning/60 hover:bg-warning-soft',
+    tableActionSuccess: 'border border-success/40 bg-success-soft text-success hover:border-success/60 hover:bg-success-soft',
+    tableActionDanger: 'border border-danger/40 bg-danger-soft text-danger hover:border-danger/60 hover:bg-danger-soft',
+    tableActionSecondary: 'border border-info/30 bg-info-soft text-info hover:border-info/50 hover:bg-info-soft',
     iconAction: '!px-2.5 !py-2'
   },
   input: {
     label: 'mb-1.5 block text-xs font-bold uppercase tracking-wide text-text-muted',
-    base: 'w-full rounded-xl border bg-surface py-2.5 text-sm text-text placeholder:text-text-subtle focus:outline-none focus:ring-2 transition-all',
+    base: 'w-full rounded-lg border bg-surface py-2.5 text-sm text-text placeholder:text-text-subtle disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none focus:ring-2 transition-all',
     normal: 'border-border-strong focus:border-primary focus:ring-primary-soft',
     error: 'border-danger focus:border-danger focus:ring-danger-soft',
     withIcon: 'pl-10 pr-3',
     withoutIcon: 'px-3'
   },
   select: {
-    base: 'w-full appearance-none rounded-xl border bg-surface py-2.5 pl-3 pr-10 text-sm text-text focus:outline-none focus:ring-2 transition-all',
+    base: 'w-full appearance-none rounded-lg border bg-surface py-2.5 pl-3 pr-10 text-sm text-text disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none focus:ring-2 transition-all',
     normal: 'border-border-strong focus:border-primary focus:ring-primary-soft',
     error: 'border-danger focus:border-danger focus:ring-danger-soft'
   },
   modal: {
     overlay: 'fixed inset-0 z-[1000] bg-black/50 backdrop-blur-[1px] p-0 sm:p-4 flex sm:items-center sm:justify-center',
-    panel: 'flex h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-border bg-surface shadow-posLg sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl',
+    panel: 'flex h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-border bg-surface shadow-posLg sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl',
     width: {
       default: 'sm:max-w-[min(880px,calc(100vw-1rem))]',
       medium: 'sm:max-w-[min(840px,calc(100vw-1rem))]',
@@ -70,7 +75,7 @@ export const uiClassTokens = {
     header: 'border-b border-border bg-background px-4 py-4 sm:px-6 lg:px-8',
     headerTitle: 'text-lg font-extrabold leading-tight text-text sm:text-xl',
     headerDescription: 'mt-0.5 text-sm text-text-muted',
-    close: 'inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-subtle transition-colors hover:bg-surface-alt hover:text-text',
+    close: 'inline-flex h-8 w-8 items-center justify-center rounded-md text-text-subtle transition-colors hover:bg-surface-alt hover:text-text',
     body: 'min-h-0 flex-1 overflow-y-auto',
     footer: 'border-t border-border bg-surface px-4 py-4 sm:px-6 lg:px-8'
   }

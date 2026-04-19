@@ -1,1 +1,1 @@
-export { default } from '../../components/ui/LoadingState';
+export { default } from '../../shared/ui/feedback/LoadingState';

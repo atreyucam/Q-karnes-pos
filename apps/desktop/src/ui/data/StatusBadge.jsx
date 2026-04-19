@@ -1,1 +1,1 @@
-export { StatusBadge, TipoBadge } from '../../components/ui/Badge';
+export { StatusBadge, TipoBadge } from '../../shared/ui/data-display/StatusChip';

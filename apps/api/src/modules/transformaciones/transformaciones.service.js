@@ -28,6 +28,8 @@ const adminAuthSchema = z.object({
   password: z.string().min(1)
 });
 
+const COST_DISTRIBUTION_MODES = ['AUTOMATICA', 'MANUAL'];
+
 const itemSchema = z.object({
   producto_id: z.number().int().positive(),
   cantidad: z.number().positive(),
@@ -54,6 +56,7 @@ const saveDraftSchema = z.object({
   tipo_proceso: z.string().trim().min(1).max(80).default('DESPIECE'),
   referencia_lote: z.string().trim().max(100).optional().nullable(),
   observacion: z.string().trim().max(300).optional().nullable(),
+  modo_distribucion_costo: z.enum(COST_DISTRIBUTION_MODES).default('AUTOMATICA'),
   insumo: parentItemSchema,
   resultados: z.array(itemSchema).min(1),
   mermas: z.array(mermaSchema).min(1)
@@ -141,6 +144,7 @@ function normalizeDraftInput(body = {}) {
     tipo_proceso: body.tipo_proceso,
     referencia_lote: body.referencia_lote,
     observacion: body.observacion,
+    modo_distribucion_costo: body.modo_distribucion_costo ?? body.distribucion_costo?.modo,
     insumo: {
       producto_id: parentProductId,
       ...(explicitParentQty !== undefined && explicitParentQty !== null ? { cantidad: explicitParentQty } : {})
@@ -344,6 +348,7 @@ function validateAndNormalizeDraftPayload(payload, productsMap) {
     tipo_proceso: payload.tipo_proceso.trim(),
     referencia_lote: payload.referencia_lote?.trim() || null,
     observacion: payload.observacion?.trim() || null,
+    modo_distribucion_costo: payload.modo_distribucion_costo || 'AUTOMATICA',
     unidad_base_interna: INTERNAL_WEIGHT_BASE_UNIT,
     parent,
     insumo: {
@@ -397,10 +402,12 @@ function normalizeDetalle(transformacion, resultados, mermas, movimientos) {
     id: transformacion.id,
     numero: transformacion.numero,
     estado: transformacion.estado,
+    estado_ui_label: transformacion.estado === 'BORRADOR' ? 'LISTA_PARA_APLICAR' : transformacion.estado,
     fecha: transformacion.fecha,
     tipo_proceso: transformacion.tipo_proceso,
     referencia_lote: transformacion.referencia_lote || null,
     observacion: transformacion.observacion || null,
+    modo_distribucion_costo: transformacion.modo_distribucion_costo || 'AUTOMATICA',
     fecha_aplicacion: transformacion.fecha_aplicacion || null,
     fecha_anulacion: transformacion.fecha_anulacion || null,
     novedad_anulacion: transformacion.novedad_anulacion || null,
@@ -468,8 +475,13 @@ function normalizeDetalle(transformacion, resultados, mermas, movimientos) {
       unidad_medida: row.unidad_medida,
       motivo: row.motivo,
       costo_total: centsToMoney(row.costo_total_centavos || 0),
-      costo_total_centavos: Number(row.costo_total_centavos || 0)
+      costo_total_centavos: Number(row.costo_total_centavos || 0),
+      clasificacion_sin_impacto_stock: true
     })),
+    distribucion_costo: {
+      modo: transformacion.modo_distribucion_costo || 'AUTOMATICA',
+      requiere_cuadre_exacto: true
+    },
     resumen: summary,
     metricas: {
       total_hijos: summary.salida_util_total,
@@ -494,6 +506,7 @@ function normalizeDetalle(transformacion, resultados, mermas, movimientos) {
       producto_id: row.producto_id,
       producto_codigo: row.producto_codigo,
       producto_nombre: row.producto_nombre,
+      unidad_medida: row.producto_unidad_medida || null,
       cantidad: Number(row.cantidad || 0),
       cantidad_base: Number(row.cantidad_base || 0),
       signo: Number(row.signo || 0),
@@ -579,6 +592,7 @@ async function createBorrador(body, actorUser) {
       tipo_proceso: draft.tipo_proceso,
       referencia_lote: draft.referencia_lote,
       observacion: draft.observacion,
+      modo_distribucion_costo: draft.modo_distribucion_costo,
       actor_usuario_id: actorUser.id,
       unidad_base_interna: draft.unidad_base_interna,
       cantidad_padre_base: draft.insumo.cantidad_base,
@@ -622,6 +636,7 @@ async function updateBorrador(id, body, actorUser) {
       tipo_proceso: draft.tipo_proceso,
       referencia_lote: draft.referencia_lote,
       observacion: draft.observacion,
+      modo_distribucion_costo: draft.modo_distribucion_costo,
       unidad_base_interna: draft.unidad_base_interna,
       cantidad_padre_base: draft.insumo.cantidad_base,
       costo_total_padre_centavos: draft.costo_total_padre_centavos,
@@ -735,6 +750,7 @@ async function aplicarTransformacion(id, body, actorUser) {
       costo_total_padre_centavos: normalized.costo_total_padre_centavos,
       costo_total_distribuido_centavos: distributionTotal,
       costo_total_merma_centavos: normalized.costo_total_merma_centavos,
+      modo_distribucion_costo: transformacion.modo_distribucion_costo || 'AUTOMATICA',
       origen_costo_tipo: 'PROMEDIO_PRODUCTO'
     }, trx);
 
@@ -909,6 +925,7 @@ async function anularTransformacion(id, body, actorUser) {
     const resultados = await repository.getResultadosByTransformacionId(id, trx);
     const mermas = await repository.getMermasByTransformacionId(id, trx);
     const childIds = resultados.map((row) => row.producto_id);
+    const involvedIds = new Set([transformacion.insumo_producto_id, ...childIds]);
 
     const originalMovements = await repository.listMovimientosByReferencias([`TRANSFORMACION:${id}`], trx);
     const maxOriginalMovementId = originalMovements.reduce(
@@ -917,7 +934,7 @@ async function anularTransformacion(id, body, actorUser) {
     );
 
     const hasLaterMovements = await repository.hasLaterInventoryMovements({
-      productIds: childIds,
+      productIds: [...involvedIds],
       afterDate: transformacion.fecha_aplicacion || transformacion.updated_at || transformacion.fecha,
       afterMovementId: maxOriginalMovementId || null,
       excludedReferences: [`TRANSFORMACION:${id}`, `TRANSFORMACION_ANULACION:${id}`]
@@ -926,7 +943,6 @@ async function anularTransformacion(id, body, actorUser) {
       throw new AppError(400, 'No es seguro anular: existen movimientos posteriores sobre productos hijo');
     }
 
-    const involvedIds = new Set([transformacion.insumo_producto_id, ...childIds]);
     const products = await repository.getProductosByIds([...involvedIds], trx);
     const productsMap = new Map(products.map((row) => [row.id, normalizeProducto(row)]));
     const parent = productsMap.get(transformacion.insumo_producto_id);
@@ -1065,10 +1081,12 @@ async function listTransformaciones(query = {}) {
     id: row.id,
     numero: row.numero,
     estado: row.estado,
+    estado_ui_label: row.estado === 'BORRADOR' ? 'LISTA_PARA_APLICAR' : row.estado,
     fecha: row.fecha,
     tipo_proceso: row.tipo_proceso,
     referencia_lote: row.referencia_lote || null,
     observacion: row.observacion || null,
+    modo_distribucion_costo: row.modo_distribucion_costo || 'AUTOMATICA',
     fecha_aplicacion: row.fecha_aplicacion || null,
     fecha_anulacion: row.fecha_anulacion || null,
     novedad_anulacion: row.novedad_anulacion || null,
@@ -1104,7 +1122,8 @@ async function listTransformaciones(query = {}) {
     },
     acciones: {
       puede_editar: row.estado === 'BORRADOR',
-      puede_aplicar: row.estado === 'BORRADOR',
+      puede_aplicar: false,
+      puede_aplicar_desde_detalle: row.estado === 'BORRADOR',
       puede_anular: row.estado === 'APLICADA'
     }
   }));

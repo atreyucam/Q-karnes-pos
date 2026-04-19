@@ -5,11 +5,15 @@ import {
   Alert,
   Button,
   Card,
-  IconButton,
+  Field,
+  FiltersBar,
   Input,
   PageHeader,
   Paginador,
+  Select,
   StatusBadge,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
@@ -30,7 +34,7 @@ export default function VentasListPage() {
   const listar = useVentasStore((s) => s.listar);
   const cargarTicket = useVentasStore((s) => s.cargarTicket);
 
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState({ search: '', estado: 'TODOS', metodo: 'TODOS' });
   const [pagina, setPagina] = useState(1);
   const [printingSaleId, setPrintingSaleId] = useState(null);
 
@@ -40,22 +44,27 @@ export default function VentasListPage() {
 
   useEffect(() => {
     setPagina(1);
-  }, [ventas.length, search]);
+  }, [ventas.length, filters]);
 
   const ventasFiltradas = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return ventas;
+    const q = filters.search.trim().toLowerCase();
 
-    return ventas.filter((venta) => [
-      venta.id,
-      venta.cliente_nombre,
-      venta.metodo_pago_label,
-      venta.estado,
-      venta.total,
-      venta.usuario_nombre,
-      venta.referencia
-    ].some((value) => String(value || '').toLowerCase().includes(q)));
-  }, [search, ventas]);
+    return ventas.filter((venta) => {
+      const matchesSearch = !q || [
+        venta.id,
+        venta.cliente_nombre,
+        venta.metodo_pago_label,
+        venta.estado,
+        venta.total,
+        venta.usuario_nombre,
+        venta.referencia
+      ].some((value) => String(value || '').toLowerCase().includes(q));
+      const matchesEstado = filters.estado === 'TODOS' || String(venta.estado || '') === filters.estado;
+      const metodo = String(venta.metodo_pago_label || '').trim().toLowerCase();
+      const matchesMetodo = filters.metodo === 'TODOS' || metodo === filters.metodo.toLowerCase();
+      return matchesSearch && matchesEstado && matchesMetodo;
+    });
+  }, [filters, ventas]);
 
   const totalPaginas = Math.max(1, Math.ceil(ventasFiltradas.length / PAGE_SIZE));
   const ventasPaginadas = useMemo(() => {
@@ -90,17 +99,54 @@ export default function VentasListPage() {
 
       {error && <Alert tone="error">{error}</Alert>}
 
-      <Card className="p-5">
-        <div className="max-w-md">
-          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Buscar</label>
-          <Input
-            className="mt-2"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Orden, cliente, metodo, vendedor o estado"
-          />
-        </div>
-      </Card>
+      <FiltersBar
+        search={(
+          <Field label="Buscar">
+            <Input
+              value={filters.search}
+              onChange={(event) => setFilters((state) => ({ ...state, search: event.target.value }))}
+              placeholder="Orden, cliente, método, vendedor o estado"
+            />
+          </Field>
+        )}
+        actions={(
+          <Button
+            variant="secondary"
+            className="w-full xl:w-auto"
+            onClick={() => setFilters({ search: '', estado: 'TODOS', metodo: 'TODOS' })}
+          >
+            Limpiar filtros
+          </Button>
+        )}
+      >
+        <Field label="Estado">
+          <Select
+            value={filters.estado}
+            onChange={(event) => setFilters((state) => ({ ...state, estado: event.target.value }))}
+          >
+            <option value="TODOS">Todos</option>
+            {Array.from(new Set(ventas.map((venta) => String(venta.estado || '').trim()).filter(Boolean))).map((estado) => (
+              <option key={estado} value={estado}>
+                {estado}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="Método">
+          <Select
+            value={filters.metodo}
+            onChange={(event) => setFilters((state) => ({ ...state, metodo: event.target.value }))}
+          >
+            <option value="TODOS">Todos</option>
+            {Array.from(new Set(ventas.map((venta) => String(venta.metodo_pago_label || '').trim()).filter(Boolean))).map((metodo) => (
+              <option key={metodo} value={metodo}>
+                {metodo}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </FiltersBar>
 
       <Tabla>
         <TablaCabecera>
@@ -134,36 +180,36 @@ export default function VentasListPage() {
               <TablaCelda>{venta.usuario_nombre || '-'}</TablaCelda>
               <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(venta.total || 0)}</TablaCelda>
               <TablaCelda>
-                <div className="flex justify-end gap-1">
-                  <IconButton
-                    variant="iconView"
-                    size="sm"
+                <TableActions>
+                  <TableActionButton
+                    variant="neutral"
+                    icon={<PiEye />}
                     aria-label={`Ver venta ${venta.id}`}
                     title="Ver venta"
                     onClick={() => navigate(`/ventas/${venta.id}`)}
                   >
-                    <PiEye className="text-lg" />
-                  </IconButton>
-                  <IconButton
-                    variant="iconEdit"
-                    size="sm"
+                    Ver
+                  </TableActionButton>
+                  <TableActionButton
+                    variant="warning"
+                    icon={<PiArrowsClockwise />}
                     aria-label={`Devolver venta ${venta.id}`}
                     title="Devolver"
                     onClick={() => navigate(`/ventas/${venta.id}?action=devolucion`)}
                   >
-                    <PiArrowsClockwise className="text-lg" />
-                  </IconButton>
-                  <IconButton
-                    variant="iconSecondary"
-                    size="sm"
+                    Devolver
+                  </TableActionButton>
+                  <TableActionButton
+                    variant="secondary"
+                    icon={<PiReceipt />}
                     aria-label={`Ver ticket venta ${venta.id}`}
                     title="Ver ticket"
                     disabled={printingSaleId === venta.id}
                     onClick={() => handlePrintTicket(venta.id)}
                   >
-                    <PiReceipt className="text-lg" />
-                  </IconButton>
-                </div>
+                    {printingSaleId === venta.id ? 'Imprimiendo...' : 'Imprimir'}
+                  </TableActionButton>
+                </TableActions>
               </TablaCelda>
             </TablaFila>
           ))}

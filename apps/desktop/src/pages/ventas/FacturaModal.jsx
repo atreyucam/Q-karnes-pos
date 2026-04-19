@@ -4,10 +4,12 @@ import apiClient from '../../lib/apiClient';
 import {
   Alert,
   Button,
+  Field,
   Input,
   Modal,
   Paginador,
   StatusBadge,
+  Switch,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
@@ -15,6 +17,7 @@ import {
   TablaCelda
 } from '../../shared/ui';
 import { uiClassTokens } from '../../shared/tokens/uiClassTokens';
+import useFormErrors from '../../shared/hooks/useFormErrors';
 
 const PAGE_SIZE = 8;
 const MIN_SEARCH_LENGTH = 0;
@@ -36,6 +39,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
   const [showCreate, setShowCreate] = useState(false);
   const [nuevoClienteForm, setNuevoClienteForm] = useState(emptyClienteForm);
   const [saving, setSaving] = useState(false);
+  const createFormErrors = useFormErrors();
 
   const canSearch = debouncedSearch.length >= MIN_SEARCH_LENGTH;
 
@@ -88,6 +92,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
       setShowCreate(false);
       setNuevoClienteForm(emptyClienteForm);
       setSaving(false);
+      createFormErrors.resetErrors();
     }
   }, [open]);
 
@@ -95,8 +100,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
 
   const crearYSeleccionar = async () => {
     const nombre = nuevoClienteForm.nombre.trim();
-    if (!nombre) {
-      setError('Nombre de cliente requerido');
+    if (!createFormErrors.setErrors(nombre ? {} : { nombre: 'Este campo es obligatorio.' })) {
       return;
     }
 
@@ -253,56 +257,53 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} maxWidthClass="max-w-4xl" panelClassName="p-5">
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-[var(--color-text)]">Nuevo cliente</h3>
-              <p className="text-sm text-[var(--color-text-muted)]">Crea el cliente y selecciónalo inmediatamente para la factura.</p>
+          <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Nuevo cliente</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Crea el cliente y selecciónalo inmediatamente para la factura.</p>
             </div>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setShowCreate(false)}>
+            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setShowCreate(false)}>
               X
             </Button>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium text-[var(--color-text)]">Nombre</label>
+              <Field label="Nombre" required error={createFormErrors.errors.nombre}>
                 <Input
-                  className="mt-2"
                   value={nuevoClienteForm.nombre}
-                  onChange={(event) => setNuevoClienteForm((state) => ({ ...state, nombre: event.target.value }))}
+                  onChange={(event) => {
+                    createFormErrors.clearFieldError('nombre');
+                    setNuevoClienteForm((state) => ({ ...state, nombre: event.target.value }));
+                  }}
                   placeholder="Nombre del cliente"
                 />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-[var(--color-text)]">Teléfono</label>
+              </Field>
+              <Field label="Teléfono">
                 <Input
-                  className="mt-2"
                   value={nuevoClienteForm.telefono}
                   onChange={(event) => setNuevoClienteForm((state) => ({ ...state, telefono: event.target.value }))}
                   placeholder="0990000000"
                 />
-              </div>
+              </Field>
             </div>
 
             <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium text-[var(--color-text)]">Dirección (opcional)</label>
+              <Field label="Dirección">
                 <Input
-                  className="mt-2"
                   value={nuevoClienteForm.direccion}
                   onChange={(event) => setNuevoClienteForm((state) => ({ ...state, direccion: event.target.value }))}
                   placeholder="Sector / calle"
                 />
-              </div>
-              <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 text-sm font-medium text-[var(--color-text)]">
-                <input
-                  type="checkbox"
+              </Field>
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+                <Switch
                   checked={nuevoClienteForm.activo}
-                  onChange={(event) => setNuevoClienteForm((state) => ({ ...state, activo: event.target.checked }))}
+                  onChange={(checked) => setNuevoClienteForm((state) => ({ ...state, activo: checked }))}
+                  label="Cliente activo"
+                  description="Si está inactivo no aparecerá como opción para nuevas ventas."
                 />
-                Cliente activo
-              </label>
+              </div>
             </div>
           </div>
 
