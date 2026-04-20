@@ -17,19 +17,8 @@ import {
 export const navigationItems = [
   { type: 'link', to: '/dashboard', label: 'Inicio', icon: PiHouseLine, roles: ['ADMIN', 'CAJERO'] },
   { type: 'link', to: '/caja', label: 'Caja', icon: PiCashRegister, roles: ['ADMIN', 'CAJERO'] },
-  {
-    type: 'group',
-    key: 'ventas',
-    label: 'Ventas',
-    icon: PiShoppingCartSimple,
-    roles: ['ADMIN', 'CAJERO'],
-    defaultTo: '/ventas/nueva',
-    basePath: '/ventas',
-    items: [
-      { to: '/ventas/nueva', label: 'Nueva venta' },
-      { to: '/ventas', label: 'Historial y devoluciones' }
-    ]
-  },
+  { type: 'link', to: '/ventas/nueva', label: 'Nueva venta', icon: PiShoppingCartSimple, roles: ['ADMIN', 'CAJERO'] },
+  { type: 'link', to: '/ventas', label: 'Ventas', icon: PiShoppingCartSimple, roles: ['ADMIN', 'CAJERO'] },
   {
     type: 'group',
     key: 'compras',

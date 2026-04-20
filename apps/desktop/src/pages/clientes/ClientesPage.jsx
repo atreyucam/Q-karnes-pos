@@ -36,11 +36,16 @@ const PAGE_SIZE = 10;
 const emptyClienteForm = {
   id: null,
   nombre: '',
+  cedula: '',
   telefono: '',
   direccion: '',
   observacion: '',
   activo: true
 };
+
+function sanitizeCedulaInput(value) {
+  return String(value || '').replace(/[^0-9]/g, '').slice(0, 10);
+}
 
 export default function ClientesPage() {
   const { clientes, meta, error, loading, listar, crear, actualizar, abonar } = useClientesStore();
@@ -115,6 +120,7 @@ export default function ClientesPage() {
     setClienteForm({
       id: cliente.id,
       nombre: cliente.nombre || '',
+      cedula: cliente.cedula || '',
       telefono: cliente.telefono || '',
       direccion: cliente.direccion || '',
       observacion: cliente.observacion || '',
@@ -131,10 +137,13 @@ export default function ClientesPage() {
   const onSaveCliente = async () => {
     const nextErrors = {};
     if (!clienteForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (!clienteForm.cedula.trim()) nextErrors.cedula = 'Este campo es obligatorio.';
+    else if (!/^\d{10}$/.test(clienteForm.cedula)) nextErrors.cedula = 'La cédula debe tener 10 dígitos numéricos.';
     if (!clienteFormErrors.setErrors(nextErrors)) return;
 
     const payload = {
       nombre: clienteForm.nombre.trim(),
+      cedula: clienteForm.cedula.trim(),
       telefono: clienteForm.telefono.trim() || null,
       direccion: clienteForm.direccion.trim() || null,
       observacion: clienteForm.observacion.trim() || null,
@@ -381,6 +390,18 @@ export default function ClientesPage() {
                   setClienteForm((s) => ({ ...s, nombre: e.target.value }));
                 }}
                 placeholder="Ej: Restaurante El Buen Sabor"
+              />
+            </Field>
+
+            <Field label="Cédula" required error={clienteFormErrors.errors.cedula}>
+              <Input
+                inputMode="numeric"
+                value={clienteForm.cedula}
+                onChange={(e) => {
+                  clienteFormErrors.clearFieldError('cedula');
+                  setClienteForm((s) => ({ ...s, cedula: sanitizeCedulaInput(e.target.value) }));
+                }}
+                placeholder="0123456789"
               />
             </Field>
 

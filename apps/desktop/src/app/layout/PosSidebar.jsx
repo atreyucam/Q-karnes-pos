@@ -7,15 +7,15 @@ import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { isGroupActive, navigationItems } from './posNavigation';
 
 function getActiveKey(items, location) {
-  const activeGroup = items.find(
-    (item) => item.type === 'group' && isGroupActive(item, location)
-  );
-  if (activeGroup) return activeGroup.key;
-
   const activeLink = items.find(
     (item) => item.type === 'link' && item.to === location.pathname
   );
   if (activeLink) return activeLink.to;
+
+  const activeGroup = items.find(
+    (item) => item.type === 'group' && isGroupActive(item, location)
+  );
+  if (activeGroup) return activeGroup.key;
 
   return null;
 }
@@ -39,8 +39,11 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
   );
 
   useEffect(() => {
+    const hasDirectLinkMatch = visibleItems.some(
+      (item) => item.type === 'link' && item.to === location.pathname
+    );
     const activeGroup = visibleItems.find(
-      (item) => item.type === 'group' && isGroupActive(item, location)
+      (item) => item.type === 'group' && !hasDirectLinkMatch && isGroupActive(item, location)
     );
 
     setOpenGroupKey(activeGroup?.key ?? null);

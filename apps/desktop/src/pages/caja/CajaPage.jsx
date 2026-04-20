@@ -35,7 +35,10 @@ import { useCajaStore } from '../../stores/cajaStore';
 import { useAuthStore } from '../../stores/authStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
+import { sanitizeDecimalInput } from '../../lib/formatQty';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+
+const MAX_CASH_OPERATION_AMOUNT = 5000;
 
 const timeFormatter = new Intl.DateTimeFormat('es-EC', {
   timeZone: 'America/Guayaquil',
@@ -178,6 +181,19 @@ function getCloseStatusMeta(difference) {
   };
 }
 
+function getPendingCloseStatusMeta() {
+  return {
+    tone: 'default',
+    label: 'Pendiente',
+    message: 'Ingresa el efectivo contado para validar el estado del cierre.',
+    badgeLabel: 'Cierre pendiente'
+  };
+}
+
+function sanitizeCashAmountInput(value) {
+  return sanitizeDecimalInput(value, 2);
+}
+
 function ResultRow({ label, value, tone = 'default' }) {
   const toneClass = tone === 'danger'
     ? 'text-[var(--color-danger)]'
@@ -218,6 +234,7 @@ function ManualMovementModal({
   type,
   form,
   errors,
+  numericWarning,
   loading,
   onChange,
   onSubmit
@@ -250,12 +267,16 @@ function ManualMovementModal({
 
           <div>
             <Input
+              inputMode="decimal"
+              min="0"
+              max={MAX_CASH_OPERATION_AMOUNT}
               error={Boolean(errors.monto)}
               placeholder="Monto"
               value={form.monto}
-              onChange={(event) => onChange('monto', event.target.value)}
+              onChange={(event) => onChange('monto', sanitizeCashAmountInput(event.target.value))}
             />
             {errors.monto ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.monto}</p> : null}
+            {!errors.monto && numericWarning ? <p className="mt-2 text-sm text-[var(--color-danger)]">{numericWarning}</p> : null}
           </div>
         </div>
 
@@ -293,8 +314,9 @@ function CashClosingModal({
   const efectivoEsperado = Number(summary?.efectivo_esperado || 0);
   const contado = Number(form.efectivo_contado || 0);
   const diferencia = round2(contado - efectivoEsperado);
-  const hasDifference = form.efectivo_contado !== '' && Math.abs(diferencia) > 0.009;
-  const statusMeta = getCloseStatusMeta(hasDifference ? diferencia : 0);
+  const hasCountedCash = String(form.efectivo_contado || '').trim() !== '';
+  const hasDifference = hasCountedCash && Math.abs(diferencia) > 0.009;
+  const statusMeta = hasCountedCash ? getCloseStatusMeta(hasDifference ? diferencia : 0) : getPendingCloseStatusMeta();
   const turnoLabel = turnoActual?.id ? `Turno #${turnoActual.id}` : 'Sin turno';
 
   useEffect(() => {
@@ -384,15 +406,23 @@ function CashClosingModal({
                     : 'border-[var(--color-warning)]/35 bg-[var(--color-warning-soft)]'
                   : 'border-[var(--color-border)] bg-[var(--color-surface)]'
               }`}>
-                <p className="text-sm font-semibold text-[var(--color-text)]">Conteo físico</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Conteo físico</p>
+                  <StatusBadge tone={statusMeta.tone}>
+                    {statusMeta.badgeLabel}
+                  </StatusBadge>
+                </div>
                 <div className="mt-3 space-y-3">
                   <div>
                     <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Efectivo contado</label>
                     <Input
+                      inputMode="decimal"
+                      min="0"
+                      max={MAX_CASH_OPERATION_AMOUNT}
                       error={Boolean(errors.efectivo_contado)}
                       placeholder="$0.00"
                       value={form.efectivo_contado}
-                      onChange={(event) => onFormChange('efectivo_contado', event.target.value)}
+                      onChange={(event) => onFormChange('efectivo_contado', sanitizeCashAmountInput(event.target.value))}
                     />
                     {errors.efectivo_contado ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.efectivo_contado}</p> : null}
                   </div>
@@ -429,10 +459,7 @@ function CashClosingModal({
                     : 'border-[var(--color-success)]/20 bg-[var(--color-success-soft)]'
               }`}>
                 <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge tone={statusMeta.tone}>{hasDifference ? statusMeta.badgeLabel : 'Cierre cuadrado'}</StatusBadge>
-                  <p className="text-sm font-semibold text-[var(--color-text)]">
-                    {hasDifference ? `Cierre con ${statusMeta.label.toLowerCase()}` : 'Cierre cuadrado'}
-                  </p>
+                  <StatusBadge tone={statusMeta.tone}>{statusMeta.badgeLabel}</StatusBadge>
                 </div>
                 <div className="mt-4 space-y-3">
                   <ResultRow label="Esperado" value={formatMoney(efectivoEsperado)} />
@@ -527,6 +554,7 @@ export default function CajaPage() {
   const [fondo, setFondo] = useState('100.00');
   const [manualModal, setManualModal] = useState(null);
   const [manualForm, setManualForm] = useState({ concepto: '', monto: '' });
+  const [manualNumericWarning, setManualNumericWarning] = useState('');
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [closeForm, setCloseForm] = useState({ efectivo_contado: '', observacion: '' });
   const [closeAuth, setCloseAuth] = useState({ usuario: '', password: '' });
@@ -693,6 +721,7 @@ export default function CajaPage() {
   const openManualModal = (tipo) => {
     setManualModal(tipo);
     setManualForm({ concepto: '', monto: '' });
+    setManualNumericWarning('');
     manualFormErrors.resetErrors();
   };
 
@@ -703,7 +732,8 @@ export default function CajaPage() {
 
     if (!manualForm.concepto.trim()) nextErrors.concepto = 'Este campo es obligatorio.';
     if (!String(manualForm.monto || '').trim()) nextErrors.monto = 'Este campo es obligatorio.';
-    else if (!(monto > 0)) nextErrors.monto = 'Ingresa un valor válido.';
+    else if (!(monto > 0)) nextErrors.monto = 'El monto debe ser mayor a 0.';
+    else if (monto > MAX_CASH_OPERATION_AMOUNT) nextErrors.monto = `El monto no puede superar ${MAX_CASH_OPERATION_AMOUNT}.`;
     if (!manualFormErrors.setErrors(nextErrors)) return;
 
     await movimientoManual({
@@ -714,6 +744,7 @@ export default function CajaPage() {
 
     setManualModal(null);
     setManualForm({ concepto: '', monto: '' });
+    setManualNumericWarning('');
     manualFormErrors.resetErrors();
     await refreshTurnoData();
   };
@@ -730,7 +761,8 @@ export default function CajaPage() {
     const nextErrors = {};
 
     if (!String(closeForm.efectivo_contado || '').trim()) nextErrors.efectivo_contado = 'Este campo es obligatorio.';
-    else if (!Number.isFinite(closeCountedCash) || closeCountedCash < 0) nextErrors.efectivo_contado = 'Ingresa un valor válido.';
+    else if (!Number.isFinite(closeCountedCash) || closeCountedCash < 0) nextErrors.efectivo_contado = 'El efectivo contado no puede ser negativo.';
+    else if (closeCountedCash > MAX_CASH_OPERATION_AMOUNT) nextErrors.efectivo_contado = `El efectivo contado no puede superar ${MAX_CASH_OPERATION_AMOUNT}.`;
 
     if (closeHasDifference) {
       if (!closeForm.observacion.trim()) nextErrors.observacion = 'La observación es obligatoria cuando existe diferencia.';
@@ -1011,13 +1043,22 @@ export default function CajaPage() {
 
       <ManualMovementModal
         open={Boolean(manualModal)}
-        onClose={() => setManualModal(null)}
+        onClose={() => {
+          setManualModal(null);
+          setManualNumericWarning('');
+        }}
         type={manualModal}
         form={manualForm}
         errors={manualFormErrors.errors}
+        numericWarning={manualNumericWarning}
         loading={loading}
         onChange={(field, value) => {
           manualFormErrors.clearFieldError(field);
+          if (field === 'monto') {
+            setManualNumericWarning(/[a-zA-Z]/.test(String(value || '')) ? 'Solo valores numéricos.' : '');
+            setManualForm((state) => ({ ...state, [field]: sanitizeCashAmountInput(value) }));
+            return;
+          }
           setManualForm((state) => ({ ...state, [field]: value }));
         }}
         onSubmit={onManual}

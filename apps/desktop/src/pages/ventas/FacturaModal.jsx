@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiMagnifyingGlass, PiUserPlus, PiUsersThree, PiX } from 'react-icons/pi';
+import { PiMagnifyingGlass } from 'react-icons/pi';
 import apiClient from '../../lib/apiClient';
 import {
   Alert,
@@ -14,7 +14,8 @@ import {
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
-  TablaCelda
+  TablaCelda,
+  Textarea
 } from '../../shared/ui';
 import { uiClassTokens } from '../../shared/tokens/uiClassTokens';
 import useFormErrors from '../../shared/hooks/useFormErrors';
@@ -23,10 +24,16 @@ const PAGE_SIZE = 8;
 const MIN_SEARCH_LENGTH = 0;
 const emptyClienteForm = {
   nombre: '',
+  cedula: '',
   telefono: '',
   direccion: '',
+  observacion: '',
   activo: true
 };
+
+function sanitizeCedulaInput(value) {
+  return String(value || '').replace(/[^0-9]/g, '').slice(0, 10);
+}
 
 export default function FacturaModal({ open, onClose, onSelectCliente }) {
   const [searchInput, setSearchInput] = useState('');
@@ -100,7 +107,11 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
 
   const crearYSeleccionar = async () => {
     const nombre = nuevoClienteForm.nombre.trim();
-    if (!createFormErrors.setErrors(nombre ? {} : { nombre: 'Este campo es obligatorio.' })) {
+    const cedula = nuevoClienteForm.cedula.trim();
+    const nextErrors = {};
+    if (!nombre) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (cedula && !/^\d{10}$/.test(cedula)) nextErrors.cedula = 'La cédula debe tener 10 dígitos numéricos.';
+    if (!createFormErrors.setErrors(nextErrors)) {
       return;
     }
 
@@ -109,8 +120,10 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
     try {
       const response = await apiClient.post('/api/clientes', {
         nombre,
+        cedula: cedula || null,
         telefono: nuevoClienteForm.telefono.trim() || null,
         direccion: nuevoClienteForm.direccion.trim() || null,
+        observacion: nuevoClienteForm.observacion.trim() || null,
         activo: nuevoClienteForm.activo
       });
       const cliente = response.data?.data || response.data;
@@ -126,30 +139,16 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
   return (
     <Modal open={open} onClose={onClose} maxWidthClass={uiClassTokens.modal.width.large} panelClassName="p-0">
       <div className="flex min-h-0 flex-1 flex-col bg-surface">
-        <div className="bg-background px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div className="rounded-xl border border-success bg-success-soft p-2 text-success">
-                <PiUsersThree className="text-2xl" />
-              </div>
-              <div>
-                <p className="ui-page-eyebrow !text-success">Venta</p>
-                <h3 className="text-lg font-extrabold leading-tight text-text sm:text-xl">Buscar cliente</h3>
-                <p className="mt-0.5 text-sm text-text-muted">
-                  Selecciona un cliente existente o crea uno nuevo sin salir del flujo de venta.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-subtle hover:bg-surface-alt hover:text-text-muted"
-              onClick={onClose}
-              aria-label="Cerrar modal"
-            >
-              <PiX className="text-xl" />
-            </button>
+        <div className="ui-modal-header !mx-0 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Buscar cliente</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Selecciona un cliente existente o crea uno nuevo sin salir del flujo de venta.
+            </p>
           </div>
-          <div className="mt-4 h-px w-full bg-surface-alt" />
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={onClose}>
+            X
+          </Button>
         </div>
 
         <div className="border-b border-border px-4 py-4 sm:px-6 lg:px-8">
@@ -160,7 +159,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
                 <PiMagnifyingGlass className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl text-text-subtle" />
                 <Input
                   className="py-2.5 pl-10 pr-3"
-                  placeholder="Nombre, RUC, telefono..."
+                  placeholder="Nombre, cédula, teléfono..."
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                 />
@@ -171,8 +170,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
               variant="primary"
               onClick={() => setShowCreate(true)}
             >
-              <PiUserPlus className="h-4 w-4" />
-              Agregar nuevo cliente
+              + nuevo cliente
             </Button>
           </div>
 
@@ -260,15 +258,15 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
           <div className="ui-modal-header">
           <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Nuevo cliente</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Crea el cliente y selecciónalo inmediatamente para la factura.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Registra o actualiza clientes para ventas y crédito.</p>
             </div>
             <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setShowCreate(false)}>
               X
             </Button>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-3">
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="space-y-4">
               <Field label="Nombre" required error={createFormErrors.errors.nombre}>
                 <Input
                   value={nuevoClienteForm.nombre}
@@ -279,6 +277,19 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
                   placeholder="Nombre del cliente"
                 />
               </Field>
+
+              <Field label="Cédula" error={createFormErrors.errors.cedula}>
+                <Input
+                  inputMode="numeric"
+                  value={nuevoClienteForm.cedula}
+                  onChange={(event) => {
+                    createFormErrors.clearFieldError('cedula');
+                    setNuevoClienteForm((state) => ({ ...state, cedula: sanitizeCedulaInput(event.target.value) }));
+                  }}
+                  placeholder="0123456789"
+                />
+              </Field>
+
               <Field label="Teléfono">
                 <Input
                   value={nuevoClienteForm.telefono}
@@ -288,7 +299,7 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
               </Field>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <Field label="Dirección">
                 <Input
                   value={nuevoClienteForm.direccion}
@@ -304,6 +315,16 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
                   description="Si está inactivo no aparecerá como opción para nuevas ventas."
                 />
               </div>
+            </div>
+
+            <div className="lg:col-span-2">
+              <Field label="Observación">
+                <Textarea
+                  value={nuevoClienteForm.observacion}
+                  onChange={(event) => setNuevoClienteForm((state) => ({ ...state, observacion: event.target.value }))}
+                  placeholder="Notas del cliente"
+                />
+              </Field>
             </div>
           </div>
 

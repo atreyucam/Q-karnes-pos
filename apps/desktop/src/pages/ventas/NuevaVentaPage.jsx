@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PiX } from 'react-icons/pi';
+import { PiTrash, PiX } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import { useVentasStore } from '../../stores/ventasStore';
 import {
@@ -9,12 +9,6 @@ import {
   Input,
   Modal,
   PageHeader,
-  Select,
-  Tabla,
-  TablaCabecera,
-  TablaCuerpo,
-  TablaFila,
-  TablaCelda,
   Toast
 } from '../../ui';
 import FacturaModal from './FacturaModal';
@@ -60,6 +54,13 @@ function formatStock(value, unidad) {
   return getUnidad(unidad) === 'UND'
     ? String(Math.trunc(n))
     : n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+}
+
+function formatQtyWithUnit(value, unidad) {
+  const unit = getUnidad(unidad);
+  const qty = Number(value || 0);
+  if (unit === 'UND') return `${Math.trunc(qty)} ${unit}`;
+  return `${qty.toFixed(2)} ${unit}`;
 }
 
 export default function NuevaVentaPage() {
@@ -399,31 +400,13 @@ export default function NuevaVentaPage() {
     }
   };
 
+  const clienteLabel = clienteSeleccionado?.nombre || 'Consumidor final';
+  const metodoPagoLabel = (codigo, nombre) => (codigo === PAYMENT_CODES.CREDITO_CLIENTE ? 'Crédito' : nombre);
+
   return (
-    <div className="sales-page-layout sales-page-shell flex h-full min-h-0 flex-col gap-4 overflow-hidden">
+    <div className="sales-page-layout sales-page-shell flex h-full min-h-0 flex-col gap-1 overflow-hidden">
       <PageHeader
         title="Nueva venta"
-        description="Busca productos, arma el carrito y confirma el cobro usando el contrato vigente del backend."
-        actions={(
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-                Cliente
-              </p>
-              <p className={`mt-1 text-[var(--color-text)] ${clienteSeleccionado ? 'text-lg font-bold' : 'text-sm font-semibold'}`}>
-                {clienteSeleccionado?.nombre || 'Comprobante final'}
-              </p>
-            </div>
-            {clienteSeleccionado && (
-              <Button type="button" variant="secondary" onClick={handleClearCliente}>
-                Quitar cliente
-              </Button>
-            )}
-            <Button type="button" variant="primary" onClick={() => setModalFacturaOpen(true)}>
-              Cliente / factura
-            </Button>
-          </div>
-        )}
       />
 
       {(localError || errorVenta || catalogError) && (
@@ -438,28 +421,16 @@ export default function NuevaVentaPage() {
         </Alert>
       )}
 
-      {selectedPaymentOption && (
-        <Alert tone={selectedPaymentOption.requiere_cliente || (!cajaAbierta && requiresOpenCashShift) ? 'warning' : 'info'} className="shrink-0">
-          {selectedPaymentOption.requiere_cliente
-            ? 'La venta a credito requiere cliente y no impacta caja fisica.'
-            : paymentImpactsCash
-              ? (cajaAbierta
-                ? 'El pago en efectivo impacta caja fisica y se registrara en el turno abierto.'
-                : 'El pago en efectivo requiere un turno de caja abierto.')
-              : 'Este metodo es informativo para caja: registra la venta pero no altera el saldo fisico.'}
-        </Alert>
-      )}
-
-      <div className="flex-1 min-h-0 grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
-        <Card className="min-h-0 p-4">
+      <div className="flex-1 min-h-0 grid gap-1.5 xl:grid-cols-[1fr_1.35fr]">
+        <Card className="min-h-0 border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] p-2 shadow-none">
           <div className="flex h-full min-h-0 flex-col">
-            <div className="shrink-0 space-y-3">
-              <p className="font-semibold text-[var(--color-text)]">Categorias</p>
+            <div className="shrink-0 space-y-2">
+              <p className="font-semibold text-[var(--color-text)]">Buscar producto</p>
 
               <div className="relative">
                 <Input
                   className="pr-11"
-                  placeholder="Buscar por codigo o nombre"
+                  placeholder="Buscar codigo o nombre"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onKeyDown={handleSearchKeyDown}
@@ -476,19 +447,23 @@ export default function NuevaVentaPage() {
                 ) : null}
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {categorias.map((categoria) => (
-                  <Button
-                    key={categoria.id}
-                    type="button"
-                    size="md"
-                    variant={categoriaActiva === categoria.id ? 'primary' : 'secondary'}
-                    className="min-h-11 rounded-xl px-4"
-                    onClick={() => setCategoriaActiva(categoria.id)}
-                  >
-                    {categoria.nombre}
-                  </Button>
-                ))}
+              <div className="overflow-x-auto">
+                <div className="inline-flex min-h-9 items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-1">
+                  {categorias.map((categoria) => (
+                    <button
+                      key={categoria.id}
+                      type="button"
+                      className={`min-h-7 rounded-lg px-3 text-xs font-semibold transition-colors ${
+                        categoriaActiva === categoria.id
+                          ? 'bg-[var(--color-brand)] text-white shadow-sm'
+                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                      }`}
+                      onClick={() => setCategoriaActiva(categoria.id)}
+                    >
+                      {categoria.nombre}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center justify-between">
@@ -501,15 +476,30 @@ export default function NuevaVentaPage() {
               {loadingCatalogo && <p className="text-sm text-[var(--color-text-muted)]">Cargando productos...</p>}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-auto pt-2 pr-1">
+            <div className="flex-1 min-h-0 overflow-auto pt-1.5 pr-1 pb-1">
               {!loadingCatalogo && productosMostrados.length === 0 && (
                 <p className="text-sm text-[var(--color-text-muted)]">No hay productos para este filtro.</p>
               )}
 
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {productosMostrados.map((producto, index) => {
                   const unidad = getUnidad(producto.unidad_medida || producto.unidad);
                   const selected = index === selectedProductoIndex;
+                  const stockActual = Number(producto.stock_actual || 0);
+                  const stockMinimo = Number(producto.stock_minimo || 0);
+                  const isOut = stockActual <= 0;
+                  const isLow = !isOut && ((stockMinimo > 0 && stockActual <= stockMinimo) || stockActual <= 5);
+                  const stockBadgeLabel = isOut ? 'Agotado' : (isLow ? 'Bajo' : null);
+                  const stockBadgeClass = isOut
+                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_70%,white_30%)] text-[var(--color-danger)]'
+                    : isLow
+                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_78%,white_22%)] text-[var(--color-warning)]'
+                      : '';
+                  const stateTintClass = isOut
+                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_30%,white_70%)]'
+                    : isLow
+                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_35%,white_65%)]'
+                      : 'bg-[var(--color-surface)]';
 
                   return (
                     <button
@@ -518,40 +508,49 @@ export default function NuevaVentaPage() {
                       ref={(node) => { productRefs.current[index] = node; }}
                       onMouseEnter={() => setSelectedProductoIndex(index)}
                       onClick={() => addProductoToCarrito(producto)}
-                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      className={`w-full rounded-lg border px-2.5 py-[7px] text-left transition-colors ${stateTintClass} ${
                         selected
-                          ? 'border-[var(--color-brand)] bg-[var(--color-brand-soft)]'
-                          : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]'
-                      }`}
+                          ? 'border-[var(--color-border-strong)]'
+                          : 'border-[var(--color-border)] hover:bg-[color-mix(in_oklab,var(--color-surface-muted)_65%,white_35%)]'
+                      } ${isOut ? 'opacity-90' : ''}`}
                     >
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-[var(--color-text)]">
-                            {producto.codigo} - {producto.nombre}
+                      <div className="space-y-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="min-w-0 truncate text-sm font-semibold leading-tight text-[var(--color-text)]">
+                            {producto.codigo} {producto.nombre}
                           </p>
-                          <p className="text-sm text-[var(--color-text-muted)]">
-                            {unidad} | Stock: {formatStock(producto.stock_actual, unidad)}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <p className="text-sm font-semibold text-[var(--color-text)]">
+                          <div className="shrink-0 flex items-center gap-2">
+                            <p className="text-sm font-bold leading-none text-[var(--color-text)]">
                               {formatMoney(producto.precio_venta || producto.precio_referencia || 0)}
                             </p>
-                            <p className="text-xs text-[var(--color-text-muted)]">P. unit</p>
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="sm"
+                              className="-mt-0.5 min-h-6 px-0.5 py-0 text-[8px] leading-none"
+                              disabled={isOut}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                addProductoToCarrito(producto);
+                              }}
+                            >
+                              Agregar
+                            </Button>
                           </div>
-                          <Button
-                            type="button"
-                            variant="primary"
-                            size="sm"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              addProductoToCarrito(producto);
-                            }}
-                          >
-                            Agregar
-                          </Button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-[var(--color-text-muted)]">
+                            Stock {formatStock(producto.stock_actual, unidad)} {unidad}
+                          </p>
+                          {isOut ? (
+                            <span className="text-[11px] font-semibold text-[var(--color-danger)]">Sin stock</span>
+                          ) : null}
+                          {stockBadgeLabel ? (
+                            <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stockBadgeClass}`}>
+                              {stockBadgeLabel}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     </button>
@@ -562,156 +561,159 @@ export default function NuevaVentaPage() {
           </div>
         </Card>
 
-        <Card className="min-h-0 p-4">
+        <Card className="relative min-h-0 overflow-hidden border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] p-0 shadow-none">
           <div className="flex h-full min-h-0 flex-col">
-            <div className="mb-2 flex shrink-0 items-center justify-between">
-              <p className="font-semibold text-[var(--color-text)]">Carrito</p>
-              <p className="text-sm font-medium text-[var(--color-text-muted)]">Items: {carrito.length}</p>
+            <div className="shrink-0 border-b border-[color-mix(in_oklab,var(--color-border)_75%,transparent)] bg-[var(--color-surface-alt)] px-3 py-2">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold text-[var(--color-text)]">Carrito</h3>
+                    <span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-xs font-semibold text-[var(--color-text-muted)]">
+                      {carrito.length} items
+                    </span>
+                  </div>
+                  <p className="text-sm font-medium text-[var(--color-text)]">Cliente: {clienteLabel}</p>
+                </div>
+
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                  {clienteSeleccionado ? (
+                    <Button type="button" variant="ghost" size="sm" onClick={handleClearCliente}>
+                      Quitar cliente
+                    </Button>
+                  ) : null}
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setModalFacturaOpen(true)}>
+                    Buscar cliente
+                  </Button>
+                </div>
+              </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-auto">
-              <Tabla>
-                <TablaCabecera>
-                  <tr>
-                    <TablaCelda as="th">Producto</TablaCelda>
-                    <TablaCelda as="th" className="w-[120px]">Cant</TablaCelda>
-                    <TablaCelda as="th" className="text-right">P. unit</TablaCelda>
-                    <TablaCelda as="th" className="text-right">Subtotal</TablaCelda>
-                    <TablaCelda as="th" className="w-[64px] text-center">Accion</TablaCelda>
-                  </tr>
-                </TablaCabecera>
-                <TablaCuerpo>
-                  {carritoConEstado.length === 0 && (
-                    <TablaFila>
-                      <TablaCelda colSpan={5} className="text-center text-[var(--color-text-muted)]">
-                        Sin productos en carrito
-                      </TablaCelda>
-                    </TablaFila>
-                  )}
-
+            <div className="flex-[0.88] min-h-0 overflow-auto bg-[var(--color-surface)] p-3 pb-1.5">
+              {carritoConEstado.length === 0 ? (
+                <div className="flex h-full min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-6 text-center">
+                  <p className="text-base font-semibold text-[var(--color-text)]">Sin productos en el carrito</p>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                    Busca un producto y presiona Agregar para comenzar
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
                   {carritoConEstado.map((item) => (
-                    <TablaFila key={item.producto_id} className="bg-[color-mix(in_oklab,var(--color-warning-soft)_45%,white_55%)]">
-                      <TablaCelda>
-                        <div className="min-w-[120px]">
-                          <p className="font-medium text-[var(--color-text)]">{item.nombre}</p>
-                        </div>
-                      </TablaCelda>
-                      <TablaCelda>
-                        <div className="flex min-w-[108px] items-center gap-2">
+                    <article
+                      key={item.producto_id}
+                      className={`rounded-lg border px-2.5 py-2 ${
+                        item.cantidadError
+                          ? 'border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-soft)_52%,white_48%)]'
+                          : 'border-[var(--color-border)] bg-[var(--color-surface-alt)]'
+                      }`}
+                    >
+                      <p className="truncate text-[15px] font-semibold text-[var(--color-text)]">{item.nombre}</p>
+
+                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
                           <Input
                             type="text"
                             inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
-                            className="w-[4.75rem] px-2 py-1 text-sm"
+                            className="h-7 w-[6ch] min-w-[6ch] rounded-md px-1.5 py-0 text-right text-xs font-semibold"
                             value={item.cantidadInput}
                             onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
                           />
-                          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                            {item.unidad_medida}
-                          </span>
+                          <span className="font-semibold uppercase">{getUnidad(item.unidad_medida)}</span>
+                          <span>x</span>
+                          <span className="font-medium text-[var(--color-text)]">{formatMoney(item.precio)}</span>
                         </div>
-                        {item.cantidadError && (
-                          <p className="mt-1 text-[11px] text-[var(--color-danger)]">{item.cantidadError}</p>
-                        )}
-                      </TablaCelda>
-                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                        {formatMoney(item.precio)}
-                      </TablaCelda>
-                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                        {formatMoney(item.subtotal)}
-                      </TablaCelda>
-                      <TablaCelda className="text-center">
+
+                        <p className="ml-auto mr-2.5 shrink-0 text-right text-base font-bold text-[var(--color-text)]">
+                          {formatMoney(item.subtotal)}
+                        </p>
+
                         <Button
                           type="button"
-                          variant="iconDanger"
+                          variant="ghost"
                           size="sm"
-                          className="font-bold"
+                          className="shrink-0 border border-[color-mix(in_oklab,var(--color-danger)_25%,transparent)] bg-[color-mix(in_oklab,var(--color-danger-soft)_42%,white_58%)] text-[color-mix(in_oklab,var(--color-danger)_72%,var(--color-text)_28%)] hover:bg-[color-mix(in_oklab,var(--color-danger-soft)_62%,white_38%)] hover:text-[var(--color-danger)]"
                           aria-label={`Quitar ${item.nombre}`}
                           title="Quitar"
                           onClick={() => removeItem(item.producto_id)}
                         >
-                          <span className="text-xl font-extrabold leading-none text-current">x</span>
+                          <PiTrash className="text-base" />
                         </Button>
-                      </TablaCelda>
-                    </TablaFila>
+                      </div>
+
+                      {item.cantidadError ? (
+                        <p className="mt-2 text-xs font-semibold text-[var(--color-danger)]">{item.cantidadError}</p>
+                      ) : null}
+                    </article>
                   ))}
-                </TablaCuerpo>
-              </Tabla>
+                </div>
+              )}
             </div>
 
-            <div className="mt-3 shrink-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
-                <div className="space-y-3">
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Metodo de pago</label>
-                    <Select
-                      value={selectedPaymentCode}
-                      onChange={(e) => setSelectedPaymentCode(e.target.value)}
-                      disabled={!paymentOptions.length}
-                    >
+            <div className="sticky bottom-0 z-10 flex-[0.12] shrink-0 border-t border-[color-mix(in_oklab,var(--color-border)_75%,transparent)] bg-[var(--color-surface-alt)] p-3">
+              <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(220px,290px)]">
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Metodo de pago</label>
+                    <div className="flex flex-wrap gap-1.5">
                       {paymentOptions.map((option) => (
-                        <option key={option.codigo} value={option.codigo}>
-                          {option.nombre}
-                        </option>
+                        <Button
+                          key={option.codigo}
+                          type="button"
+                          size="sm"
+                          className="px-2.5 py-1 text-xs"
+                          variant={selectedPaymentCode === option.codigo ? 'primary' : 'secondary'}
+                          onClick={() => setSelectedPaymentCode(option.codigo)}
+                        >
+                          {metodoPagoLabel(option.codigo, option.nombre)}
+                        </Button>
                       ))}
-                    </Select>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Cliente</label>
-                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2.5 text-sm font-medium text-[var(--color-text)]">
-                      {clienteSeleccionado?.nombre || 'Comprobante final'}
                     </div>
+                    {selectedPaymentCode === PAYMENT_CODES.CREDITO_CLIENTE ? (
+                      <p className="text-[13px] font-medium text-[var(--color-warning)]">
+                        Debe seleccionar un cliente para usar credito.
+                      </p>
+                    ) : null}
                   </div>
 
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Descuento</label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Descuento</label>
                     <Input
                       type="text"
                       inputMode="decimal"
+                      className="h-9"
                       value={descuento}
                       onChange={(e) => setDescuento(sanitizeDecimalInput(e.target.value, 2))}
                     />
                   </div>
-
-                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2.5 text-sm text-[var(--color-text-muted)]">
-                    <p>
-                      Metodo actual:{' '}
-                      <strong className="text-[var(--color-text)]">{selectedPaymentOption?.nombre || '-'}</strong>
-                    </p>
-                    <p className="mt-1">
-                      {paymentImpactsCash
-                        ? 'Afecta caja fisica.'
-                        : 'No afecta caja fisica, solo queda como referencia de cobro.'}
-                    </p>
-                    {selectedPaymentOption?.requiere_cliente ? (
-                      <p className="mt-1 text-[var(--color-warning)]">El credito exige cliente asociado.</p>
-                    ) : null}
-                  </div>
                 </div>
 
-                <div className="space-y-2 text-right lg:pt-4">
-                  <div className="flex items-center justify-end gap-6 text-sm text-[var(--color-text-muted)]">
-                    <span>Subtotal</span>
-                    <span className="min-w-[110px] font-semibold text-[var(--color-text)]">{formatMoney(subtotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-end gap-6 text-sm text-[var(--color-text-muted)]">
-                    <span>Descuento</span>
-                    <span className="min-w-[110px] font-semibold text-[var(--color-text)]">{formatMoney(descuentoValue)}</span>
-                  </div>
-                  <div className="flex items-center justify-end gap-6 border-t border-[var(--color-border)] pt-3 text-base">
-                    <span className="font-semibold text-[var(--color-text)]">Total</span>
-                    <span className="min-w-[110px] text-2xl font-bold text-[var(--color-text)]">{formatMoney(total)}</span>
+                <div className="ml-auto w-full max-w-[300px] rounded-lg border border-[color-mix(in_oklab,var(--color-border)_70%,transparent)] bg-[var(--color-surface)] px-3 py-2.5 text-right">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+                      <span>Subtotal</span>
+                      <span className="font-semibold text-[var(--color-text)]">{formatMoney(subtotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+                      <span>Descuento</span>
+                      <span className="font-semibold text-[var(--color-text)]">{formatMoney(descuentoValue)}</span>
+                    </div>
+                    <div className="mt-1 border-t border-[var(--color-border)] pt-2">
+                      <p className="text-[10px] font-semibold tracking-wider text-[var(--color-text-muted)]">TOTAL</p>
+                      <p className="text-3xl font-black leading-none text-[var(--color-text)]">{formatMoney(total)}</p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap justify-end gap-2">
-                <Button type="button" variant="secondary" onClick={resetVentaDraft}>
+              <div className="mt-2.5 flex flex-wrap justify-end gap-1.5">
+                <Button type="button" size="sm" variant="secondary" onClick={resetVentaDraft}>
                   Cancelar
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant={paymentImpactsCash ? 'cashier' : 'primary'}
+                  className="min-w-[150px] px-4 py-1.5 text-sm font-semibold"
                   disabled={ventaActionDisabled}
                   onClick={submitVenta}
                 >
@@ -722,7 +724,7 @@ export default function NuevaVentaPage() {
           </div>
         </Card>
       </div>
-
+      
       <FacturaModal
         open={modalFacturaOpen}
         onClose={() => setModalFacturaOpen(false)}

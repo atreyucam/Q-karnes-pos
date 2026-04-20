@@ -30,12 +30,54 @@ import useFormErrors from '../../shared/hooks/useFormErrors';
 function resolvePaymentTypeLabel(row) {
   const tipo = String(row?.tipo || '').trim().toUpperCase();
   if (tipo === 'TRANSFERENCIA') return 'Transferencia';
-  if (tipo === 'CREDITO') return 'Credito';
+  if (tipo === 'CREDITO') return 'Crédito';
   return 'Efectivo';
 }
 
 function resolveCashImpact(row) {
-  return row?.afecta_caja ? 'Si' : 'No';
+  return row?.afecta_caja ? 'Sí' : 'No';
+}
+
+function resolveMetodoLabel(value) {
+  return String(value || '-').replace(/_/g, ' ');
+}
+
+function EmptyRow({ colSpan, text }) {
+  return (
+    <TablaFila>
+      <TablaCelda colSpan={colSpan} className="py-8 text-center text-[var(--color-text-muted)]">
+        {text}
+      </TablaCelda>
+    </TablaFila>
+  );
+}
+
+function InfoItem({ label, value }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+        {label}
+      </p>
+      <p className="text-sm font-medium text-[var(--color-text)]">{value || '-'}</p>
+    </div>
+  );
+}
+
+function TotalsRow({ label, value, strong = false }) {
+  return (
+    <div className="flex items-center justify-between gap-6">
+      <span
+        className={`text-sm ${strong ? 'font-semibold text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`}
+      >
+        {label}
+      </span>
+      <span
+        className={`text-right ${strong ? 'text-xl font-bold text-[var(--color-text)]' : 'text-base font-semibold text-[var(--color-text)]'}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
 }
 
 export default function VentaDetallePage() {
@@ -87,35 +129,79 @@ export default function VentaDetallePage() {
   }, [ventaId]);
 
   const venta = ventaDetalle?.venta || null;
+
   const pagos = useMemo(
     () => (Array.isArray(ventaDetalle?.pagos) ? ventaDetalle.pagos : []),
     [ventaDetalle?.pagos]
   );
+
+  const detalleRows = useMemo(
+    () => (Array.isArray(ventaDetalle?.detalle) ? ventaDetalle.detalle : []),
+    [ventaDetalle?.detalle]
+  );
+
   const resumenPago = ventaDetalle?.resumen_pago || null;
+
   const devolucionesRows = useMemo(
     () => (Array.isArray(devoluciones?.devoluciones) ? devoluciones.devoluciones : []),
     [devoluciones?.devoluciones]
   );
+
   const devolucionDetalleRows = useMemo(
     () => (Array.isArray(devoluciones?.detalle) ? devoluciones.detalle : []),
     [devoluciones?.detalle]
   );
+
   const ventaAbonos = useMemo(
     () => (Array.isArray(ventaDetalle?.abonos) ? ventaDetalle.abonos : []),
     [ventaDetalle?.abonos]
   );
 
-  const canReturn = Boolean(venta) && ![SALE_STATUS.ANULADA, SALE_STATUS.DEVUELTA_TOTAL].includes(venta.estado);
-  const canAnular = Boolean(venta)
-    && venta.estado === SALE_STATUS.EMITIDA
-    && devolucionesRows.length === 0;
-  const needsCashShiftForAnular = Number(resumenPago?.contado_centavos || 0) > 0 && !turnoActual?.id;
+  const movimientosPagoRows = useMemo(() => {
+    const pagosBase = pagos.map((row) => ({
+      id: `pago-${row.id}`,
+      fecha: row.fecha || row.fecha_emision || venta?.fecha || null,
+      movimiento: row.tipo ? `Cobro ${resolvePaymentTypeLabel(row).toLowerCase()}` : 'Cobro',
+      metodo: resolveMetodoLabel(row.metodo_codigo || row.tipo || '-'),
+      caja: resolveCashImpact(row),
+      monto: Number(row.monto || 0),
+      referencia: row.referencia || row.observacion || `Venta #${venta?.id || ventaId}`
+    }));
+
+    const abonosCredito = ventaAbonos.map((abono) => ({
+      id: `abono-${abono.id}`,
+      fecha: abono.fecha || abono.fecha_emision || venta?.fecha || null,
+      movimiento: 'Abono de crédito',
+      metodo: resolveMetodoLabel(abono.metodo_pago || abono.metodo || 'CRÉDITO'),
+      caja:
+        String(abono.metodo_pago || abono.metodo || '').toUpperCase() === 'EFECTIVO' ? 'Sí' : 'No',
+      monto: Number(abono.monto || 0),
+      referencia: abono.observacion || abono.referencia || '-'
+    }));
+
+    return [...pagosBase, ...abonosCredito].sort((a, b) => {
+      const fechaA = a.fecha ? new Date(a.fecha).getTime() : 0;
+      const fechaB = b.fecha ? new Date(b.fecha).getTime() : 0;
+      return fechaB - fechaA;
+    });
+  }, [pagos, ventaAbonos, venta, ventaId]);
+
+  const canReturn =
+    Boolean(venta) && ![SALE_STATUS.ANULADA, SALE_STATUS.DEVUELTA_TOTAL].includes(venta.estado);
+
+  const canAnular =
+    Boolean(venta) && venta.estado === SALE_STATUS.EMITIDA && devolucionesRows.length === 0;
+
+  const needsCashShiftForAnular =
+    Number(resumenPago?.contado_centavos || 0) > 0 && !turnoActual?.id;
+
   const isAdmin = user?.rol?.nombre === 'ADMIN';
 
   useEffect(() => {
     if (!venta) return;
 
     const action = searchParams.get('action');
+
     if (action === 'devolucion' && canReturn) {
       setDevolucionOpen(true);
       const nextParams = new URLSearchParams(searchParams);
@@ -192,12 +278,13 @@ export default function VentaDetallePage() {
       await anularVenta(ventaId, {
         motivo: anulacionForm.motivo.trim(),
         novedad: anulacionForm.novedad.trim(),
-        autorizacion: !isAdmin && anulacionForm.usuario.trim() && anulacionForm.password
-          ? {
-              usuario: anulacionForm.usuario.trim(),
-              password: anulacionForm.password
-            }
-          : undefined
+        autorizacion:
+          !isAdmin && anulacionForm.usuario.trim() && anulacionForm.password
+            ? {
+                usuario: anulacionForm.usuario.trim(),
+                password: anulacionForm.password
+              }
+            : undefined
       });
       await loadContext();
       setAnulacionOpen(false);
@@ -215,42 +302,50 @@ export default function VentaDetallePage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <BackButton onClick={() => navigate('/ventas')}>Volver a ventas</BackButton>
 
       <PageHeader
         title={venta ? `Venta #${venta.id}` : `Venta #${ventaId}`}
         description="Detalle operativo completo de la venta, sus pagos, devoluciones y acciones reversibles."
-        actions={(
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={handlePrint} disabled={printing || !venta}>
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handlePrint}
+              disabled={printing || !venta}
+            >
               {printing ? 'Generando ticket...' : 'Ver ticket'}
             </Button>
-            <Button type="button" variant="primary" onClick={() => setDevolucionOpen(true)} disabled={!canReturn}>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => setDevolucionOpen(true)}
+              disabled={!canReturn}
+            >
               Devolver
             </Button>
-            <Button type="button" variant="danger" onClick={() => setAnulacionOpen(true)} disabled={!canAnular}>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => setAnulacionOpen(true)}
+              disabled={!canAnular}
+            >
               Anular
             </Button>
           </div>
-        )}
+        }
       />
 
-      {(localError || error) && (
-        <Alert tone="error">
-          {localError || error}
-        </Alert>
-      )}
+      {(localError || error) && <Alert tone="error">{localError || error}</Alert>}
 
-      {loading && !venta && (
-        <Alert tone="info">
-          Cargando detalle de la venta...
-        </Alert>
-      )}
+      {loading && !venta && <Alert tone="info">Cargando detalle de la venta...</Alert>}
 
       {venta && needsCashShiftForAnular ? (
         <Alert tone="warning">
-          Esta venta incluye efectivo y la anulacion requiere un turno de caja abierto para revertir el saldo.
+          Esta venta incluye efectivo y la anulación requiere un turno de caja abierto para
+          revertir el saldo.
         </Alert>
       ) : null}
 
@@ -265,214 +360,257 @@ export default function VentaDetallePage() {
       {venta && !canAnular ? (
         <Alert tone="info">
           {venta.estado !== SALE_STATUS.EMITIDA
-            ? `La anulacion no esta disponible para el estado ${venta.estado}.`
-            : 'La anulacion ya no esta disponible porque la venta tiene devoluciones registradas.'}
+            ? `La anulación no está disponible para el estado ${venta.estado}.`
+            : 'La anulación ya no está disponible porque la venta tiene devoluciones registradas.'}
         </Alert>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Estado</p>
-          <div className="mt-2"><StatusBadge status={venta?.estado || 'PENDIENTE'} /></div>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Cliente</p>
-          <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{venta?.cliente_nombre || 'Comprobante final'}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Fecha</p>
-          <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{venta?.fecha ? formatDateQuito(venta.fecha) : '-'}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Metodo principal</p>
-          <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{ventaDetalle?.resumen_pago?.label || '-'}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Referencia</p>
-          <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{venta?.referencia || '-'}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Vendedor</p>
-          <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{venta?.usuario_nombre || '-'}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Total</p>
-          <p className="mt-2 text-xl font-bold text-[var(--color-text)]">{formatMoney(venta?.total || 0)}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Costo / margen</p>
-          <p className="mt-2 text-base font-semibold text-[var(--color-text)]">
-            {formatMoney(venta?.total_costo || 0)} / {formatMoney(venta?.total_margen || 0)}
-          </p>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <p className="font-semibold text-[var(--color-text)]">Productos vendidos</p>
-              <p className="text-sm text-[var(--color-text-muted)]">Incluye snapshot de costo y margen por linea.</p>
+      {venta ? (
+        <Card className="p-0">
+          <div className="border-b border-[var(--color-border)] px-5 py-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <StatusBadge status={venta.estado || 'PENDIENTE'} />
             </div>
+          </div>
+
+          <div className="px-5 py-5">
+            <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <div className="space-y-4">
+                <InfoItem label="Cliente" value={venta.cliente_nombre || 'Comprobante final'} />
+                <InfoItem label="Fecha" value={venta.fecha ? formatDateQuito(venta.fecha) : '-'} />
+                <InfoItem label="Vendedor" value={venta.usuario_nombre || '-'} />
+                <InfoItem label="Método principal" value={ventaDetalle?.resumen_pago?.label || '-'} />
+                <InfoItem label="Referencia" value={venta.referencia || '-'} />
+              </div>
+
+              <div className="space-y-4">
+                <div className="overflow-hidden rounded-2xl border border-[var(--color-border)]">
+                  <div className="border-b border-[var(--color-border)] px-4 py-3">
+                    <p className="font-semibold text-[var(--color-text)]">Productos vendidos</p>
+                    <p className="text-sm text-[var(--color-text-muted)]">
+                      Incluye costo unitario al momento de la venta y margen por línea.
+                    </p>
+                  </div>
+
+                  <Tabla>
+                    <TablaCabecera>
+                      <tr>
+                        <TablaCelda as="th">Producto</TablaCelda>
+                        <TablaCelda as="th">Cantidad / unidad</TablaCelda>
+                        <TablaCelda as="th" className="text-right">
+                          P. unit
+                        </TablaCelda>
+                        <TablaCelda as="th" className="text-right">
+                          Total
+                        </TablaCelda>
+                        <TablaCelda as="th" className="text-right">
+                          Costo unit.
+                        </TablaCelda>
+                        <TablaCelda as="th" className="text-right">
+                          Subtotal costo
+                        </TablaCelda>
+                        <TablaCelda as="th" className="text-right">
+                          Margen
+                        </TablaCelda>
+                      </tr>
+                    </TablaCabecera>
+
+                    <TablaCuerpo>
+                      {detalleRows.length === 0 ? (
+                        <EmptyRow colSpan={7} text="No hay líneas registradas en esta venta." />
+                      ) : (
+                        detalleRows.map((line) => (
+                          <TablaFila key={line.id}>
+                            <TablaCelda>
+                              <div>
+                                <p className="font-medium text-[var(--color-text)]">
+                                  {line.producto_codigo} - {line.producto_nombre}
+                                </p>
+                                <p className="text-xs text-[var(--color-text-muted)]">
+                                  {getUnidad(line.unidad_medida || line.unidad)}
+                                </p>
+                              </div>
+                            </TablaCelda>
+                            <TablaCelda>
+                              <span className="whitespace-nowrap">
+                                {formatQtyByUnit(line.cantidad, line.unidad_medida || line.unidad)}
+                              </span>
+                            </TablaCelda>
+                            <TablaCelda className="text-right">
+                              {formatMoney(line.precio_unit || 0)}
+                            </TablaCelda>
+                            <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                              {formatMoney(line.total_linea || 0)}
+                            </TablaCelda>
+                            <TablaCelda className="text-right">
+                              {formatMoney(line.costo_unit_snapshot || 0)}
+                            </TablaCelda>
+                            <TablaCelda className="text-right">
+                              {formatMoney(line.subtotal_costo || 0)}
+                            </TablaCelda>
+                            <TablaCelda className="text-right font-semibold">
+                              {formatMoney(line.margen || 0)}
+                            </TablaCelda>
+                          </TablaFila>
+                        ))
+                      )}
+                    </TablaCuerpo>
+                  </Tabla>
+                </div>
+
+                <div className="flex justify-end">
+                  <div className="w-full max-w-[320px] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4">
+                    <div className="space-y-3">
+                      <TotalsRow
+                        label="Costo total"
+                        value={formatMoney(venta.total_costo || 0)}
+                      />
+                      <TotalsRow
+                        label="Margen total"
+                        value={formatMoney(venta.total_margen || 0)}
+                      />
+                      <div className="border-t border-[var(--color-border)] pt-3">
+                        <TotalsRow
+                          label="Total venta"
+                          value={formatMoney(venta.total || 0)}
+                          strong
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card className="p-0">
+          <div className="border-b border-[var(--color-border)] px-5 py-4">
+            <p className="font-semibold text-[var(--color-text)]">Devoluciones</p>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Historial completo de reversiones asociadas a esta venta.
+            </p>
           </div>
 
           <Tabla>
             <TablaCabecera>
               <tr>
-                <TablaCelda as="th">Producto</TablaCelda>
-                <TablaCelda as="th">Cantidad</TablaCelda>
-                <TablaCelda as="th" className="text-right">P. unit</TablaCelda>
-                <TablaCelda as="th" className="text-right">Total</TablaCelda>
-                <TablaCelda as="th" className="text-right">Costo snap</TablaCelda>
-                <TablaCelda as="th" className="text-right">Subtotal costo</TablaCelda>
-                <TablaCelda as="th" className="text-right">Margen</TablaCelda>
+                <TablaCelda as="th">ID</TablaCelda>
+                <TablaCelda as="th">Fecha</TablaCelda>
+                <TablaCelda as="th">Motivo</TablaCelda>
+                <TablaCelda as="th">Método</TablaCelda>
+                <TablaCelda as="th" className="text-right">
+                  Total
+                </TablaCelda>
               </tr>
             </TablaCabecera>
             <TablaCuerpo>
-              {(ventaDetalle?.detalle || []).map((line) => (
-                <TablaFila key={line.id}>
-                  <TablaCelda>
-                    <div>
-                      <p className="font-medium text-[var(--color-text)]">{line.producto_codigo} - {line.producto_nombre}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">{getUnidad(line.unidad_medida || line.unidad)}</p>
-                    </div>
-                  </TablaCelda>
-                  <TablaCelda>{formatQtyByUnit(line.cantidad, line.unidad_medida || line.unidad)}</TablaCelda>
-                  <TablaCelda className="text-right">{formatMoney(line.precio_unit || 0)}</TablaCelda>
-                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(line.total_linea || 0)}</TablaCelda>
-                  <TablaCelda className="text-right">{formatMoney(line.costo_unit_snapshot || 0)}</TablaCelda>
-                  <TablaCelda className="text-right">{formatMoney(line.subtotal_costo || 0)}</TablaCelda>
-                  <TablaCelda className="text-right">{formatMoney(line.margen || 0)}</TablaCelda>
-                </TablaFila>
-              ))}
-            </TablaCuerpo>
-          </Tabla>
-        </Card>
-
-        <div className="space-y-4">
-          <Card className="p-4">
-            <div className="mb-3">
-              <p className="font-semibold text-[var(--color-text)]">Pagos registrados</p>
-              <p className="text-sm text-[var(--color-text-muted)]">Caja solo se afecta cuando el pago es efectivo.</p>
-            </div>
-
-            <Tabla>
-              <TablaCabecera>
-                <tr>
-                  <TablaCelda as="th">Tipo</TablaCelda>
-                  <TablaCelda as="th">Metodo</TablaCelda>
-                  <TablaCelda as="th">Caja</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Monto</TablaCelda>
-                </tr>
-              </TablaCabecera>
-              <TablaCuerpo>
-                {pagos.length === 0 ? (
-                  <TablaFila>
-                    <TablaCelda colSpan={4} className="text-center text-[var(--color-text-muted)]">
-                      No hay pagos registrados.
-                    </TablaCelda>
-                  </TablaFila>
-                ) : pagos.map((row) => (
-                  <TablaFila key={row.id}>
-                    <TablaCelda>{resolvePaymentTypeLabel(row)}</TablaCelda>
-                    <TablaCelda>{String(row.metodo_codigo || '-').replace(/_/g, ' ')}</TablaCelda>
-                    <TablaCelda>{resolveCashImpact(row)}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(row.monto || 0)}</TablaCelda>
-                  </TablaFila>
-                ))}
-              </TablaCuerpo>
-            </Tabla>
-          </Card>
-
-          <Card className="p-4">
-            <div className="mb-3">
-              <p className="font-semibold text-[var(--color-text)]">Devoluciones</p>
-              <p className="text-sm text-[var(--color-text-muted)]">Historial completo de reversiones asociadas a esta venta.</p>
-            </div>
-
-            <Tabla>
-              <TablaCabecera>
-                <tr>
-                  <TablaCelda as="th">ID</TablaCelda>
-                  <TablaCelda as="th">Fecha</TablaCelda>
-                  <TablaCelda as="th">Motivo</TablaCelda>
-                  <TablaCelda as="th">Metodo</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Total</TablaCelda>
-                </tr>
-              </TablaCabecera>
-              <TablaCuerpo>
-                {devolucionesRows.length === 0 ? (
-                  <TablaFila>
-                    <TablaCelda colSpan={5} className="text-center text-[var(--color-text-muted)]">
-                      Sin devoluciones registradas.
-                    </TablaCelda>
-                  </TablaFila>
-                ) : devolucionesRows.map((row) => (
+              {devolucionesRows.length === 0 ? (
+                <EmptyRow colSpan={5} text="Sin devoluciones registradas." />
+              ) : (
+                devolucionesRows.map((row) => (
                   <TablaFila key={row.id}>
                     <TablaCelda>#{row.id}</TablaCelda>
                     <TablaCelda>{row.fecha ? formatDateQuito(row.fecha) : '-'}</TablaCelda>
                     <TablaCelda>{row.motivo}</TablaCelda>
                     <TablaCelda>{row.metodo_pago_label || '-'}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(row.total_devuelto || 0)}</TablaCelda>
+                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                      {formatMoney(row.total_devuelto || 0)}
+                    </TablaCelda>
                   </TablaFila>
-                ))}
-              </TablaCuerpo>
-            </Tabla>
-          </Card>
-        </div>
-      </div>
-
-      {devolucionDetalleRows.length > 0 ? (
-        <Card className="p-4">
-          <div className="mb-3">
-            <p className="font-semibold text-[var(--color-text)]">Detalle de devoluciones</p>
-            <p className="text-sm text-[var(--color-text-muted)]">Cantidades revertidas por linea original.</p>
-          </div>
-
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">Producto</TablaCelda>
-                <TablaCelda as="th">Cantidad</TablaCelda>
-                <TablaCelda as="th" className="text-right">Subtotal</TablaCelda>
-                <TablaCelda as="th" className="text-right">Costo revertido</TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {devolucionDetalleRows.map((row) => (
-                <TablaFila key={row.id}>
-                  <TablaCelda>{row.producto_codigo} - {row.producto_nombre}</TablaCelda>
-                  <TablaCelda>{formatQtyByUnit(row.cantidad, ventaDetalle?.detalle?.find((line) => line.id === row.venta_detalle_id)?.unidad_medida || 'UND')}</TablaCelda>
-                  <TablaCelda className="text-right">{formatMoney(row.subtotal || 0)}</TablaCelda>
-                  <TablaCelda className="text-right">{formatMoney(row.subtotal_costo || 0)}</TablaCelda>
-                </TablaFila>
-              ))}
+                ))
+              )}
             </TablaCuerpo>
           </Tabla>
         </Card>
-      ) : null}
 
-      {ventaAbonos.length > 0 ? (
-        <Card className="p-4">
-          <div className="mb-3">
-            <p className="font-semibold text-[var(--color-text)]">Pagos del credito</p>
-            <p className="text-sm text-[var(--color-text-muted)]">Abonos aplicados a la cuenta por cobrar de esta venta.</p>
+        <Card className="p-0">
+          <div className="border-b border-[var(--color-border)] px-5 py-4">
+            <p className="font-semibold text-[var(--color-text)]">Movimientos de pago</p>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Historial operativo de cobros y abonos asociados a esta venta.
+            </p>
           </div>
 
           <Tabla>
             <TablaCabecera>
               <tr>
                 <TablaCelda as="th">Fecha</TablaCelda>
-                <TablaCelda as="th">Observacion</TablaCelda>
-                <TablaCelda as="th" className="text-right">Monto</TablaCelda>
+                <TablaCelda as="th">Movimiento</TablaCelda>
+                <TablaCelda as="th">Método</TablaCelda>
+                <TablaCelda as="th">Caja</TablaCelda>
+                <TablaCelda as="th" className="text-right">
+                  Monto
+                </TablaCelda>
               </tr>
             </TablaCabecera>
             <TablaCuerpo>
-              {ventaAbonos.map((abono) => (
-                <TablaFila key={abono.id}>
-                  <TablaCelda>{formatDateQuito(abono.fecha || abono.fecha_emision || venta?.fecha)}</TablaCelda>
-                  <TablaCelda>{abono.observacion || abono.referencia || '-'}</TablaCelda>
-                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(abono.monto || 0)}</TablaCelda>
+              {movimientosPagoRows.length === 0 ? (
+                <EmptyRow colSpan={5} text="No hay movimientos de pago registrados." />
+              ) : (
+                movimientosPagoRows.map((row) => (
+                  <TablaFila key={row.id}>
+                    <TablaCelda>{row.fecha ? formatDateQuito(row.fecha) : '-'}</TablaCelda>
+                    <TablaCelda>
+                      <div>
+                        <p className="font-medium text-[var(--color-text)]">{row.movimiento}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">{row.referencia || '-'}</p>
+                      </div>
+                    </TablaCelda>
+                    <TablaCelda>{row.metodo}</TablaCelda>
+                    <TablaCelda>{row.caja}</TablaCelda>
+                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                      {formatMoney(row.monto || 0)}
+                    </TablaCelda>
+                  </TablaFila>
+                ))
+              )}
+            </TablaCuerpo>
+          </Tabla>
+        </Card>
+      </div>
+
+      {devolucionDetalleRows.length > 0 ? (
+        <Card className="p-0">
+          <div className="border-b border-[var(--color-border)] px-5 py-4">
+            <p className="font-semibold text-[var(--color-text)]">Detalle de devoluciones</p>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Cantidades revertidas por línea original.
+            </p>
+          </div>
+
+          <Tabla>
+            <TablaCabecera>
+              <tr>
+                <TablaCelda as="th">Producto</TablaCelda>
+                <TablaCelda as="th">Cantidad / unidad</TablaCelda>
+                <TablaCelda as="th" className="text-right">
+                  Subtotal
+                </TablaCelda>
+                <TablaCelda as="th" className="text-right">
+                  Costo revertido
+                </TablaCelda>
+              </tr>
+            </TablaCabecera>
+            <TablaCuerpo>
+              {devolucionDetalleRows.map((row) => (
+                <TablaFila key={row.id}>
+                  <TablaCelda>{row.producto_codigo} - {row.producto_nombre}</TablaCelda>
+                  <TablaCelda>
+                    <span className="whitespace-nowrap">
+                      {formatQtyByUnit(
+                        row.cantidad,
+                        ventaDetalle?.detalle?.find((line) => line.id === row.venta_detalle_id)
+                          ?.unidad_medida || 'UND'
+                      )}
+                    </span>
+                  </TablaCelda>
+                  <TablaCelda className="text-right">{formatMoney(row.subtotal || 0)}</TablaCelda>
+                  <TablaCelda className="text-right">
+                    {formatMoney(row.subtotal_costo || 0)}
+                  </TablaCelda>
                 </TablaFila>
               ))}
             </TablaCuerpo>
@@ -491,25 +629,34 @@ export default function VentaDetallePage() {
         onSubmit={handleSubmitDevolucion}
       />
 
-      <Modal open={anulacionOpen} onClose={() => setAnulacionOpen(false)} maxWidthClass="max-w-2xl" panelClassName="p-5">
+      <Modal
+        open={anulacionOpen}
+        onClose={() => setAnulacionOpen(false)}
+        maxWidthClass="max-w-2xl"
+        panelClassName="p-5"
+      >
         <div className="space-y-4">
           <div className="ui-modal-header">
             <div className="ui-modal-header-copy">
-              <h3 className="text-lg font-semibold text-[var(--color-text)]">Anular venta #{venta?.id || ventaId}</h3>
+              <h3 className="text-lg font-semibold text-[var(--color-text)]">
+                Anular venta #{venta?.id || ventaId}
+              </h3>
               <p className="text-sm text-[var(--color-text-muted)]">
                 La anulación revierte inventario, caja y crédito cuando el backend lo permite.
               </p>
             </div>
-            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setAnulacionOpen(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ui-modal-close-plain"
+              onClick={() => setAnulacionOpen(false)}
+            >
               X
             </Button>
           </div>
 
-          {(localError || error) && (
-            <Alert tone="error">
-              {localError || error}
-            </Alert>
-          )}
+          {(localError || error) && <Alert tone="error">{localError || error}</Alert>}
 
           {needsCashShiftForAnular ? (
             <Alert tone="warning">
@@ -527,7 +674,10 @@ export default function VentaDetallePage() {
               }}
               placeholder="Motivo de la anulación"
             />
-            {anulacionFormErrors.errors.motivo ? <p className="text-sm text-[var(--color-danger)]">{anulacionFormErrors.errors.motivo}</p> : null}
+            {anulacionFormErrors.errors.motivo ? (
+              <p className="text-sm text-[var(--color-danger)]">{anulacionFormErrors.errors.motivo}</p>
+            ) : null}
+
             <Textarea
               value={anulacionForm.novedad}
               error={Boolean(anulacionFormErrors.errors.novedad)}
@@ -538,7 +688,9 @@ export default function VentaDetallePage() {
               placeholder="Novedad operativa obligatoria"
               rows={4}
             />
-            {anulacionFormErrors.errors.novedad ? <p className="text-sm text-[var(--color-danger)]">{anulacionFormErrors.errors.novedad}</p> : null}
+            {anulacionFormErrors.errors.novedad ? (
+              <p className="text-sm text-[var(--color-danger)]">{anulacionFormErrors.errors.novedad}</p>
+            ) : null}
           </div>
 
           {!isAdmin ? (
@@ -562,8 +714,16 @@ export default function VentaDetallePage() {
                 }}
                 placeholder="Clave ADMIN"
               />
-              {anulacionFormErrors.errors.usuario ? <p className="text-sm text-[var(--color-danger)] md:col-span-2">{anulacionFormErrors.errors.usuario}</p> : null}
-              {anulacionFormErrors.errors.password ? <p className="text-sm text-[var(--color-danger)] md:col-span-2">{anulacionFormErrors.errors.password}</p> : null}
+              {anulacionFormErrors.errors.usuario ? (
+                <p className="text-sm text-[var(--color-danger)] md:col-span-2">
+                  {anulacionFormErrors.errors.usuario}
+                </p>
+              ) : null}
+              {anulacionFormErrors.errors.password ? (
+                <p className="text-sm text-[var(--color-danger)] md:col-span-2">
+                  {anulacionFormErrors.errors.password}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -571,7 +731,12 @@ export default function VentaDetallePage() {
             <Button type="button" variant="secondary" onClick={() => setAnulacionOpen(false)}>
               Cancelar
             </Button>
-            <Button type="button" variant="danger" onClick={handleSubmitAnulacion} disabled={submittingAnulacion}>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={handleSubmitAnulacion}
+              disabled={submittingAnulacion}
+            >
               {submittingAnulacion ? 'Anulando...' : 'Confirmar anulación'}
             </Button>
           </div>

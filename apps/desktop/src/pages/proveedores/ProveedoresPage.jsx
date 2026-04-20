@@ -50,7 +50,7 @@ export default function ProveedoresPage() {
   const navigate = useNavigate();
 
   const [pagina, setPagina] = useState(1);
-  const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS' });
+  const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', credito: 'TODOS' });
   const [proveedorModal, setProveedorModal] = useState({ open: false, mode: 'create' });
   const [proveedorForm, setProveedorForm] = useState(emptyProveedorForm);
   const [feedback, setFeedback] = useState('');
@@ -64,7 +64,8 @@ export default function ProveedoresPage() {
     listar({
       include_cxp: 1,
       search: filtros.search || undefined,
-      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado
+      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
+      tiene_credito: filtros.credito === 'TODOS' ? undefined : filtros.credito
     });
   };
 
@@ -240,7 +241,7 @@ export default function ProveedoresPage() {
             className="w-full xl:w-auto"
             onClick={() => {
               setPagina(1);
-              setFiltros({ search: '', estado: 'TODOS' });
+              setFiltros({ search: '', estado: 'TODOS', credito: 'TODOS' });
             }}
           >
             Limpiar filtros
@@ -255,6 +256,17 @@ export default function ProveedoresPage() {
             <option value="TODOS">Todos</option>
             <option value="1">Activo</option>
             <option value="0">Inactivo</option>
+          </Select>
+        </Field>
+
+        <Field label="Crédito">
+          <Select
+            value={filtros.credito}
+            onChange={(e) => onChangeFiltro('credito', e.target.value)}
+          >
+            <option value="TODOS">Todos</option>
+            <option value="1">Con crédito</option>
+            <option value="0">Sin crédito</option>
           </Select>
         </Field>
       </FiltersBar>

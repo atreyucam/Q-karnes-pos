@@ -35,11 +35,16 @@ const PAGE_SIZE = 8;
 const emptyClienteForm = {
   id: null,
   nombre: '',
+  cedula: '',
   telefono: '',
   direccion: '',
   observacion: '',
   activo: true
 };
+
+function sanitizeCedulaInput(value) {
+  return String(value || '').replace(/[^0-9]/g, '').slice(0, 10);
+}
 
 export default function ClienteDetallePage() {
   const { id } = useParams();
@@ -159,6 +164,7 @@ export default function ClienteDetallePage() {
     setClienteForm({
       id: clienteDetalle.id,
       nombre: clienteDetalle.nombre || '',
+      cedula: clienteDetalle.cedula || '',
       telefono: clienteDetalle.telefono || '',
       direccion: clienteDetalle.direccion || '',
       observacion: clienteDetalle.observacion || '',
@@ -175,6 +181,8 @@ export default function ClienteDetallePage() {
   const onSaveCliente = async () => {
     const nextErrors = {};
     if (!clienteForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (!clienteForm.cedula.trim()) nextErrors.cedula = 'Este campo es obligatorio.';
+    else if (!/^\d{10}$/.test(clienteForm.cedula)) nextErrors.cedula = 'La cédula debe tener 10 dígitos numéricos.';
     if (!clienteFormErrors.setErrors(nextErrors)) return;
 
     const saldoPendiente = Number(resumen?.saldo || 0);
@@ -188,6 +196,7 @@ export default function ClienteDetallePage() {
 
     const payload = {
       nombre: clienteForm.nombre.trim(),
+      cedula: clienteForm.cedula.trim(),
       telefono: clienteForm.telefono.trim() || null,
       direccion: clienteForm.direccion.trim() || null,
       observacion: clienteForm.observacion.trim() || null,
@@ -272,33 +281,45 @@ export default function ClienteDetallePage() {
 
       {clienteDetalle && (
         <Card className="p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-3 text-sm">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_280px]">
+            <div className="space-y-3 p-1 text-sm">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Cliente</span>
                 <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.nombre}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Teléfono</span>
-                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.telefono || '-'}</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Cédula</span>
+                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.cedula || '-'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Dirección</span>
+                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.direccion || '-'}</span>
               </div>
             </div>
 
-            <div className="space-y-3 text-sm">
+            <div className="space-y-3 p-1 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Teléfono</span>
+                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.telefono || '-'}</span>
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</span>
                 <StatusBadge status={clienteDetalle.activo ? 'ACTIVO' : 'INACTIVO'} />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Dirección</span>
-                <span className="text-[var(--color-text)]">{clienteDetalle.direccion || '-'}</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Observación</span>
+                <span className="text-[var(--color-text)]">{clienteDetalle.observacion || '-'}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Saldo crédito</span>
-                <span className={`text-lg font-bold ${Number(resumen?.saldo || 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
-                  {formatMoney(resumen?.saldo)}
-                </span>
-              </div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Saldo crédito</p>
+              <p className={`mt-3 text-3xl font-extrabold ${Number(resumen?.saldo || 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
+                {formatMoney(resumen?.saldo)}
+              </p>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Balance actual del crédito pendiente del cliente.
+              </p>
             </div>
           </div>
         </Card>
@@ -398,6 +419,18 @@ export default function ClienteDetallePage() {
                   setClienteForm((state) => ({ ...state, nombre: e.target.value }));
                 }}
                 placeholder="Ej: Restaurante El Buen Sabor"
+              />
+            </Field>
+
+            <Field label="Cédula" required error={clienteFormErrors.errors.cedula}>
+              <Input
+                inputMode="numeric"
+                value={clienteForm.cedula}
+                onChange={(e) => {
+                  clienteFormErrors.clearFieldError('cedula');
+                  setClienteForm((state) => ({ ...state, cedula: sanitizeCedulaInput(e.target.value) }));
+                }}
+                placeholder="0123456789"
               />
             </Field>
 

@@ -11,8 +11,11 @@ const { moneyRound } = require('../../helpers/money');
 const { computeDebtStatus } = require('../../helpers/credit');
 const { CASH_MOVEMENT_TYPES, buildCashMovementPayload } = require('../caja/cashMovement');
 
+const cedulaSchema = z.string().regex(/^\d{10}$/, 'La cédula debe tener 10 dígitos numéricos');
+
 const createSchema = z.object({
   nombre: z.string().min(1),
+  cedula: cedulaSchema.optional().nullable(),
   telefono: z.string().trim().optional().nullable(),
   direccion: z.string().trim().optional().nullable(),
   observacion: z.string().trim().optional().nullable(),
@@ -22,6 +25,7 @@ const createSchema = z.object({
 
 const updateSchema = z.object({
   nombre: z.string().min(1).optional(),
+  cedula: cedulaSchema.optional().nullable(),
   telefono: z.string().trim().optional().nullable(),
   direccion: z.string().trim().optional().nullable(),
   observacion: z.string().trim().optional().nullable(),
@@ -104,6 +108,7 @@ async function create(body) {
 
   return repository.create({
     nombre: parsed.data.nombre,
+    cedula: parsed.data.cedula || null,
     telefono: parsed.data.telefono || null,
     direccion: parsed.data.direccion || null,
     observacion: parsed.data.observacion || null,

@@ -34,13 +34,18 @@ export default function VentasListPage() {
   const listar = useVentasStore((s) => s.listar);
   const cargarTicket = useVentasStore((s) => s.cargarTicket);
 
-  const [filters, setFilters] = useState({ search: '', estado: 'TODOS', metodo: 'TODOS' });
+  const [filters, setFilters] = useState({ search: '', estado: 'TODOS', metodo: 'TODOS', desde: '', hasta: '' });
   const [pagina, setPagina] = useState(1);
   const [printingSaleId, setPrintingSaleId] = useState(null);
 
   useEffect(() => {
-    listar();
-  }, [listar]);
+    listar({
+      search: filters.search || undefined,
+      estado: filters.estado === 'TODOS' ? undefined : filters.estado,
+      desde: filters.desde || undefined,
+      hasta: filters.hasta || undefined
+    });
+  }, [filters.desde, filters.estado, filters.hasta, filters.search, listar]);
 
   useEffect(() => {
     setPagina(1);
@@ -113,7 +118,7 @@ export default function VentasListPage() {
           <Button
             variant="secondary"
             className="w-full xl:w-auto"
-            onClick={() => setFilters({ search: '', estado: 'TODOS', metodo: 'TODOS' })}
+            onClick={() => setFilters({ search: '', estado: 'TODOS', metodo: 'TODOS', desde: '', hasta: '' })}
           >
             Limpiar filtros
           </Button>
@@ -131,6 +136,22 @@ export default function VentasListPage() {
               </option>
             ))}
           </Select>
+        </Field>
+
+        <Field label="Desde">
+          <Input
+            type="date"
+            value={filters.desde}
+            onChange={(event) => setFilters((state) => ({ ...state, desde: event.target.value }))}
+          />
+        </Field>
+
+        <Field label="Hasta">
+          <Input
+            type="date"
+            value={filters.hasta}
+            onChange={(event) => setFilters((state) => ({ ...state, hasta: event.target.value }))}
+          />
         </Field>
 
         <Field label="Método">

@@ -31,6 +31,8 @@ const movementFilterMap = {
   ])
 };
 
+const MAX_MANUAL_CASH_AMOUNT = 5000;
+
 const abrirSchema = z.object({
   fondo_inicial: z.number().nonnegative(),
   observacion: z.string().optional()
@@ -39,12 +41,16 @@ const abrirSchema = z.object({
 const manualSchema = z.object({
   tipo: z.enum(['INGRESO', 'EGRESO']),
   concepto: z.string().min(1),
-  monto: z.number().positive(),
+  monto: z.number()
+    .positive('El monto debe ser mayor a 0')
+    .max(MAX_MANUAL_CASH_AMOUNT, `El monto no puede superar ${MAX_MANUAL_CASH_AMOUNT}`),
   observacion: z.string().trim().optional()
 });
 
 const corteZSchema = z.object({
-  efectivo_contado: z.number().nonnegative(),
+  efectivo_contado: z.number()
+    .nonnegative('El efectivo contado no puede ser negativo')
+    .max(MAX_MANUAL_CASH_AMOUNT, `El efectivo contado no puede superar ${MAX_MANUAL_CASH_AMOUNT}`),
   observacion: z.string().optional(),
   autorizacion: z.object({
     usuario: z.string().min(1),

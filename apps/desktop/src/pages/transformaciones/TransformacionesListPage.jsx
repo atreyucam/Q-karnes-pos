@@ -24,7 +24,7 @@ import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatQtyByUnit } from '../../lib/formatQty';
 import { useAuthStore } from '../../stores/authStore';
 import { useTransformacionesStore } from '../../stores/transformacionesStore';
-import { getTransformacionStatusHelp, getTransformacionStatusLabel } from './transformacionesUi';
+import { getTransformacionStatusLabel } from './transformacionesUi';
 
 const PAGE_SIZE = 12;
 
@@ -277,12 +277,13 @@ export default function TransformacionesListPage() {
                     <p className="text-xs text-text-muted">{row.insumo?.producto_codigo || '-'}</p>
                   </div>
                 </TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.metricas?.total_consumido ?? row.resumen?.entrada_total, row.insumo?.unidad_medida, { fixedWeight: true })}</TablaCelda>
+                <TablaCelda>
+                  {`${formatQtyByUnit(row.metricas?.total_consumido ?? row.resumen?.entrada_total, row.insumo?.unidad_medida, { fixedWeight: true })} ${row.insumo?.unidad_medida || ''}`.trim()}
+                </TablaCelda>
                 <TablaCelda>
                   <StatusBadge status={row.estado}>
                     {getTransformacionStatusLabel(row.estado)}
                   </StatusBadge>
-                  <p className="mt-2 max-w-[16rem] text-xs text-text-muted">{getTransformacionStatusHelp(row.estado)}</p>
                 </TablaCelda>
                 <TablaCelda>{row.actor?.nombre || row.actor?.usuario || '-'}</TablaCelda>
                 <TablaCelda>

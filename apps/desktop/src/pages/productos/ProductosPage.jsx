@@ -4,7 +4,6 @@ import {
   Alert,
   Button,
   Card,
-  Checkbox,
   ConfirmDialog,
   EmptyState,
   Field,
@@ -139,6 +138,7 @@ export default function ProductosPage() {
   const [localError, setLocalError] = useState('');
   const [feedback, setFeedback] = useState('');
   const [categoriaManagerOpen, setCategoriaManagerOpen] = useState(false);
+  const [categoriaEditorOpen, setCategoriaEditorOpen] = useState(false);
   const [categoriaForm, setCategoriaForm] = useState(emptyCategoriaForm);
   const [categoriaMode, setCategoriaMode] = useState('create');
   const [categoriaError, setCategoriaError] = useState('');
@@ -192,7 +192,12 @@ export default function ProductosPage() {
   }, [allProductos]);
 
   const productosOrdenados = useMemo(
-    () => [...productos].sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })),
+    () => [...productos].sort((a, b) => {
+      const aEnMinimo = Number(a.stock_actual || 0) <= Number(a.stock_minimo || 0) ? 0 : 1;
+      const bEnMinimo = Number(b.stock_actual || 0) <= Number(b.stock_minimo || 0) ? 0 : 1;
+      if (aEnMinimo !== bEnMinimo) return aEnMinimo - bEnMinimo;
+      return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
+    }),
     [productos]
   );
 
@@ -275,16 +280,22 @@ export default function ProductosPage() {
 
   const openCategoriaManager = () => {
     setCategoriaManagerOpen(true);
-    setCategoriaMode('create');
-    setCategoriaForm(emptyCategoriaForm);
     setCategoriaError('');
   };
 
   const closeCategoriaManager = () => {
     setCategoriaManagerOpen(false);
+    setCategoriaEditorOpen(false);
     setCategoriaMode('create');
     setCategoriaForm(emptyCategoriaForm);
     setCategoriaError('');
+  };
+
+  const openCategoriaCreateModal = () => {
+    setCategoriaMode('create');
+    setCategoriaForm(emptyCategoriaForm);
+    setCategoriaError('');
+    setCategoriaEditorOpen(true);
   };
 
   const openCategoriaEdit = (categoria) => {
@@ -295,7 +306,7 @@ export default function ProductosPage() {
       activo: Boolean(categoria.activo ?? true)
     });
     setCategoriaError('');
-    setCategoriaManagerOpen(true);
+    setCategoriaEditorOpen(true);
   };
 
   const onSaveProducto = async () => {
@@ -395,6 +406,7 @@ export default function ProductosPage() {
       }
       await refreshCategorias();
       await refreshList();
+      setCategoriaEditorOpen(false);
       setCategoriaMode('create');
       setCategoriaForm(emptyCategoriaForm);
       setCategoriaFeedback(categoriaMode === 'edit' ? 'Categoría actualizada correctamente.' : 'Categoría creada correctamente.');
@@ -546,9 +558,9 @@ export default function ProductosPage() {
                   <TablaCelda as="th">Código</TablaCelda>
                   <TablaCelda as="th">Nombre</TablaCelda>
                   <TablaCelda as="th">Categoría</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
                   <TablaCelda as="th">Unidad</TablaCelda>
                   <TablaCelda as="th" className="text-right">Precio venta</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
                   <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
                   <TablaCelda as="th">Roles</TablaCelda>
                   <TablaCelda as="th">Estado</TablaCelda>
@@ -586,11 +598,11 @@ export default function ProductosPage() {
                         </div>
                       </TablaCelda>
                       <TablaCelda>{producto.categoria_nombre || 'Sin categoría'}</TablaCelda>
-                      <TablaCelda>{unidadMedida}</TablaCelda>
-                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(producto.precio_venta)}</TablaCelda>
                       <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
                         {formatQtyByUnit(producto.stock_actual, unidadMedida)}
                       </TablaCelda>
+                      <TablaCelda>{unidadMedida}</TablaCelda>
+                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(producto.precio_venta)}</TablaCelda>
                       <TablaCelda className="text-right">{formatMoney(producto.costo_promedio)}</TablaCelda>
                       <TablaCelda>
                         <div className="flex flex-wrap gap-1.5">
@@ -735,27 +747,34 @@ export default function ProductosPage() {
 
           <div className="md:col-span-2">
             <label className={labelClassName()}>Roles del producto</label>
-            <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <div className="mt-2 grid gap-3 md:grid-cols-2">
               {PRODUCT_ROLE_OPTIONS.map((role) => (
                 <div
                   key={role.key}
-                  className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
+                  className={`rounded-lg border px-3 py-3 ${
                     productoForm.es_merma && role.key !== 'es_merma'
-                      ? 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
-                      : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]'
+                      ? 'border-[var(--color-border)] bg-[var(--color-surface-muted)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-surface)]'
                   }`}
                 >
-                  <Checkbox
+                  <Switch
                     checked={Boolean(productoForm[role.key])}
                     disabled={productoForm.es_merma && role.key !== 'es_merma'}
-                    onChange={(e) => onToggleRole(role.key, e.target.checked)}
+                    onChange={(checked) => onToggleRole(role.key, checked)}
+                    label={role.label}
+                    description={role.hint}
                   />
-                  <div>
-                    <p className="font-semibold text-[var(--color-text)]">{role.label}</p>
-                    <p className="text-xs text-[var(--color-text-muted)]">{role.hint}</p>
-                  </div>
                 </div>
               ))}
+
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
+                <Switch
+                  checked={productoForm.activo}
+                  onChange={(checked) => setProductoForm((prev) => ({ ...prev, activo: checked }))}
+                  label="Producto activo"
+                  description="Si está inactivo no aparece para nuevas operaciones."
+                />
+              </div>
             </div>
             <p className="mt-2 text-xs text-[var(--color-text-muted)]">
               Debe existir al menos un rol activo. `Merma` es exclusivo y bloquea los demás roles mientras esté activo.
@@ -769,15 +788,7 @@ export default function ProductosPage() {
           )}
         </div>
 
-        <div className="mt-5 flex justify-between gap-2">
-          <div className="flex items-center">
-            <Switch
-              checked={productoForm.activo}
-              onChange={(checked) => setProductoForm((prev) => ({ ...prev, activo: checked }))}
-              label="Producto activo"
-              description="Si está inactivo no aparece para nuevas operaciones."
-            />
-          </div>
+        <div className="mt-5 flex justify-end gap-2">
           <div className="flex gap-2">
             <Button variant="secondary" onClick={closeProductoModal}>
               Cancelar
@@ -797,68 +808,23 @@ export default function ProductosPage() {
                 <h3 className="text-lg font-semibold text-[var(--color-text)]">Gestionar categorías</h3>
                 <p className="text-sm text-[var(--color-text-muted)]">Crea, renombra, activa, desactiva o elimina categorías sin productos asociados.</p>
               </div>
+              <div className="flex items-center gap-2">
+                <Button onClick={openCategoriaCreateModal}>
+                  Nueva categoría
+                </Button>
               <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeCategoriaManager}>
                 X
               </Button>
+              </div>
             </div>
           </div>
 
-          <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[320px_minmax(0,1fr)]">
-            <div className="border-b border-[var(--color-border)] px-5 py-5 lg:border-b-0 lg:border-r">
-              <div className="space-y-4">
-                <div>
-                  <h4 className="text-sm font-semibold text-[var(--color-text)]">
-                    {categoriaMode === 'edit' ? 'Editar categoría' : 'Nueva categoría'}
-                  </h4>
-                  <p className="text-xs text-[var(--color-text-muted)]">Los cambios se reflejan en los selectores del sistema.</p>
-                </div>
-
-                {(categoriaError || categoriaFeedback) && (
-                  <Alert tone={categoriaError ? 'error' : 'success'}>
-                    {categoriaError || categoriaFeedback}
-                  </Alert>
-                )}
-
-                <Field label="Nombre">
-                  <Input
-                    value={categoriaForm.nombre}
-                    onChange={(e) => setCategoriaForm((prev) => ({ ...prev, nombre: e.target.value }))}
-                    placeholder="Nombre de categoría"
-                  />
-                </Field>
-
-                {categoriaMode === 'edit' && (
-                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-                    <Switch
-                      checked={categoriaForm.activo}
-                      onChange={(checked) => setCategoriaForm((prev) => ({ ...prev, activo: checked }))}
-                      label="Categoría activa"
-                      description="Si está inactiva deja de aparecer como opción en formularios."
-                    />
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={onSaveCategoria} disabled={categoriaSaving}>
-                    {categoriaSaving ? 'Guardando...' : categoriaMode === 'edit' ? 'Guardar cambios' : 'Crear categoría'}
-                  </Button>
-                  {categoriaMode === 'edit' && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setCategoriaMode('create');
-                        setCategoriaForm(emptyCategoriaForm);
-                        setCategoriaError('');
-                      }}
-                    >
-                      Cancelar edición
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="min-h-0 overflow-auto px-5 py-5">
+          <div className="min-h-0 overflow-auto px-5 py-5">
+            {(categoriaError || categoriaFeedback) && (
+              <Alert tone={categoriaError ? 'error' : 'success'} className="mb-4">
+                {categoriaError || categoriaFeedback}
+              </Alert>
+            )}
               <Tabla>
                 <TablaCabecera>
                   <tr>
@@ -924,7 +890,48 @@ export default function ProductosPage() {
                   )}
                 </TablaCuerpo>
               </Tabla>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={categoriaEditorOpen} onClose={() => setCategoriaEditorOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+              <h3 className="text-lg font-semibold text-[var(--color-text)]">
+                {categoriaMode === 'edit' ? 'Editar categoría' : 'Nueva categoría'}
+              </h3>
+              <p className="text-sm text-[var(--color-text-muted)]">Los cambios se reflejan en los selectores del sistema.</p>
             </div>
+            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setCategoriaEditorOpen(false)}>
+              X
+            </Button>
+          </div>
+
+          <Field label="Nombre">
+            <Input
+              value={categoriaForm.nombre}
+              onChange={(e) => setCategoriaForm((prev) => ({ ...prev, nombre: e.target.value }))}
+              placeholder="Nombre de categoría"
+            />
+          </Field>
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+            <Switch
+              checked={categoriaForm.activo}
+              onChange={(checked) => setCategoriaForm((prev) => ({ ...prev, activo: checked }))}
+              label="Categoría activa"
+              description="Si está inactiva deja de aparecer como opción en formularios."
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCategoriaEditorOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={onSaveCategoria} disabled={categoriaSaving}>
+              {categoriaSaving ? 'Guardando...' : categoriaMode === 'edit' ? 'Guardar cambios' : 'Crear categoría'}
+            </Button>
           </div>
         </div>
       </Modal>

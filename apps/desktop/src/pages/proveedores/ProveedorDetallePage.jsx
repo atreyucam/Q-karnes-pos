@@ -291,8 +291,8 @@ export default function ProveedorDetallePage() {
 
       {proveedorDetalle && (
         <Card className="p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-3 text-sm">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_280px]">
+            <div className="space-y-3 p-1 text-sm">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Proveedor</span>
                 <span className="font-semibold text-[var(--color-text)]">{proveedorDetalle.nombre}</span>
@@ -307,7 +307,7 @@ export default function ProveedorDetallePage() {
               </div>
             </div>
 
-            <div className="space-y-3 text-sm">
+            <div className="space-y-3 p-1 text-sm">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</span>
                 <StatusBadge status={proveedorDetalle.activo ? 'ACTIVO' : 'INACTIVO'} />
@@ -319,11 +319,19 @@ export default function ProveedorDetallePage() {
                 </StatusBadge>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Saldo pendiente</span>
-                <span className={`text-lg font-bold ${Number(resumenCxp?.saldo || 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
-                  {formatMoney(resumenCxp?.saldo)}
-                </span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Observación</span>
+                <span className="text-[var(--color-text)]">{proveedorDetalle.observacion || '-'}</span>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Saldo pendiente</p>
+              <p className={`mt-3 text-3xl font-extrabold ${Number(resumenCxp?.saldo || 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
+                {formatMoney(resumenCxp?.saldo)}
+              </p>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Balance actual de cuentas por pagar del proveedor.
+              </p>
             </div>
           </div>
         </Card>
