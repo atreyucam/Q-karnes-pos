@@ -14,3 +14,6 @@ docs/
 apps/api/data/test-runs/
 .codex-tmp/
 test-results/
+data/
+.codex-tmp/
+test-results/
