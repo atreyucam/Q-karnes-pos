@@ -5,13 +5,26 @@ const auditoriaService = require('../auditoria/auditoria.service');
 const configuracionService = require('../configuracion/configuracion.service');
 const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
-const { moneyRound } = require('../../helpers/money');
 const { addDays, toDateOnly } = require('../../helpers/credit');
 const { currentDateTimeInEcuador } = require('../../helpers/ecuadorTime');
 const { assertQuantityByUnit } = require('../../helpers/quantityRules');
 const { getProductoOperableById } = require('../../helpers/productValidation');
 const { toLineError, throwLineValidationError } = require('../../helpers/domainErrors');
-const { calculateWeightedAverageCost, resolveReceptionCost } = require('../../helpers/inventoryCosting');
+const {
+  buildInventoryMovement,
+  buildInventoryValuation,
+  resolveReceptionCostExact
+} = require('../../helpers/inventoryLedger');
+const {
+  quantityToBase,
+  moneyToCents,
+  centsToMoney,
+  centsToUnitCost
+} = require('../../helpers/unitPolicy');
+const {
+  resolveProductInventory,
+  buildProductInventoryUpdatePayload
+} = require('../../helpers/inventoryState');
 const { CASH_MOVEMENT_TYPES, buildCashMovementPayload } = require('../caja/cashMovement');
 
 const createOrderSchema = z.object({
@@ -149,7 +162,7 @@ function decorateRecepcionesData(data) {
     recepciones: (data.recepciones || []).map((row) => ({
       ...row,
       fecha_recepcion: row.fecha,
-      documento_respaldo: row.numero_factura || row.factura_id || null
+      documento_respaldo: row.documento_respaldo || row.numero_factura || row.factura_id || null
     })),
     detalles: data.detalles || []
   };
@@ -326,6 +339,7 @@ async function receiveOrden(ordenId, body, actorUser) {
 
   return db.transaction(async (trx) => {
     const numeroDocumento = String(parsed.data.documento_respaldo || parsed.data.factura.numero_factura || '').trim();
+    const numeroFactura = String(parsed.data.factura.numero_factura || parsed.data.documento_respaldo || '').trim();
     const fechaRecepcion = parseCompraDateTimeInput(parsed.data.fecha_recepcion, 'fecha_recepcion', currentDateTimeInEcuador());
     const schemaSupport = await repository.resolveSchemaSupport(trx);
     const config = await configuracionService.getRuntimeConfig(trx);
@@ -349,7 +363,7 @@ async function receiveOrden(ordenId, body, actorUser) {
 
     const facturaExistente = await repository.getFacturaByProveedorAndNumero(
       proveedorId,
-      numeroDocumento,
+      numeroFactura,
       trx
     );
     if (facturaExistente) {
@@ -417,7 +431,7 @@ async function receiveOrden(ordenId, body, actorUser) {
         validatedReceptionItems.push({
           ...item,
           cantidad,
-          costing: resolveReceptionCost({
+          costing: resolveReceptionCostExact({
             quantity: cantidad,
             unitCost: item.costo_unit_real,
             totalCost: item.costo_total_real,
@@ -442,6 +456,7 @@ async function receiveOrden(ordenId, body, actorUser) {
     let total = 0;
     const receptionDetails = [];
     const inventoryMoves = [];
+    const valuationRows = [];
     const supplierHistory = [];
 
     for (const item of validatedReceptionItems) {
@@ -449,43 +464,76 @@ async function receiveOrden(ordenId, body, actorUser) {
       const newRecibida = n(detail.cantidad_recibida) + item.cantidad;
       await repository.updateOrderDetailReceived(detail.id, newRecibida, trx);
 
-      const stockAnterior = n(product.stock_actual);
-      const costoAnterior = n(product.costo_promedio);
+      const inventoryProduct = resolveProductInventory(product);
       const cantidadRecibida = n(item.cantidad);
-      const costoReal = n(item.costing.unitCost);
-      const costoTotalReal = n(item.costing.totalCost);
-
-      const weighted = calculateWeightedAverageCost({
-        currentStock: stockAnterior,
-        currentCost: costoAnterior,
-        incomingQty: cantidadRecibida,
-        incomingTotalCost: costoTotalReal
+      const cantidadBase = quantityToBase(cantidadRecibida, inventoryProduct.unidad_operativa, {
+        field: 'cantidad',
+        requirePositive: true,
+        allowZero: false,
+        details: { product_id: product.id, codigo: product.codigo || null }
+      });
+      const totalCostExact = n(item.costing.totalCost);
+      const costoTotalCentavos = moneyToCents(item.costing.totalCost, 'costo_total_real');
+      const nextStockBase = inventoryProduct.stock_actual_base + cantidadBase;
+      const nextValueCents = inventoryProduct.valor_inventario_centavos + costoTotalCentavos;
+      const currentVisibleStock = n(inventoryProduct.stock_actual);
+      const currentVisibleAverageCost = n(product.costo_promedio ?? inventoryProduct.costo_promedio);
+      const nextVisibleStock = currentVisibleStock + cantidadRecibida;
+      const nextVisibleAverageCost = nextVisibleStock > 0
+        ? (((currentVisibleStock * currentVisibleAverageCost) + totalCostExact) / nextVisibleStock)
+        : 0;
+      const inventoryUpdate = buildProductInventoryUpdatePayload({
+        unit: inventoryProduct.unidad_operativa,
+        stockBase: nextStockBase,
+        stockMinBase: inventoryProduct.stock_minimo_base,
+        valueCents: nextValueCents,
+        visibleAverageCost: nextVisibleAverageCost
       });
 
-      await repository.setProductStockAndCost(detail.producto_id, weighted.nextStock, weighted.nextCost, trx);
+      await repository.setProductStockAndCost(detail.producto_id, inventoryUpdate, trx);
 
-      const subtotal = moneyRound(costoTotalReal);
-      total = moneyRound(total + subtotal);
+      const subtotal = totalCostExact;
+      total += subtotal;
 
       receptionDetails.push({
         orden_detalle_id: detail.id,
         cantidad: cantidadRecibida,
-        costo_unit_real: costoReal,
+        costo_unit_real: n(item.costing.unitCost),
         subtotal
       });
 
-      inventoryMoves.push({
+      inventoryMoves.push(buildInventoryMovement({
         tipo: 'COMPRA',
-        producto_id: detail.producto_id,
+        productoId: detail.producto_id,
         cantidad: cantidadRecibida,
-        referencia: null,
-        signo: 1
-      });
+        cantidadBase,
+        signo: 1,
+        origenTipo: 'RECEPCION_PENDIENTE',
+        saldoResultante: inventoryUpdate.stock_actual,
+        saldoResultanteBase: nextStockBase,
+        costoUnitario: n(item.costing.unitCost),
+        costoTotal: subtotal,
+        costoTotalCentavos,
+        costoOrigenTipo: 'RECEPCION_REAL'
+      }));
+
+      valuationRows.push(buildInventoryValuation({
+        productoId: detail.producto_id,
+        origenTipo: 'RECEPCION_PENDIENTE',
+        cantidad: cantidadRecibida,
+        cantidadBase,
+        costoUnitario: n(item.costing.unitCost),
+        costoTotal: subtotal,
+        costoTotalCentavos,
+        costoOrigenTipo: 'RECEPCION_REAL',
+        fecha: fechaRecepcion
+      }));
 
       supplierHistory.push({
         proveedor_id: proveedorId,
         producto_id: detail.producto_id,
-        costo_unit: costoReal
+        costo_unit: n(item.costing.unitCost),
+        fecha: fechaRecepcion
       });
     }
 
@@ -493,7 +541,7 @@ async function receiveOrden(ordenId, body, actorUser) {
       {
         orden_id: ordenId,
         proveedor_id: proveedorId,
-        numero_factura: numeroDocumento,
+        numero_factura: numeroFactura,
         metodo_pago: parsed.data.factura.metodo_pago,
         total,
         fecha: fechaRecepcion
@@ -513,7 +561,7 @@ async function receiveOrden(ordenId, body, actorUser) {
           orden_id: ordenId,
           proveedor_id: proveedorId,
           proveedor_nombre: proveedor.nombre,
-          numero_factura: factura.numero_factura,
+          numero_factura: numeroFactura,
           documento_respaldo: numeroDocumento,
           metodo_pago: factura.metodo_pago,
           total: factura.total
@@ -521,7 +569,7 @@ async function receiveOrden(ordenId, body, actorUser) {
         datos_nuevos: {
           orden_id: ordenId,
           proveedor_id: proveedorId,
-          numero_factura: factura.numero_factura,
+          numero_factura: numeroFactura,
           documento_respaldo: numeroDocumento,
           metodo_pago: factura.metodo_pago,
           total: factura.total
@@ -547,7 +595,7 @@ async function receiveOrden(ordenId, body, actorUser) {
           moduloOrigen: 'COMPRAS',
           origenId: factura.id,
           actorId: actorUser?.id || null,
-          observacion: parsed.data.observacion?.trim() || `Factura ${factura.numero_factura}`
+          observacion: parsed.data.observacion?.trim() || `Factura ${numeroFactura}`
         }),
         trx
       );
@@ -560,15 +608,15 @@ async function receiveOrden(ordenId, body, actorUser) {
           factura_id: factura.id,
           tipo: 'CARGO',
           monto: total,
-          documento_origen: `FACTURA:${factura.numero_factura}`,
-          numero_documento: factura.numero_factura,
+          documento_origen: `FACTURA:${numeroFactura}`,
+          numero_documento: numeroFactura,
           fecha_emision: toDateOnly(factura.fecha),
           fecha_vencimiento: addDays(
             factura.fecha,
             Number(proveedor.dias_pago || config.dias_credito_proveedor_default || 0)
           ),
           estado: 'APLICADO',
-          referencia: `FACTURA:${factura.numero_factura}`,
+          referencia: `FACTURA:${numeroFactura}`,
           observacion: parsed.data.observacion?.trim() || `Compra OC #${ordenId} a credito`
         },
         trx
@@ -603,13 +651,17 @@ async function receiveOrden(ordenId, body, actorUser) {
     const recepcionPayload = {
       orden_id: ordenId,
       total,
-      factura_id: factura.numero_factura,
+      factura_id: numeroFactura,
       factura_compra_id: factura.id,
       fecha: fechaRecepcion
     };
 
     if (schemaSupport.hasRecepcionObservacion) {
       recepcionPayload.observacion = parsed.data.observacion?.trim() || null;
+    }
+
+    if (schemaSupport.hasDocumentoRespaldo) {
+      recepcionPayload.documento_respaldo = numeroDocumento;
     }
 
     if (schemaSupport.hasUsuarioReceptorId) {
@@ -624,7 +676,24 @@ async function receiveOrden(ordenId, body, actorUser) {
     );
 
     await repository.createInventoryMovements(
-      inventoryMoves.map((m) => ({ ...m, referencia: `RECEPCION:${recepcion.id}` })),
+      inventoryMoves.map((movement) => ({
+        ...movement,
+        referencia: `RECEPCION:${recepcion.id}`,
+        origen_tipo: 'RECEPCION',
+        origen_id: recepcion.id,
+        fecha: fechaRecepcion
+      })),
+      trx
+    );
+
+    await repository.createInventoryValuation(
+      valuationRows.map((row) => ({
+        ...row,
+        referencia: `RECEPCION:${recepcion.id}`,
+        origen_tipo: 'RECEPCION',
+        origen_id: recepcion.id,
+        fecha: fechaRecepcion
+      })),
       trx
     );
 
@@ -637,9 +706,17 @@ async function receiveOrden(ordenId, body, actorUser) {
 
     await auditoriaService.logEvent(
       {
-        entidad: 'COMPRA_ORDEN',
-        entidad_id: ordenId,
+        entidad: 'COMPRA_RECEPCION',
+        entidad_id: recepcion.id,
         accion: 'RECEPCION',
+        despues: {
+          recepcion_id: recepcion.id,
+          orden_id: ordenId,
+          factura_id: factura.id,
+          proveedor_id: proveedorId,
+          total,
+          estado
+        },
         detalle: {
           modulo: 'COMPRAS',
           actor: actorUser || null,
@@ -649,7 +726,7 @@ async function receiveOrden(ordenId, body, actorUser) {
           proveedor_nombre: proveedor.nombre,
           factura: {
             ...parsed.data.factura,
-            numero_factura: numeroDocumento
+            numero_factura: numeroFactura
           },
           documento_respaldo: numeroDocumento,
           observacion: parsed.data.observacion?.trim() || null,

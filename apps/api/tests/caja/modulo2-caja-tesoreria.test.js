@@ -18,6 +18,10 @@ async function loginCajero() {
   return (await authService.login({ usuario: 'cajero', password: 'cajero123' })).user;
 }
 
+async function loginAdmin() {
+  return (await authService.login({ usuario: 'admin', password: 'admin123' })).user;
+}
+
 async function openTurno(cajero, fondo = 100, observacion = 'Turno modulo 2') {
   return cajaService.abrirTurno({ fondo_inicial: fondo, observacion }, cajero.id);
 }
@@ -417,6 +421,55 @@ async function runSuite(options = {}) {
     add(14, 'Turno realista expone al menos 10 movimientos mixtos con sentido contable', true);
   } catch (error) {
     add(14, 'Turno realista expone al menos 10 movimientos mixtos con sentido contable', false, error.message);
+  }
+
+  {
+    const cajero = await prepareScenario();
+    await openTurno(cajero, 100, 'Doble apertura');
+    const r = await expectThrows(
+      () => cajaService.abrirTurno({ fondo_inicial: 50, observacion: 'No debe abrir' }, cajero.id),
+      'Ya existe un turno abierto'
+    );
+    add(15, 'Caja no permite doble apertura simultánea', r.ok, r.error);
+  }
+
+  {
+    const cajero = await prepareScenario();
+    await openTurno(cajero, 100, 'Cierre faltante sin observacion');
+    const r = await expectThrows(
+      () => cajaService.corteZ({ efectivo_contado: 95 }, cajero),
+      'Observación requerida'
+    );
+    add(16, 'Cierre con diferencia exige observación', r.ok, r.error);
+  }
+
+  {
+    const cajero = await prepareScenario();
+    await openTurno(cajero, 100, 'Cierre sobrante sin autorizacion');
+    const r = await expectThrows(
+      () => cajaService.corteZ({ efectivo_contado: 105, observacion: 'Sobrante detectado' }, cajero),
+      'autoriz'
+    );
+    add(17, 'Cierre con diferencia exige autorización administrativa', r.ok, r.error);
+  }
+
+  try {
+    const cajero = await prepareScenario();
+    const admin = await loginAdmin();
+    await openTurno(cajero, 100, 'Cierre con diferencia autorizado');
+    const cierre = await cajaService.corteZ(
+      {
+        efectivo_contado: 105,
+        observacion: 'Sobrante validado',
+        autorizacion: { usuario: 'admin', password: 'admin123' }
+      },
+      cajero
+    );
+    assert(admin.rol?.nombre === 'ADMIN', 'No se pudo autenticar el autorizador');
+    assert(Number(cierre.data.diferencia) === 5, `Diferencia inesperada: ${cierre.data.diferencia}`);
+    add(18, 'Cierre con diferencia autorizado se persiste correctamente', true);
+  } catch (error) {
+    add(18, 'Cierre con diferencia autorizado se persiste correctamente', false, error.message);
   }
 
   const report = printSuiteReport('MODULO 2 - CAJA Y TESORERIA', results);

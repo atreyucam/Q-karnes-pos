@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "migrate": "knex migrate:latest",
     "seed": "knex seed:run",
+    "seed:master-demo": "knex seed:run --specific 002_master_demo.js",
     "db:check": "node scripts/sqlite-integrity-check.js",
     "db:paths": "node scripts/sqlite-paths.js",
     "db:backup": "node scripts/sqlite-backup.js",
@@ -25,7 +26,10 @@
     "test:modulo6": "node tests/auditoria/modulo6-auditoria-operativa.test.js",
     "test:modulo7": "node tests/sistema/modulo7-resiliencia-mantenimiento.test.js",
     "test:modulo8": "node tests/run-regression.js",
+    "test:productos": "node tests/productos/productos-flags.test.js",
     "test:transformaciones": "node tests/transformaciones/transformaciones-partial-despiece.test.js",
+    "test:ventas": "node tests/ventas/ventas-basic.test.js",
+    "test:compras-inventario": "node tests/inventario/modulo2-compras-inventario-financiero.test.js",
     "test:operacion": "node tests/integracion/operacion-modulos.test.js",
     "test:regression": "node tests/run-regression.js",
     "test:all": "npm run test:modulo1 && npm run test:modulo2 && npm run test:modulo3 && npm run test:modulo4 && npm run test:modulo5 && npm run test:modulo6 && npm run test:modulo7 && npm run test:regression"

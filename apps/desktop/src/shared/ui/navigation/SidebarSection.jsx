@@ -34,24 +34,26 @@ export default function SidebarSection({
         title={group.label}
         onClick={collapsed ? onNavigateDefault : onToggle}
         className={clsx(
-          'ui-sidebar-item w-full',
+          'ui-sidebar-item',
           active ? 'ui-sidebar-item-active' : 'ui-sidebar-item-idle',
           collapsed && 'justify-center px-0'
         )}
       >
         {!collapsed && <span className={clsx('ui-sidebar-active-rail', active && 'ui-sidebar-active-rail-visible')} />}
 
-        {Icon ? (
-          <div className="ui-sidebar-icon-wrap">
-            <Icon className="text-xl" />
-          </div>
-        ) : null}
-
         {!collapsed && (
           <>
-            <span className="min-w-0 flex-1 truncate text-left">{group.label}</span>
+            <span className="ui-sidebar-item-content min-w-0">
+              {Icon ? (
+                <div className="ui-sidebar-icon-wrap">
+                  <Icon className="text-xl" />
+                </div>
+              ) : null}
 
-            <span className="flex items-center justify-center transition-transform duration-150">
+              <span className="min-w-0 flex-1 truncate text-left">{group.label}</span>
+            </span>
+
+            <span className={clsx('ui-sidebar-caret flex items-center justify-center transition-transform duration-150', active && 'ui-sidebar-caret-active')}>
               {open ? (
                 <PiCaretDownBold className="text-base" />
               ) : (
@@ -60,6 +62,12 @@ export default function SidebarSection({
             </span>
           </>
         )}
+
+        {collapsed && Icon ? (
+          <div className="ui-sidebar-icon-wrap">
+            <Icon className="text-xl" />
+          </div>
+        ) : null}
       </button>
 
       {!collapsed && (

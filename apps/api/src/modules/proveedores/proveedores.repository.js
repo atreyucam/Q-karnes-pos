@@ -60,7 +60,7 @@ async function historialPrecios(proveedorId, trx = db) {
     .orderBy('h.fecha', 'desc');
 }
 
-async function listFacturasByProveedor(proveedorId, trx = db) {
+function buildFacturasByProveedorQuery(proveedorId, trx = db) {
   return trx('compras_facturas as f')
     .where('f.proveedor_id', proveedorId)
     .select(
@@ -112,7 +112,11 @@ async function listFacturasByProveedor(proveedorId, trx = db) {
         FROM cxp_movimientos cm
         WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'
       ), DATE(f.fecha, '+' || COALESCE((SELECT p.dias_pago FROM proveedores p WHERE p.id = f.proveedor_id), 0) || ' day')) as fecha_vencimiento`)
-    )
+    );
+}
+
+async function listFacturasByProveedor(proveedorId, trx = db) {
+  return buildFacturasByProveedorQuery(proveedorId, trx)
     .orderBy('f.id', 'desc');
 }
 
@@ -152,6 +156,25 @@ async function listCxpMovimientosByFactura(facturaId, trx = db) {
     .orderBy('id', 'asc');
 }
 
+async function getFacturaResumenByProveedor(proveedorId, facturaId, trx = db) {
+  return buildFacturasByProveedorQuery(proveedorId, trx)
+    .where('f.id', facturaId)
+    .first();
+}
+
+async function listCashMovementsByCxpOrigins(origenIds = [], trx = db) {
+  const normalized = (origenIds || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (!normalized.length) return [];
+
+  return trx('caja_movimientos')
+    .where({ modulo_origen: 'CXP' })
+    .whereIn('origen_id', normalized)
+    .orderBy('id', 'asc');
+}
+
 module.exports = {
   list,
   create,
@@ -161,5 +184,7 @@ module.exports = {
   listFacturasByProveedor,
   getFacturaByProveedor,
   listFacturaItemsByProveedor,
-  listCxpMovimientosByFactura
+  listCxpMovimientosByFactura,
+  getFacturaResumenByProveedor,
+  listCashMovementsByCxpOrigins
 };

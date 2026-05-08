@@ -1,31 +1,36 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiCheck, PiEye, PiPencilSimple, PiX } from 'react-icons/pi';
+import { PiEye, PiPencilSimple, PiPlus } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Button,
   Card,
-  Checkbox,
-  DeactivateEntityDialogs,
-  IconButton,
+  EmptyState,
+  Field,
+  FiltersBar,
   Input,
   LoadingState,
   Modal,
   PageHeader,
   Paginador,
   Select,
-  StatusBadge,
+  Switch,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
   TablaCelda,
   Textarea
-} from '../../ui';
+} from '../../shared/ui';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
+import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
+const PHONE_REGEX = /^\d{1,10}$/;
 
 const emptyProveedorForm = {
   id: null,
@@ -38,23 +43,33 @@ const emptyProveedorForm = {
   activo: true
 };
 
+function sanitizePhoneInput(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 10);
+}
+
+const toNumber = (value) => {
+  if (typeof value === 'number') return value;
+  const cleaned = String(value ?? '0').replace(/[^0-9.-]+/g, '');
+  return Number(cleaned) || 0;
+};
+
 export default function ProveedoresPage() {
   const { proveedores, error, loading, listar, crear, actualizar } = useProveedoresStore();
   const navigate = useNavigate();
 
   const [pagina, setPagina] = useState(1);
-  const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS' });
+  const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', credito: 'TODOS' });
   const [proveedorModal, setProveedorModal] = useState({ open: false, mode: 'create' });
   const [proveedorForm, setProveedorForm] = useState(emptyProveedorForm);
-  const [deactivateTarget, setDeactivateTarget] = useState(null);
-  const [deactivateError, setDeactivateError] = useState('');
-  const [deactivateLoading, setDeactivateLoading] = useState(false);
+  const [blockedDeactivateProveedor, setBlockedDeactivateProveedor] = useState(null);
+  const proveedorFormErrors = useFormErrors();
 
   const refreshList = () => {
     listar({
       include_cxp: 1,
       search: filtros.search || undefined,
-      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado
+      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
+      tiene_credito: filtros.credito === 'TODOS' ? undefined : filtros.credito
     });
   };
 
@@ -92,10 +107,12 @@ export default function ProveedoresPage() {
   const openCreateModal = () => {
     setProveedorModal({ open: true, mode: 'create' });
     setProveedorForm({ ...emptyProveedorForm });
+    proveedorFormErrors.resetErrors();
   };
 
   const openEditModal = (proveedor) => {
     setProveedorModal({ open: true, mode: 'edit' });
+    proveedorFormErrors.resetErrors();
     setProveedorForm({
       id: proveedor.id,
       nombre: proveedor.nombre || '',
@@ -111,10 +128,33 @@ export default function ProveedoresPage() {
   const closeProveedorModal = () => {
     setProveedorModal({ open: false, mode: 'create' });
     setProveedorForm({ ...emptyProveedorForm });
+    proveedorFormErrors.resetErrors();
   };
 
   const onSaveProveedor = async () => {
-    if (!proveedorForm.nombre.trim()) return;
+    const nextErrors = {};
+    if (!proveedorForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (String(proveedorForm.telefono || '').trim() && !PHONE_REGEX.test(proveedorForm.telefono.trim())) {
+      nextErrors.telefono = 'Ingresa solo números positivos, máximo 10 dígitos.';
+    }
+    if (proveedorForm.tiene_credito) {
+      const diasPago = Number(proveedorForm.dias_pago || 0);
+      if (!String(proveedorForm.dias_pago || '').trim()) nextErrors.dias_pago = 'Este campo es obligatorio.';
+      else if (!Number.isInteger(diasPago) || diasPago < 0 || diasPago > 365) nextErrors.dias_pago = 'Ingresa un valor entre 0 y 365.';
+    }
+    if (!proveedorFormErrors.setErrors(nextErrors)) return;
+
+    if (proveedorModal.mode === 'edit' && proveedorForm.id) {
+      const proveedorActual = proveedores.find((item) => Number(item.id) === Number(proveedorForm.id));
+      const saldoPendiente = Number(proveedorActual?.saldo_pendiente || 0);
+      const estabaActivo = Boolean(proveedorActual?.activo);
+      const quiereDesactivar = estabaActivo && !proveedorForm.activo;
+
+      if (quiereDesactivar && saldoPendiente > 0) {
+        setBlockedDeactivateProveedor(proveedorActual || { ...proveedorForm, saldo_pendiente: saldoPendiente });
+        return;
+      }
+    }
 
     const payload = {
       nombre: proveedorForm.nombre.trim(),
@@ -140,256 +180,283 @@ export default function ProveedoresPage() {
     }
   };
 
-  const onToggleProveedor = async (proveedor) => {
-    if (proveedor.activo) {
-      setDeactivateTarget(proveedor);
-      return;
-    }
-
-    try {
-      await actualizar(proveedor.id, { activo: true });
-      refreshList();
-    } catch (_) {
-      // store error already exposed in page alert
-    }
-  };
-
-  const onConfirmDeactivate = async () => {
-    if (!deactivateTarget) return;
-
-    setDeactivateLoading(true);
-    try {
-      await actualizar(deactivateTarget.id, { activo: false });
-      setDeactivateTarget(null);
-      refreshList();
-    } catch (error) {
-      setDeactivateTarget(null);
-      setDeactivateError(error.message || 'El sistema no permitio desactivar este proveedor.');
-    } finally {
-      setDeactivateLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-5">
       <PageHeader
         title="Proveedores"
-        description="Catalogo, estado y creditos por proveedor."
+        description="Catálogo, estado y créditos por proveedor."
         actions={(
           <Button onClick={openCreateModal}>
+            <PiPlus className="text-base" />
             Nuevo proveedor
           </Button>
         )}
       />
 
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && (
+        <Alert tone="error">
+          {error}
+        </Alert>
+      )}
 
-      <Card className="p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_190px_180px]">
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Buscar</label>
+      <FiltersBar
+        search={(
+          <Field label="Buscar">
             <Input
-              className="mt-2"
               value={filtros.search}
               onChange={(e) => onChangeFiltro('search', e.target.value)}
-              placeholder="Nombre, telefono o direccion"
+              placeholder="Nombre, teléfono o dirección"
             />
-          </div>
+          </Field>
+        )}
+        actions={(
+          <Button
+            variant="neutral"
+            className="w-full xl:w-auto"
+            onClick={() => {
+              setPagina(1);
+              setFiltros({ search: '', estado: 'TODOS', credito: 'TODOS' });
+            }}
+          >
+            Limpiar filtros
+          </Button>
+        )}
+      >
+        <Field label="Estado">
+          <Select
+            value={filtros.estado}
+            onChange={(e) => onChangeFiltro('estado', e.target.value)}
+          >
+            <option value="TODOS">Todos</option>
+            <option value="1">Activo</option>
+            <option value="0">Inactivo</option>
+          </Select>
+        </Field>
 
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</label>
-            <Select
-              className="mt-2"
-              value={filtros.estado}
-              onChange={(e) => onChangeFiltro('estado', e.target.value)}
-            >
-              <option value="TODOS">Todos</option>
-              <option value="1">Activo</option>
-              <option value="0">Inactivo</option>
-            </Select>
-          </div>
-
-          <div className="flex items-end">
-            <Button
-              variant="secondary"
-              className="w-full"
-              onClick={() => {
-                setPagina(1);
-                setFiltros({ search: '', estado: 'TODOS' });
-              }}
-            >
-              Limpiar filtros
-            </Button>
-          </div>
-        </div>
-      </Card>
+        <Field label="Crédito">
+          <Select
+            value={filtros.credito}
+            onChange={(e) => onChangeFiltro('credito', e.target.value)}
+          >
+            <option value="TODOS">Todos</option>
+            <option value="1">Con crédito</option>
+            <option value="0">Sin crédito</option>
+          </Select>
+        </Field>
+      </FiltersBar>
 
       <Card className="overflow-hidden p-0">
-        <Tabla>
-          <TablaCabecera>
-            <tr>
-              <TablaCelda as="th">Proveedor</TablaCelda>
-              <TablaCelda as="th">Telefono</TablaCelda>
-              <TablaCelda as="th">Credito</TablaCelda>
-              <TablaCelda as="th">Cada (dias)</TablaCelda>
-              <TablaCelda as="th" className="text-right">Credito pendiente</TablaCelda>
-              <TablaCelda as="th">Estado</TablaCelda>
-              <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
-            </tr>
-          </TablaCabecera>
-          <TablaCuerpo>
-            {proveedoresPaginados.map((proveedor) => {
-              const saldoPendiente = Number(proveedor.saldo_pendiente || 0);
-              return (
-                <TablaFila key={proveedor.id}>
-                  <TablaCelda>
-                    <div className="space-y-1">
-                      <p className="font-semibold text-[var(--color-text)]">{proveedor.nombre}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">{proveedor.direccion || 'Sin direccion registrada'}</p>
-                    </div>
-                  </TablaCelda>
-                  <TablaCelda>{proveedor.telefono || '-'}</TablaCelda>
-                  <TablaCelda>
-                    <StatusBadge tone={proveedor.tiene_credito ? 'warning' : 'neutral'}>
-                      {proveedor.tiene_credito ? 'Credito' : 'Sin credito'}
-                    </StatusBadge>
-                  </TablaCelda>
-                  <TablaCelda>{Number(proveedor.dias_pago || 0)}</TablaCelda>
-                  <TablaCelda className={`text-right font-semibold ${saldoPendiente > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
-                    {formatMoney(saldoPendiente)}
-                  </TablaCelda>
-                  <TablaCelda>
-                    <StatusBadge status={proveedor.activo ? 'ACTIVO' : 'INACTIVO'} />
-                  </TablaCelda>
-                  <TablaCelda>
-                    <div className="flex justify-end gap-1">
-                      <IconButton
-                        variant="iconView"
-                        size="sm"
-                        aria-label="Ver proveedor"
-                        title="Ver proveedor"
-                        onClick={() => navigate(`/proveedores/${proveedor.id}`)}
-                      >
-                        <PiEye className="text-lg" />
-                      </IconButton>
-                      <IconButton
-                        variant="iconEdit"
-                        size="sm"
-                        aria-label="Editar proveedor"
-                        title="Editar proveedor"
-                        onClick={() => openEditModal(proveedor)}
-                      >
-                        <PiPencilSimple className="text-lg" />
-                      </IconButton>
-                      <IconButton
-                        variant={proveedor.activo ? 'iconDanger' : 'iconSuccess'}
-                        size="sm"
-                        aria-label={proveedor.activo ? 'Desactivar proveedor' : 'Activar proveedor'}
-                        title={proveedor.activo ? 'Desactivar proveedor' : 'Activar proveedor'}
-                        onClick={() => onToggleProveedor(proveedor)}
-                      >
-                        {proveedor.activo ? <PiX className="text-lg" /> : <PiCheck className="text-lg" />}
-                      </IconButton>
-                    </div>
-                  </TablaCelda>
-                </TablaFila>
-              );
-            })}
-          </TablaCuerpo>
-        </Tabla>
+        {proveedoresOrdenados.length === 0 && !loading ? (
+          <div className="p-5">
+            <EmptyState
+              title="Sin proveedores"
+              description="No hay proveedores para los filtros actuales."
+            />
+          </div>
+        ) : (
+          <>
+            <Tabla>
+              <TablaCabecera>
+                <tr>
+                  <TablaCelda as="th">Proveedor</TablaCelda>
+                  <TablaCelda as="th">Contacto</TablaCelda>
+                  <TablaCelda as="th">Crédito</TablaCelda>
+                  <TablaCelda as="th">Pago cada</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Deuda</TablaCelda>
+                  <TablaCelda as="th">Estado</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
+                </tr>
+              </TablaCabecera>
+              <TablaCuerpo>
+                {proveedoresPaginados.map((proveedor) => {
+                  const saldoPendiente = toNumber(
+                    proveedor.saldo_pendiente
+                    ?? proveedor.saldoPendiente
+                    ?? proveedor.credito_pendiente
+                    ?? proveedor.creditoPendiente
+                  );
+                  const diasPago = Number(proveedor.dias_pago || 0);
+                  const pagoCadaText = Number.isFinite(diasPago) && diasPago > 0 ? `${diasPago} días` : '—';
+                  const tieneDeuda = saldoPendiente > 0;
+                  return (
+                    <TablaFila key={proveedor.id}>
+                      <TablaCelda className="py-3">
+                        <p className="font-semibold text-[var(--color-text)]">{proveedor.nombre}</p>
+                      </TablaCelda>
+                      <TablaCelda className="py-3">{proveedor.telefono || '-'}</TablaCelda>
+                      <TablaCelda className="py-3">
+                        {proveedor.tiene_credito ? (
+                          <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+                            Crédito
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                            Sin crédito
+                          </span>
+                        )}
+                      </TablaCelda>
+                      <TablaCelda className="py-3">{pagoCadaText}</TablaCelda>
+                      <TablaCelda className="py-3 text-right">
+                        <span className={tieneDeuda
+                          ? 'rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]'
+                          : 'rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]'}
+                        >
+                          {tieneDeuda ? `Pendiente ${formatMoney(saldoPendiente)}` : 'Sin deuda'}
+                        </span>
+                      </TablaCelda>
+                      <TablaCelda className="py-3">
+                        {proveedor.activo ? (
+                          <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                            Activo
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                            Inactivo
+                          </span>
+                        )}
+                      </TablaCelda>
+                      <TablaCelda className="py-3">
+                        <div className="flex justify-end">
+                          <TableActions>
+                          <TableActionButton
+                            variant="neutral"
+                            className="border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]"
+                            icon={<PiEye />}
+                            aria-label="Ver proveedor"
+                            title="Ver proveedor"
+                            onClick={() => navigate(`/proveedores/${proveedor.id}`)}
+                          >
+                            Ver
+                          </TableActionButton>
+                          <TableActionButton
+                            variant="secondary"
+                            className="border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            icon={<PiPencilSimple />}
+                            aria-label="Editar proveedor"
+                            title="Editar proveedor"
+                            onClick={() => openEditModal(proveedor)}
+                          >
+                            Editar
+                          </TableActionButton>
+                          </TableActions>
+                        </div>
+                      </TablaCelda>
+                    </TablaFila>
+                  );
+                })}
+              </TablaCuerpo>
+            </Tabla>
 
-        <div className="px-5 pb-5">
-          <Paginador
-            paginaActual={pagina}
-            totalPaginas={totalPaginas}
-            totalRegistros={proveedoresOrdenados.length}
-            mostrarSiempre
-            onPageChange={setPagina}
-          />
-        </div>
+            <div className="px-5 pb-5">
+              <Paginador
+                paginaActual={pagina}
+                totalPaginas={totalPaginas}
+                totalRegistros={proveedoresOrdenados.length}
+                mostrarSiempre
+                onPageChange={setPagina}
+              />
+            </div>
+          </>
+        )}
       </Card>
 
       {loading && <LoadingState label="Cargando proveedores..." />}
 
       <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">{proveedorModal.mode === 'edit' ? 'Editar proveedor' : 'Nuevo proveedor'}</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, credito y estado.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, crédito y estado.</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" onClick={closeProveedorModal}>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeProveedorModal}>
             X
           </Button>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Nombre</label>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Field label="Nombre" required error={proveedorFormErrors.errors.nombre}>
             <Input
-              className="mt-2"
+              className="bg-[var(--color-surface)]"
               value={proveedorForm.nombre}
-              onChange={(e) => setProveedorForm((prev) => ({ ...prev, nombre: e.target.value }))}
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('nombre');
+                setProveedorForm((prev) => ({ ...prev, nombre: e.target.value }));
+              }}
               placeholder="Pronaca"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Telefono</label>
+          <Field label="Teléfono" error={proveedorFormErrors.errors.telefono}>
             <Input
-              className="mt-2"
+              className="bg-[var(--color-surface)]"
               value={proveedorForm.telefono}
-              onChange={(e) => setProveedorForm((prev) => ({ ...prev, telefono: e.target.value }))}
+              inputMode="numeric"
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('telefono');
+                setProveedorForm((prev) => ({ ...prev, telefono: sanitizePhoneInput(e.target.value) }));
+              }}
               placeholder="0990000000"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Direccion</label>
+          <Field label="Dirección" className="md:col-span-2">
             <Input
-              className="mt-2"
+              className="bg-[var(--color-surface)]"
               value={proveedorForm.direccion}
               onChange={(e) => setProveedorForm((prev) => ({ ...prev, direccion: e.target.value }))}
               placeholder="Sector / calle"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Cada cuantos dias se paga</label>
+          <Field
+            label="Días de pago"
+            hint="Solo aplica cuando el proveedor trabaja a crédito."
+            error={proveedorFormErrors.errors.dias_pago}
+            className="md:col-span-2"
+          >
             <Input
-              className="mt-2"
+              className={
+                !proveedorForm.tiene_credito
+                  ? 'bg-[var(--color-surface-muted)] text-[var(--color-text-subtle)]'
+                  : 'bg-[var(--color-surface)]'
+              }
               value={proveedorForm.dias_pago}
-              onChange={(e) => setProveedorForm((prev) => ({ ...prev, dias_pago: e.target.value }))}
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('dias_pago');
+                const cleaned = String(e.target.value || '').replace(/\D/g, '');
+                setProveedorForm((prev) => ({ ...prev, dias_pago: cleaned }));
+              }}
               disabled={!proveedorForm.tiene_credito}
+              inputMode="numeric"
               placeholder="15"
             />
-          </div>
+          </Field>
 
-          <div className="md:col-span-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Observacion</label>
+          <Field label="Observación" className="md:col-span-2">
             <Textarea
-              className="mt-2"
+              className="bg-[var(--color-surface)]"
               value={proveedorForm.observacion}
               onChange={(e) => setProveedorForm((prev) => ({ ...prev, observacion: e.target.value }))}
               placeholder="Notas internas"
             />
-          </div>
+          </Field>
 
-          <div>
-            <Checkbox
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+            <Switch
               checked={proveedorForm.tiene_credito}
-              onChange={(e) => setProveedorForm((prev) => ({ ...prev, tiene_credito: e.target.checked }))}
-              label="Tiene credito"
+              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, tiene_credito: checked }))}
+              label="Tiene crédito"
+              description="Habilita compras a crédito y saldo pendiente."
             />
-            <p className="mt-2 text-xs text-[var(--color-text-muted)]">Habilita compras a credito y saldo pendiente.</p>
           </div>
 
-          <div>
-            <Checkbox
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+            <Switch
               checked={proveedorForm.activo}
-              onChange={(e) => setProveedorForm((prev) => ({ ...prev, activo: e.target.checked }))}
+              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, activo: checked }))}
               label="Proveedor activo"
+              description="Si está inactivo no aparece para nuevas órdenes."
             />
-            <p className="mt-2 text-xs text-[var(--color-text-muted)]">Si esta inactivo no aparece para nuevas ordenes.</p>
           </div>
         </div>
 
@@ -403,16 +470,34 @@ export default function ProveedoresPage() {
         </div>
       </Modal>
 
-      <DeactivateEntityDialogs
-        confirmOpen={Boolean(deactivateTarget)}
-        entityLabel={deactivateTarget ? `al proveedor ${deactivateTarget.nombre}` : 'este proveedor'}
-        onCloseConfirm={() => setDeactivateTarget(null)}
-        onConfirm={onConfirmDeactivate}
-        confirmLoading={deactivateLoading}
-        blockedOpen={Boolean(deactivateError)}
-        blockedMessage={deactivateError}
-        onCloseBlocked={() => setDeactivateError('')}
-      />
+      <Modal
+        open={Boolean(blockedDeactivateProveedor)}
+        onClose={() => setBlockedDeactivateProveedor(null)}
+        maxWidthClass="max-w-lg"
+        panelClassName="p-5"
+      >
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+              <h3 className="ui-panel-title">No se puede desactivar</h3>
+              <p className="ui-panel-description">
+                {blockedDeactivateProveedor
+                  ? `No puedes desactivar a ${blockedDeactivateProveedor.nombre} porque tiene saldo pendiente.`
+                  : ''}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--color-danger-soft)] bg-[color-mix(in_oklab,var(--color-danger-soft)_82%,white_18%)] p-3 text-sm text-[var(--color-text)]">
+            Saldo pendiente actual:{' '}
+            <strong className="text-[var(--color-danger)]">{formatMoney(blockedDeactivateProveedor?.saldo_pendiente || 0)}</strong>
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" variant="danger" onClick={() => setBlockedDeactivateProveedor(null)}>
+              Entendido
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

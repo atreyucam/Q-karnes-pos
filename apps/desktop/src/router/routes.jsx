@@ -5,11 +5,13 @@ import LoginPage from '../pages/auth/LoginPage';
 import DashboardPage from '../pages/dashboard/DashboardPage';
 import CajaPage from '../pages/caja/CajaPage';
 import NuevaVentaPage from '../pages/ventas/NuevaVentaPage';
+import VentaDetallePage from '../pages/ventas/VentaDetallePage';
 import VentasListPage from '../pages/ventas/VentasListPage';
 import ClientesPage from '../pages/clientes/ClientesPage';
 import ClienteDetallePage from '../pages/clientes/ClienteDetallePage';
 import ProveedoresPage from '../pages/proveedores/ProveedoresPage';
 import ProveedorDetallePage from '../pages/proveedores/ProveedorDetallePage';
+import ProveedorFacturaDetallePage from '../pages/proveedores/ProveedorFacturaDetallePage';
 import ProductosPage from '../pages/productos/ProductosPage';
 import ComprasPage from '../pages/compras/ComprasPage';
 import CompraNuevaPage from '../pages/compras/CompraNuevaPage';
@@ -22,6 +24,7 @@ import AuditoriaPage from '../pages/admin/AuditoriaPage';
 import SistemaPage from '../pages/admin/SistemaPage';
 import TransformacionesListPage from '../pages/transformaciones/TransformacionesListPage';
 import TransformacionFormPage from '../pages/transformaciones/TransformacionFormPage';
+import TransformacionDetallePage from '../pages/transformaciones/TransformacionDetallePage';
 
 export const appRoutes = [
   { path: '/', element: <RootRedirect /> },
@@ -38,7 +41,7 @@ export const appRoutes = [
             children: [
               { path: '/caja', element: <CajaPage /> },
               { path: '/ventas/nueva', element: <NuevaVentaPage /> },
-              { path: '/ventas/:id', element: <NuevaVentaPage /> },
+              { path: '/ventas/:id', element: <VentaDetallePage /> },
               { path: '/ventas', element: <VentasListPage /> },
               { path: '/clientes', element: <ClientesPage /> },
               { path: '/clientes/:id', element: <ClienteDetallePage /> }
@@ -49,6 +52,7 @@ export const appRoutes = [
             children: [
               { path: '/proveedores', element: <ProveedoresPage /> },
               { path: '/proveedores/:id', element: <ProveedorDetallePage /> },
+              { path: '/proveedores/:id/facturas/:facturaId', element: <ProveedorFacturaDetallePage /> },
               { path: '/productos', element: <ProductosPage /> },
               { path: '/compras', element: <ComprasPage /> },
               { path: '/compras/nueva', element: <CompraNuevaPage /> },
@@ -58,7 +62,9 @@ export const appRoutes = [
               { path: '/transformaciones', element: <TransformacionesListPage /> },
               { path: '/transformaciones/nueva', element: <TransformacionFormPage /> },
               { path: '/transformaciones/:id/editar', element: <TransformacionFormPage /> },
-              { path: '/transformaciones/:id', element: <TransformacionFormPage /> }
+              { path: '/transformaciones/:id', element: <TransformacionDetallePage /> },
+              { path: '/reportes', element: <Navigate to="/reportes/resumen" replace /> },
+              { path: '/reportes/:section', element: <ReportesPage /> }
             ]
           },
           {
@@ -69,7 +75,6 @@ export const appRoutes = [
               { path: '/admin/sistema', element: <SistemaPage /> }
             ]
           },
-          { path: '/reportes', element: <ReportesPage /> },
           { path: '*', element: <Navigate to="/dashboard" replace /> }
         ]
       }

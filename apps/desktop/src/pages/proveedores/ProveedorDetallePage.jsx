@@ -1,36 +1,90 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiCurrencyDollar, PiEye } from 'react-icons/pi';
+import { PiCurrencyDollar, PiEye, PiPencilSimple } from 'react-icons/pi';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
+  BackButton,
   Button,
   Card,
-  DeactivateEntityDialogs,
-  IconButton,
+  Field,
   Input,
   LoadingState,
   Modal,
   PageHeader,
   Paginador,
-  StatusBadge,
+  DeactivateEntityDialogs,
+  Switch,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
-  TablaCelda
+  TablaCelda,
+  Textarea,
+  Toast
 } from '../../ui';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
+import { useCajaStore } from '../../stores/cajaStore';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatDateQuito } from '../../lib/formatDateQuito';
-import { formatQtyByUnit } from '../../lib/formatQty';
+import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
+import ProveedorPagoModal from './ProveedorPagoModal';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
+
+const emptyProveedorForm = {
+  id: null,
+  nombre: '',
+  telefono: '',
+  direccion: '',
+  observacion: '',
+  tiene_credito: true,
+  dias_pago: '15',
+  activo: true
+};
+
+function formatCondicionFactura(factura) {
+  const normalized = String(factura?.condicion || factura?.metodo_pago || '').trim().toUpperCase();
+  return normalized === 'CREDITO' || normalized === 'CRÉDITO' ? 'Crédito' : 'Contado';
+}
+
+function formatEstadoFactura(factura) {
+  if (factura?.estado) {
+    const estado = String(factura.estado).toUpperCase();
+    if (estado === 'PAGADA') return 'Pagada';
+    if (estado === 'PENDIENTE') return 'Pendiente';
+  }
+  return Number(factura?.pendiente || 0) > 0 ? 'Pendiente' : 'Pagada';
+}
+
+function isInvalidFacturaReference(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return true;
+  const normalized = raw.replace(/[\s\-_.:/]/g, '');
+  if (!normalized) return true;
+  return /^0+$/.test(normalized);
+}
+
+function formatFacturaReference(factura) {
+  const candidates = [
+    factura?.numero_factura,
+    factura?.referencia,
+    factura?.numero_documento,
+    factura?.documento_origen
+  ];
+  const validReference = candidates.find((value) => !isInvalidFacturaReference(value));
+  return validReference ? String(validReference).trim() : 'Sin referencia';
+}
 
 export default function ProveedorDetallePage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const configuracion = useConfiguracionStore((state) => state.configuracion);
+  const turnoActual = useCajaStore((state) => state.turnoActual);
+  const fetchTurnoActual = useCajaStore((state) => state.fetchTurnoActual);
   const {
     proveedorDetalle,
     facturas,
@@ -41,24 +95,30 @@ export default function ProveedorDetallePage() {
     cargarFacturas,
     cargarResumenCxp,
     pagarCredito,
-    actualizar,
-    cargarFacturaDetalle
+    actualizar
   } = useProveedoresStore();
 
   const [pagina, setPagina] = useState(1);
   const [modalPago, setModalPago] = useState(null);
-  const [montoPago, setMontoPago] = useState('0');
-  const [referencia, setReferencia] = useState('');
-  const [modalFactura, setModalFactura] = useState(false);
-  const [facturaDetalle, setFacturaDetalle] = useState(null);
+  const [proveedorModal, setProveedorModal] = useState({ open: false, mode: 'edit' });
+  const [proveedorForm, setProveedorForm] = useState(emptyProveedorForm);
   const [confirmDeactivateOpen, setConfirmDeactivateOpen] = useState(false);
-  const [deactivateError, setDeactivateError] = useState('');
   const [deactivateLoading, setDeactivateLoading] = useState(false);
+  const [blockedDeactivateOpen, setBlockedDeactivateOpen] = useState(false);
+  const [statusToast, setStatusToast] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const proveedorFormErrors = useFormErrors();
 
   const proveedorId = Number(id);
+  const saldoProveedor = Number(resumenCxp?.saldo || 0);
 
   const loadData = async () => {
-    await Promise.all([getById(proveedorId), cargarFacturas(proveedorId), cargarResumenCxp(proveedorId)]);
+    await Promise.all([
+      getById(proveedorId),
+      cargarFacturas(proveedorId),
+      cargarResumenCxp(proveedorId),
+      fetchTurnoActual({ silent: true }).catch(() => {})
+    ]);
   };
 
   useEffect(() => {
@@ -80,41 +140,104 @@ export default function ProveedorDetallePage() {
     const start = (pagina - 1) * PAGE_SIZE;
     return facturasOrdenadas.slice(start, start + PAGE_SIZE);
   }, [facturasOrdenadas, pagina]);
+  const totalFacturasPendientes = useMemo(
+    () => facturasOrdenadas.filter((factura) => Number(factura.pendiente || 0) > 0).length,
+    [facturasOrdenadas]
+  );
 
   useEffect(() => {
     setPagina(1);
   }, [facturas.length]);
 
-  const onPagar = async () => {
-    if (!modalPago) return;
-    await pagarCredito(proveedorId, {
-      factura_id: modalPago.id,
-      monto: Number(montoPago || 0),
-      referencia: referencia || null
-    });
+  useEffect(() => {
+    if (!statusToast) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 2400);
+    const clearTimer = window.setTimeout(() => setStatusToast(''), 2580);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToast]);
+
+  const onRegistrarPago = async (payload) => {
+    await pagarCredito(proveedorId, payload);
     setModalPago(null);
-    setMontoPago('0');
-    setReferencia('');
-    loadData();
+    await loadData();
+    setStatusToast('Pago registrado correctamente');
   };
 
-  const onVerFactura = async (facturaId) => {
-    const data = await cargarFacturaDetalle(proveedorId, facturaId);
-    setFacturaDetalle(data);
-    setModalFactura(true);
+  const openEditModal = () => {
+    if (!proveedorDetalle) return;
+    setProveedorModal({ open: true, mode: 'edit' });
+    proveedorFormErrors.resetErrors();
+    setProveedorForm({
+      id: proveedorDetalle.id,
+      nombre: proveedorDetalle.nombre || '',
+      telefono: proveedorDetalle.telefono || '',
+      direccion: proveedorDetalle.direccion || '',
+      observacion: proveedorDetalle.observacion || '',
+      tiene_credito: Boolean(proveedorDetalle.tiene_credito),
+      dias_pago: String(Number(proveedorDetalle.dias_pago || 0)),
+      activo: Boolean(proveedorDetalle.activo)
+    });
+  };
+
+  const closeProveedorModal = () => {
+    setProveedorModal({ open: false, mode: 'edit' });
+    setProveedorForm(emptyProveedorForm);
+    proveedorFormErrors.resetErrors();
+  };
+
+  const onSaveProveedor = async () => {
+    const nextErrors = {};
+    if (!proveedorForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (proveedorForm.tiene_credito) {
+      const diasPago = Number(proveedorForm.dias_pago || 0);
+      if (!String(proveedorForm.dias_pago || '').trim()) nextErrors.dias_pago = 'Este campo es obligatorio.';
+      else if (!Number.isFinite(diasPago) || diasPago < 0) nextErrors.dias_pago = 'Ingresa un valor válido.';
+    }
+    if (!proveedorFormErrors.setErrors(nextErrors)) return;
+
+    const estabaActivo = Boolean(proveedorDetalle?.activo);
+    const quiereDesactivar = estabaActivo && !proveedorForm.activo;
+    if (quiereDesactivar && saldoProveedor > 0) {
+      setBlockedDeactivateOpen(true);
+      return;
+    }
+
+    const payload = {
+      nombre: proveedorForm.nombre.trim(),
+      telefono: proveedorForm.telefono.trim() || null,
+      direccion: proveedorForm.direccion.trim() || null,
+      observacion: proveedorForm.observacion.trim() || null,
+      tiene_credito: proveedorForm.tiene_credito,
+      dias_pago: proveedorForm.tiene_credito ? Number(proveedorForm.dias_pago || 0) : 0,
+      activo: proveedorForm.activo
+    };
+
+    await actualizar(proveedorId, payload);
+    closeProveedorModal();
+    await loadData();
+    setStatusToast('Proveedor actualizado.');
   };
 
   const onToggleProveedor = async () => {
     if (!proveedorDetalle) return;
 
     if (proveedorDetalle.activo) {
+      if (saldoProveedor > 0) {
+        setBlockedDeactivateOpen(true);
+        return;
+      }
       setConfirmDeactivateOpen(true);
       return;
     }
 
     try {
       await actualizar(proveedorId, { activo: true });
-      loadData();
+      await loadData();
+      setStatusToast('Proveedor ha sido activado.');
     } catch (_) {
       // store error already exposed in page alert
     }
@@ -125,10 +248,10 @@ export default function ProveedorDetallePage() {
     try {
       await actualizar(proveedorId, { activo: false });
       setConfirmDeactivateOpen(false);
-      loadData();
-    } catch (error) {
+      await loadData();
+      setStatusToast('Proveedor ha sido desactivado.');
+    } catch (_) {
       setConfirmDeactivateOpen(false);
-      setDeactivateError(error.message || 'El sistema no permitio desactivar este proveedor.');
     } finally {
       setDeactivateLoading(false);
     }
@@ -136,67 +259,111 @@ export default function ProveedorDetallePage() {
 
   return (
     <div className="space-y-5">
+      {statusToast ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast>
+        </div>
+      ) : null}
+
+      <BackButton to="/proveedores">Volver</BackButton>
+
       <PageHeader
-        title="Detalle proveedor"
+        title="Detalle del proveedor"
         description="Facturas, saldo pendiente y pagos."
         actions={(
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => navigate('/proveedores')}>
-              Volver
-            </Button>
-            {proveedorDetalle && (
-              <Button
-                variant={proveedorDetalle.activo ? 'danger' : 'primary'}
-                onClick={onToggleProveedor}
-              >
-                {proveedorDetalle.activo ? 'Desactivar proveedor' : 'Activar proveedor'}
-              </Button>
-            )}
+            {proveedorDetalle ? (
+              <>
+                <Button variant="secondary" onClick={openEditModal}>
+                  <PiPencilSimple className="text-base" />
+                  Editar
+                </Button>
+                <Button
+                  variant={proveedorDetalle.activo ? 'danger' : 'primary'}
+                  onClick={onToggleProveedor}
+                >
+                  {proveedorDetalle.activo ? 'Desactivar proveedor' : 'Activar proveedor'}
+                </Button>
+              </>
+            ) : null}
           </div>
         )}
       />
 
-      {error && <Alert tone="error">{error}</Alert>}
+      {error ? <Alert tone="error">{error}</Alert> : null}
 
-      {proveedorDetalle && (
+      {proveedorDetalle ? (
         <Card className="p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Proveedor</span>
-                <span className="font-semibold text-[var(--color-text)]">{proveedorDetalle.nombre}</span>
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Proveedor</p>
+                <p className="text-lg font-semibold text-[var(--color-text)]">{proveedorDetalle.nombre}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Telefono</span>
-                <span className="font-semibold text-[var(--color-text)]">{proveedorDetalle.telefono || '-'}</span>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Teléfono</p>
+                <p className="font-semibold text-[var(--color-text)]">{proveedorDetalle.telefono || '-'}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Direccion</span>
-                <span className="text-[var(--color-text)]">{proveedorDetalle.direccion || '-'}</span>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Dirección</p>
+                <p className="text-sm text-[var(--color-text)]">{proveedorDetalle.direccion || '-'}</p>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Estado</p>
+                {proveedorDetalle.activo ? (
+                  <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                    Activo
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                    Inactivo
+                  </span>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Crédito / días</p>
+                {proveedorDetalle.tiene_credito ? (
+                  <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+                    Crédito • {Number(proveedorDetalle.dias_pago || 0)} días
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                    Sin crédito
+                  </span>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Observación</p>
+                <p className="text-sm text-[var(--color-text)]">{proveedorDetalle.observacion || '-'}</p>
               </div>
             </div>
 
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</span>
-                <StatusBadge status={proveedorDetalle.activo ? 'ACTIVO' : 'INACTIVO'} />
+            <div className="rounded-xl border border-[#F5D08A] bg-[#FFFBF2] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">Deuda total</p>
+              <p className="mt-2 text-3xl font-black leading-none text-[var(--color-text)]">
+                {formatMoney(saldoProveedor)}
+              </p>
+              <div className="mt-2">
+                {saldoProveedor > 0 ? (
+                  <span className="inline-flex rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+                    Pendiente
+                  </span>
+                ) : (
+                  <span className="inline-flex rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                    Sin deuda
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Credito / dias</span>
-                <StatusBadge tone={proveedorDetalle.tiene_credito ? 'warning' : 'neutral'}>
-                  {proveedorDetalle.tiene_credito ? `${Number(proveedorDetalle.dias_pago || 0)} dias` : 'Sin credito'}
-                </StatusBadge>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Saldo pendiente</span>
-                <span className={`text-lg font-bold ${Number(resumenCxp?.saldo || 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
-                  {formatMoney(resumenCxp?.saldo)}
-                </span>
-              </div>
+              <p className="mt-2 text-xs font-medium text-[var(--color-text)]">
+                Facturas pendientes: {totalFacturasPendientes}
+              </p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Balance actual de cuentas por pagar.
+              </p>
             </div>
           </div>
         </Card>
-      )}
+      ) : null}
 
       <Card className="space-y-3 p-0">
         <div className="flex items-center justify-between px-5 pt-5">
@@ -207,11 +374,12 @@ export default function ProveedorDetallePage() {
         <Tabla>
           <TablaCabecera>
             <tr>
-              <TablaCelda as="th">N factura</TablaCelda>
+              <TablaCelda as="th">N.º factura</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
-              <TablaCelda as="th">Metodo</TablaCelda>
+              <TablaCelda as="th">Condición</TablaCelda>
               <TablaCelda as="th" className="text-right">Total</TablaCelda>
               <TablaCelda as="th" className="text-right">Pendiente</TablaCelda>
+              <TablaCelda as="th">Estado</TablaCelda>
               <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -219,42 +387,72 @@ export default function ProveedorDetallePage() {
             {facturasPaginadas.map((factura) => {
               const pendiente = Number(factura.pendiente || 0);
               const sinPendiente = pendiente <= 0;
+              const condicion = formatCondicionFactura(factura);
+              const estado = formatEstadoFactura(factura);
               return (
-                <TablaFila key={factura.id}>
-                  <TablaCelda className="font-semibold text-[var(--color-text)]">{factura.numero_factura}</TablaCelda>
-                  <TablaCelda>{formatDateQuito(factura.fecha)}</TablaCelda>
-                  <TablaCelda>
-                    <StatusBadge status={factura.metodo_pago} />
+                <TablaFila key={factura.id} className="transition-colors hover:bg-[var(--color-surface-muted)]">
+                  <TablaCelda className="py-3 font-semibold text-[var(--color-text)]">{formatFacturaReference(factura)}</TablaCelda>
+                  <TablaCelda className="py-3">{formatDateQuito(factura.fecha)}</TablaCelda>
+                  <TablaCelda className="py-3">
+                    {condicion === 'Crédito' ? (
+                      <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+                        Crédito
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                        Contado
+                      </span>
+                    )}
                   </TablaCelda>
-                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(factura.total)}</TablaCelda>
-                  <TablaCelda className={`text-right font-semibold ${pendiente > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
-                    {formatMoney(pendiente)}
+                  <TablaCelda className="py-3 text-right font-semibold text-[var(--color-text)]">{formatMoney(factura.total)}</TablaCelda>
+                  <TablaCelda className="py-3 text-right">
+                    {pendiente > 0 ? (
+                      <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+                        Pendiente {formatMoney(pendiente)}
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                        Sin deuda
+                      </span>
+                    )}
                   </TablaCelda>
-                  <TablaCelda>
-                    <div className="flex justify-end gap-1">
-                      <IconButton
-                        variant="iconView"
-                        size="sm"
-                        aria-label="Ver factura"
-                        title="Ver factura"
-                        onClick={() => onVerFactura(factura.id)}
-                      >
-                        <PiEye className="text-lg" />
-                      </IconButton>
-                      <IconButton
-                        variant="iconSecondary"
-                        size="sm"
-                        aria-label="Pagar credito"
-                        title={sinPendiente ? 'Sin saldo pendiente' : 'Pagar credito'}
-                        disabled={factura.metodo_pago !== 'CREDITO' || sinPendiente}
-                        onClick={() => {
-                          setModalPago(factura);
-                          setMontoPago(String(Number(factura.pendiente || 0).toFixed(2)));
-                          setReferencia('');
-                        }}
-                      >
-                        <PiCurrencyDollar className="text-lg" />
-                      </IconButton>
+                  <TablaCelda className="py-3">
+                    {estado === 'Pendiente' ? (
+                      <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+                        Pendiente
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                        Pagada
+                      </span>
+                    )}
+                  </TablaCelda>
+                  <TablaCelda className="py-3">
+                    <div className="flex justify-end">
+                      <TableActions>
+                        <TableActionButton
+                          variant="neutral"
+                          icon={<PiEye />}
+                          aria-label="Ver factura"
+                          title="Ver factura"
+                          className="border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]"
+                          onClick={() => navigate(`/proveedores/${proveedorId}/facturas/${factura.id}`)}
+                        >
+                          Ver
+                        </TableActionButton>
+                        {sinPendiente ? null : (
+                          <TableActionButton
+                            variant="secondary"
+                            icon={<PiCurrencyDollar />}
+                            aria-label="Pagar factura"
+                            title="Pagar factura"
+                            className="h-8 border border-[var(--color-text)] bg-[var(--color-text)] px-3 text-white hover:border-black hover:bg-black"
+                            onClick={() => setModalPago(factura)}
+                          >
+                            Pagar
+                          </TableActionButton>
+                        )}
+                      </TableActions>
                     </div>
                   </TablaCelda>
                 </TablaFila>
@@ -274,146 +472,132 @@ export default function ProveedorDetallePage() {
         </div>
       </Card>
 
-      {loading && <LoadingState label="Cargando proveedor..." />}
+      {loading ? <LoadingState label="Cargando proveedor..." /> : null}
 
-      <Modal open={Boolean(modalPago)} onClose={() => setModalPago(null)} maxWidthClass="max-w-3xl" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Pagar credito</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Factura {modalPago?.numero_factura}</p>
+      <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Editar proveedor</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, crédito y estado.</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setModalPago(null)}>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeProveedorModal}>
             X
           </Button>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-          <p className="text-[var(--color-text-muted)]">Pendiente: <span className="font-semibold text-[var(--color-text)]">{formatMoney(modalPago?.pendiente)}</span></p>
-          <p className="text-[var(--color-text-muted)]">
-            {configuracion?.exigir_caja_abierta_para_pagos
-              ? 'Este pago impacta caja y requiere turno abierto.'
-              : 'Este pago puede registrarse sin turno abierto; si existe turno abierto tambien queda en caja.'}
-          </p>
-        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Field label="Nombre" required error={proveedorFormErrors.errors.nombre}>
+            <Input
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.nombre}
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('nombre');
+                setProveedorForm((prev) => ({ ...prev, nombre: e.target.value }));
+              }}
+              placeholder="Pronaca"
+            />
+          </Field>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Monto</label>
-            <Input className="mt-2" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} placeholder="Monto a pagar" />
+          <Field label="Teléfono">
+            <Input
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.telefono}
+              onChange={(e) => setProveedorForm((prev) => ({ ...prev, telefono: e.target.value }))}
+              placeholder="0990000000"
+            />
+          </Field>
+
+          <Field label="Dirección" className="md:col-span-2">
+            <Input
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.direccion}
+              onChange={(e) => setProveedorForm((prev) => ({ ...prev, direccion: e.target.value }))}
+              placeholder="Sector / calle"
+            />
+          </Field>
+
+          <Field
+            label="Días de pago"
+            hint="Solo aplica cuando el proveedor trabaja a crédito."
+            error={proveedorFormErrors.errors.dias_pago}
+            className="md:col-span-2"
+          >
+            <Input
+              className={
+                !proveedorForm.tiene_credito
+                  ? 'bg-[var(--color-surface-muted)] text-[var(--color-text-subtle)]'
+                  : 'bg-[var(--color-surface)]'
+              }
+              value={proveedorForm.dias_pago}
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('dias_pago');
+                setProveedorForm((prev) => ({ ...prev, dias_pago: e.target.value }));
+              }}
+              disabled={!proveedorForm.tiene_credito}
+              placeholder="15"
+            />
+          </Field>
+
+          <Field label="Observación" className="md:col-span-2">
+            <Textarea
+              className="bg-[var(--color-surface)]"
+              value={proveedorForm.observacion}
+              onChange={(e) => setProveedorForm((prev) => ({ ...prev, observacion: e.target.value }))}
+              placeholder="Notas internas"
+            />
+          </Field>
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+            <Switch
+              checked={proveedorForm.tiene_credito}
+              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, tiene_credito: checked }))}
+              label="Tiene crédito"
+              description="Habilita compras a crédito y saldo pendiente."
+            />
           </div>
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Referencia</label>
-            <Input className="mt-2" value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Referencia (opcional)" />
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+            <Switch
+              checked={proveedorForm.activo}
+              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, activo: checked }))}
+              label="Proveedor activo"
+              description="Si está inactivo no aparece para nuevas órdenes."
+            />
           </div>
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setModalPago(null)}>
+          <Button variant="secondary" onClick={closeProveedorModal}>
             Cancelar
           </Button>
-          <Button disabled={loading} onClick={onPagar}>
-            Confirmar pago
+          <Button onClick={onSaveProveedor}>
+            Guardar proveedor
           </Button>
         </div>
       </Modal>
 
-      <Modal open={modalFactura && Boolean(facturaDetalle)} onClose={() => setModalFactura(false)} maxWidthClass="max-w-5xl" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Detalle factura proveedor</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Resumen de compra y movimientos asociados.</p>
-          </div>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setModalFactura(false)}>
-            X
-          </Button>
-        </div>
-
-        {facturaDetalle?.factura && (
-          <div className="mt-4 grid gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-4 md:grid-cols-2">
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Factura</span>
-                <span className="font-semibold text-[var(--color-text)]">{facturaDetalle.factura.numero_factura}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Fecha</span>
-                <span className="font-semibold text-[var(--color-text)]">{formatDateQuito(facturaDetalle.factura.fecha)}</span>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Metodo</span>
-                <StatusBadge status={facturaDetalle.factura.metodo_pago} />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Total</span>
-                <span className="font-semibold text-[var(--color-text)]">{formatMoney(facturaDetalle.factura.total)}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-4 space-y-4">
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">Producto</TablaCelda>
-                <TablaCelda as="th">Cantidad</TablaCelda>
-                <TablaCelda as="th" className="text-right">C.Unit</TablaCelda>
-                <TablaCelda as="th" className="text-right">Subtotal</TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {(facturaDetalle?.items || []).map((item) => (
-                <TablaFila key={item.id}>
-                  <TablaCelda>{item.producto_codigo} - {item.producto_nombre}</TablaCelda>
-                  <TablaCelda>{formatQtyByUnit(item.cantidad, item.unidad_medida || item.unidad, { fixedLB: true })}</TablaCelda>
-                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(item.costo_unit_real)}</TablaCelda>
-                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(item.subtotal)}</TablaCelda>
-                </TablaFila>
-              ))}
-            </TablaCuerpo>
-          </Tabla>
-
-          {(facturaDetalle?.movimientos || []).length > 0 && (
-            <Tabla>
-              <TablaCabecera>
-                <tr>
-                  <TablaCelda as="th">Fecha</TablaCelda>
-                  <TablaCelda as="th">Tipo</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Monto</TablaCelda>
-                  <TablaCelda as="th">Observacion</TablaCelda>
-                </tr>
-              </TablaCabecera>
-              <TablaCuerpo>
-                {(facturaDetalle.movimientos || []).map((movimiento) => (
-                  <TablaFila key={movimiento.id}>
-                    <TablaCelda>{formatDateQuito(movimiento.fecha)}</TablaCelda>
-                    <TablaCelda>
-                      <StatusBadge status={movimiento.tipo === 'ABONO' ? 'PARCIAL' : 'CREDITO'}>
-                        {movimiento.tipo}
-                      </StatusBadge>
-                    </TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(movimiento.monto)}</TablaCelda>
-                    <TablaCelda>{movimiento.observacion || '-'}</TablaCelda>
-                  </TablaFila>
-                ))}
-              </TablaCuerpo>
-            </Tabla>
-          )}
-        </div>
-      </Modal>
+      <ProveedorPagoModal
+        open={Boolean(modalPago)}
+        onClose={() => setModalPago(null)}
+        onSubmit={onRegistrarPago}
+        proveedor={proveedorDetalle}
+        factura={modalPago}
+        configuracion={configuracion}
+        turnoActual={turnoActual}
+        loading={loading}
+      />
 
       <DeactivateEntityDialogs
         confirmOpen={confirmDeactivateOpen}
-        entityLabel={proveedorDetalle ? `al proveedor ${proveedorDetalle.nombre}` : 'este proveedor'}
+        blockedOpen={blockedDeactivateOpen}
+        entityType="proveedor"
+        entityName={proveedorDetalle?.nombre || '-'}
+        pendingAmountLabel={formatMoney(saldoProveedor)}
+        blockedMessage="El proveedor mantiene cuentas pendientes por pagar."
+        confirmLoading={deactivateLoading}
         onCloseConfirm={() => setConfirmDeactivateOpen(false)}
         onConfirm={onConfirmDeactivate}
-        confirmLoading={deactivateLoading}
-        blockedOpen={Boolean(deactivateError)}
-        blockedMessage={deactivateError}
-        onCloseBlocked={() => setDeactivateError('')}
+        onCloseBlocked={() => setBlockedDeactivateOpen(false)}
       />
     </div>
   );

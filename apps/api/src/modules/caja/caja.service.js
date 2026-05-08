@@ -7,6 +7,7 @@ const configuracionService = require('../configuracion/configuracion.service');
 const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
+const { moneyToCents } = require('../../helpers/unitPolicy');
 const { CASH_MOVEMENT_TYPES, buildCashMovementPayload, buildTurnoCashSnapshot } = require('./cashMovement');
 
 const movementFilterMap = {
@@ -30,6 +31,8 @@ const movementFilterMap = {
   ])
 };
 
+const MAX_MANUAL_CASH_AMOUNT = 5000;
+
 const abrirSchema = z.object({
   fondo_inicial: z.number().nonnegative(),
   observacion: z.string().optional()
@@ -38,12 +41,16 @@ const abrirSchema = z.object({
 const manualSchema = z.object({
   tipo: z.enum(['INGRESO', 'EGRESO']),
   concepto: z.string().min(1),
-  monto: z.number().positive(),
+  monto: z.number()
+    .positive('El monto debe ser mayor a 0')
+    .max(MAX_MANUAL_CASH_AMOUNT, `El monto no puede superar ${MAX_MANUAL_CASH_AMOUNT}`),
   observacion: z.string().trim().optional()
 });
 
 const corteZSchema = z.object({
-  efectivo_contado: z.number().nonnegative(),
+  efectivo_contado: z.number()
+    .nonnegative('El efectivo contado no puede ser negativo')
+    .max(MAX_MANUAL_CASH_AMOUNT, `El efectivo contado no puede superar ${MAX_MANUAL_CASH_AMOUNT}`),
   observacion: z.string().optional(),
   autorizacion: z.object({
     usuario: z.string().min(1),
@@ -69,6 +76,7 @@ async function abrirTurno(body, userId) {
   const turno = await repository.createShift({
     usuario_id: userId,
     fondo_inicial: moneyRound(parsed.data.fondo_inicial),
+    fondo_inicial_centavos: moneyToCents(parsed.data.fondo_inicial, 'fondo_inicial'),
     estado: 'ABIERTO',
     observacion: parsed.data.observacion || null
   });
@@ -77,6 +85,13 @@ async function abrirTurno(body, userId) {
     entidad: 'CAJA_TURNO',
     entidad_id: turno.id,
     accion: 'APERTURA',
+    despues: {
+      turno_id: turno.id,
+      estado: turno.estado,
+      usuario_id: turno.usuario_id,
+      fondo_inicial_centavos: Number(turno.fondo_inicial_centavos || moneyToCents(turno.fondo_inicial, 'fondo_inicial')),
+      observacion: turno.observacion || null
+    },
     detalle: {
       modulo: 'CAJA',
       actor_id: userId,
@@ -215,8 +230,10 @@ async function corteZ(body, user) {
         estado: 'CERRADO',
         fecha_cierre: trx.fn.now(),
         efectivo_contado: contado,
+        efectivo_contado_centavos: moneyToCents(contado, 'efectivo_contado'),
         observacion: parsed.data.observacion || null,
-        diferencia
+        diferencia,
+        diferencia_centavos: moneyToCents(diferencia, 'diferencia')
       },
       trx
     );
@@ -226,6 +243,20 @@ async function corteZ(body, user) {
         entidad: 'CAJA_TURNO',
         entidad_id: turno.id,
         accion: 'CORTE_Z',
+        antes: {
+          turno_id: turno.id,
+          estado: turno.estado,
+          esperado,
+          resumen: snapshot
+        },
+        despues: {
+          turno_id: turno.id,
+          estado: closed.estado,
+          esperado,
+          contado,
+          diferencia,
+          fecha_cierre: closed.fecha_cierre || null
+        },
         detalle: {
           modulo: 'CAJA',
           actor: user,

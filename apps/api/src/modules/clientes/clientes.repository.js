@@ -49,6 +49,7 @@ function applyListFilters(query, filters) {
   if (filters.search) {
     query.where((qb) => {
       qb.where('nombre', 'like', `%${filters.search}%`)
+        .orWhere('cedula', 'like', `%${filters.search}%`)
         .orWhere('telefono', 'like', `%${filters.search}%`)
         .orWhere('direccion', 'like', `%${filters.search}%`)
         .orWhere('observacion', 'like', `%${filters.search}%`)

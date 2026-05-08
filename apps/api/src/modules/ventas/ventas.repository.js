@@ -1,5 +1,9 @@
 const db = require('../../db/knex');
 
+function paymentAmountExpression(trx, alias = 'vp') {
+  return `COALESCE(${alias}.monto_centavos, CAST(ROUND(CAST(${alias}.monto AS REAL) * 100, 0) AS INTEGER))`;
+}
+
 async function getProductsByIds(ids, trx = db) {
   return trx('productos').whereIn('id', ids);
 }
@@ -22,22 +26,29 @@ async function insertSale(data, trx = db) {
 }
 
 async function insertSaleDetails(rows, trx = db) {
+  if (!rows.length) return [];
   await trx('venta_detalle').insert(rows);
   return trx('venta_detalle').where({ venta_id: rows[0].venta_id }).orderBy('id', 'asc');
 }
 
 async function insertSalePayments(rows, trx = db) {
+  if (!rows.length) return [];
   await trx('venta_pagos').insert(rows);
   return trx('venta_pagos').where({ venta_id: rows[0].venta_id }).orderBy('id', 'asc');
 }
 
-async function updateProductStock(productoId, newStock, trx = db) {
-  await trx('productos').where({ id: productoId }).update({ stock_actual: newStock });
+async function updateProductStock(productoId, payload, trx = db) {
+  await trx('productos').where({ id: productoId }).update(payload);
 }
 
 async function insertInventoryMovements(rows, trx = db) {
   if (!rows.length) return;
   await trx('inventario_movimientos').insert(rows);
+}
+
+async function insertInventoryValuation(rows, trx = db) {
+  if (!rows.length) return;
+  await trx('inventario_valorizacion').insert(rows);
 }
 
 async function insertCashMovement(data, trx = db) {
@@ -50,11 +61,50 @@ async function insertCxcMovement(data, trx = db) {
   return trx('cxc_movimientos').where({ id }).first();
 }
 
-async function listSales(filters, trx = db) {
+async function listSales(filters = {}, trx = db) {
+  const cashExpr = paymentAmountExpression(trx, 'vp_cash');
+  const transferExpr = paymentAmountExpression(trx, 'vp_transfer');
+  const creditExpr = paymentAmountExpression(trx, 'vp_credit');
+
   const query = trx('ventas as v')
     .leftJoin('clientes as c', 'v.cliente_id', 'c.id')
     .leftJoin('usuarios as u', 'v.usuario_id', 'u.id')
-    .select('v.*', 'c.nombre as cliente_nombre', 'u.nombre as usuario_nombre')
+    .select(
+      'v.*',
+      'c.nombre as cliente_nombre',
+      'u.nombre as usuario_nombre',
+      trx.raw(`
+        COALESCE((
+          SELECT SUM(${cashExpr})
+          FROM venta_pagos vp_cash
+          WHERE vp_cash.venta_id = v.id
+            AND UPPER(COALESCE(vp_cash.tipo, '')) = 'CONTADO'
+            AND UPPER(COALESCE(vp_cash.metodo_codigo, 'EFECTIVO')) = 'EFECTIVO'
+        ), 0) as monto_contado_centavos
+      `),
+      trx.raw(`
+        COALESCE((
+          SELECT SUM(${transferExpr})
+          FROM venta_pagos vp_transfer
+          WHERE vp_transfer.venta_id = v.id
+            AND (
+              UPPER(COALESCE(vp_transfer.tipo, '')) = 'TRANSFERENCIA'
+              OR UPPER(COALESCE(vp_transfer.metodo_codigo, '')) = 'TRANSFERENCIA'
+            )
+        ), 0) as monto_transferencia_centavos
+      `),
+      trx.raw(`
+        COALESCE((
+          SELECT SUM(${creditExpr})
+          FROM venta_pagos vp_credit
+          WHERE vp_credit.venta_id = v.id
+            AND (
+              UPPER(COALESCE(vp_credit.tipo, '')) = 'CREDITO'
+              OR UPPER(COALESCE(vp_credit.metodo_codigo, '')) = 'CREDITO_CLIENTE'
+            )
+        ), 0) as monto_credito_centavos
+      `)
+    )
     .orderBy('v.id', 'desc');
 
   if (filters.turno_id) query.where('v.turno_id', filters.turno_id);
@@ -104,7 +154,9 @@ async function getSaleByIdWithRelations(id, trx = db) {
     .where('vd.venta_id', id)
     .orderBy('vd.id', 'asc');
 
-  const pagos = await trx('venta_pagos').where({ venta_id: id }).orderBy('id', 'asc');
+  const pagos = await trx('venta_pagos')
+    .where({ venta_id: id })
+    .orderBy('id', 'asc');
 
   return { venta, detalle, pagos };
 }
@@ -141,6 +193,19 @@ async function listCxcMovementsByVenta(ventaId, trx = db) {
     .orderBy('id', 'asc');
 }
 
+async function listCashMovementsByCxcOrigins(origenIds = [], trx = db) {
+  const normalized = (origenIds || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (!normalized.length) return [];
+
+  return trx('caja_movimientos')
+    .where({ modulo_origen: 'CXC' })
+    .whereIn('origen_id', normalized)
+    .orderBy('id', 'asc');
+}
+
 async function getReturnedQuantityBySaleDetail(ventaDetalleId, trx = db) {
   const row = await trx('devolucion_detalle')
     .where({ venta_detalle_id: ventaDetalleId })
@@ -150,12 +215,53 @@ async function getReturnedQuantityBySaleDetail(ventaDetalleId, trx = db) {
   return Number(row?.total || 0);
 }
 
+async function getReturnStatsBySaleDetail(ventaDetalleId, trx = db) {
+  const row = await trx('devolucion_detalle as dd')
+    .where({ 'dd.venta_detalle_id': ventaDetalleId })
+    .select(
+      trx.raw('COALESCE(SUM(CAST(dd.cantidad AS REAL)), 0) as total_cantidad'),
+      trx.raw('COALESCE(SUM(COALESCE(dd.cantidad_base, 0)), 0) as total_cantidad_base'),
+      trx.raw('COALESCE(SUM(COALESCE(dd.subtotal_centavos, CAST(ROUND(CAST(dd.subtotal AS REAL) * 100, 0) AS INTEGER))), 0) as total_subtotal_centavos'),
+      trx.raw('COALESCE(SUM(COALESCE(dd.subtotal_costo_centavos, 0)), 0) as total_subtotal_costo_centavos'),
+      trx.raw('COALESCE(SUM(COALESCE(dd.margen_revertido_centavos, 0)), 0) as total_margen_revertido_centavos')
+    )
+    .first();
+
+  return {
+    cantidad: Number(row?.total_cantidad || 0),
+    cantidad_base: Number(row?.total_cantidad_base || 0),
+    subtotal_centavos: Number(row?.total_subtotal_centavos || 0),
+    subtotal_costo_centavos: Number(row?.total_subtotal_costo_centavos || 0),
+    margen_revertido_centavos: Number(row?.total_margen_revertido_centavos || 0)
+  };
+}
+
+async function getRefundTotalsByVenta(ventaId, trx = db) {
+  const row = await trx('devoluciones')
+    .where({ venta_id: ventaId })
+    .select(
+      trx.raw('COALESCE(SUM(COALESCE(contado_centavos, CAST(ROUND(CAST(contado AS REAL) * 100, 0) AS INTEGER))), 0) as total_contado_centavos'),
+      trx.raw('COALESCE(SUM(COALESCE(transferencia_centavos, CAST(ROUND(CAST(transferencia AS REAL) * 100, 0) AS INTEGER))), 0) as total_transferencia_centavos'),
+      trx.raw('COALESCE(SUM(COALESCE(credito_centavos, CAST(ROUND(CAST(credito AS REAL) * 100, 0) AS INTEGER))), 0) as total_credito_centavos'),
+      trx.raw('COALESCE(SUM(COALESCE(total_devuelto_centavos, CAST(ROUND(CAST(total_devuelto AS REAL) * 100, 0) AS INTEGER))), 0) as total_devuelto_centavos')
+    )
+    .first();
+
+  return {
+    contado_centavos: Number(row?.total_contado_centavos || 0),
+    transferencia_centavos: Number(row?.total_transferencia_centavos || 0),
+    credito_centavos: Number(row?.total_credito_centavos || 0),
+    total_devuelto_centavos: Number(row?.total_devuelto_centavos || 0)
+  };
+}
+
 async function insertDevolucion(data, trx = db) {
   const [id] = await trx('devoluciones').insert(data);
   return trx('devoluciones').where({ id }).first();
 }
 
 async function insertDevolucionDetalle(rows, trx = db) {
+  if (!rows.length) return [];
   await trx('devolucion_detalle').insert(rows);
   return trx('devolucion_detalle').where({ devolucion_id: rows[0].devolucion_id }).orderBy('id', 'asc');
 }
@@ -165,7 +271,15 @@ async function setSaleStatus(id, estado, trx = db) {
 }
 
 async function getDevolucionesByVenta(ventaId, trx = db) {
-  return trx('devoluciones').where({ venta_id: ventaId }).orderBy('id', 'desc');
+  return trx('devoluciones as d')
+    .join('ventas as v', 'd.venta_id', 'v.id')
+    .select(
+      'd.*',
+      'v.observacion as venta_observacion',
+      'v.metodo_pago_codigo as venta_metodo_pago_codigo'
+    )
+    .where({ 'd.venta_id': ventaId })
+    .orderBy('d.id', 'desc');
 }
 
 async function getDevolucionDetalleByVenta(ventaId, trx = db) {
@@ -173,7 +287,12 @@ async function getDevolucionDetalleByVenta(ventaId, trx = db) {
     .join('devoluciones as d', 'dd.devolucion_id', 'd.id')
     .join('venta_detalle as vd', 'dd.venta_detalle_id', 'vd.id')
     .join('productos as p', 'vd.producto_id', 'p.id')
-    .select('dd.*', 'd.venta_id', 'p.codigo as producto_codigo', 'p.nombre as producto_nombre')
+    .select(
+      'dd.*',
+      'd.venta_id',
+      'p.codigo as producto_codigo',
+      'p.nombre as producto_nombre'
+    )
     .where('d.venta_id', ventaId)
     .orderBy('dd.id', 'asc');
 }
@@ -202,6 +321,7 @@ module.exports = {
   insertSalePayments,
   updateProductStock,
   insertInventoryMovements,
+  insertInventoryValuation,
   insertCashMovement,
   insertCxcMovement,
   listSales,
@@ -210,7 +330,10 @@ module.exports = {
   getSaleTicket,
   listCxcAbonosByVenta,
   listCxcMovementsByVenta,
+  listCashMovementsByCxcOrigins,
   getReturnedQuantityBySaleDetail,
+  getReturnStatsBySaleDetail,
+  getRefundTotalsByVenta,
   insertDevolucion,
   insertDevolucionDetalle,
   setSaleStatus,

@@ -23,15 +23,22 @@ export default function SidebarItem({
       }
     >
       {Icon ? (
-        <div className="ui-sidebar-icon-wrap">
-          <Icon className="text-xl" />
-        </div>
+        collapsed ? (
+          <div className="ui-sidebar-icon-wrap">
+            <Icon className="text-xl" />
+          </div>
+        ) : null
       ) : null}
 
       {!collapsed && (
-        <div className="min-w-0 flex-1">
-          <span className="truncate">{label}</span>
-        </div>
+        <span className="ui-sidebar-item-content min-w-0">
+          {Icon ? (
+            <div className="ui-sidebar-icon-wrap">
+              <Icon className="text-xl" />
+            </div>
+          ) : null}
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+        </span>
       )}
     </NavLink>
   );

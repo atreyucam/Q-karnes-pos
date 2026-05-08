@@ -1,186 +1,90 @@
-import { useEffect, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  EmptyState,
-  Input,
-  LoadingState,
-  PageHeader,
-  Select,
-  Tabla,
-  TablaCabecera,
-  TablaCuerpo,
-  TablaFila,
-  TablaCelda
-} from '../../ui';
-import { useAuditoriaStore, getDefaultAuditFilters } from '../../stores/auditoriaStore';
-import { formatDateQuito } from '../../lib/formatDateQuito';
+import { useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { PageHeader, Tabs } from '../../shared/ui';
+import AuditoriaResumen from './auditoria/AuditoriaResumen';
+import AuditoriaEventosView from './auditoria/AuditoriaEventosView';
+import AuditoriaHallazgosView from './auditoria/AuditoriaHallazgosView';
 
-const MODULE_OPTIONS = [
-  { value: '', label: 'Todos los modulos' },
-  { value: 'VENTAS', label: 'Ventas' },
-  { value: 'CAJA', label: 'Caja' },
-  { value: 'INVENTARIO', label: 'Inventario' },
-  { value: 'COMPRAS', label: 'Compras' },
-  { value: 'CXC', label: 'CxC' },
-  { value: 'CXP', label: 'CxP' },
-  { value: 'CONFIGURACION', label: 'Configuracion' },
-  { value: 'PRODUCTOS', label: 'Productos' },
-  { value: 'AUTH', label: 'Auth' }
+const AUDITORIA_TABS = [
+  { key: 'resumen', label: 'Resumen', component: AuditoriaResumen },
+  {
+    key: 'ventas',
+    label: 'Ventas',
+    component: () => (
+      <AuditoriaHallazgosView
+        viewKey="ventas"
+        title="Auditoria de ventas"
+        description="Hallazgos vinculados a ventas, costo snapshot y caja asociada"
+      />
+    )
+  },
+  {
+    key: 'inventario',
+    label: 'Inventario',
+    component: () => (
+      <AuditoriaHallazgosView
+        viewKey="inventario"
+        title="Auditoria de inventario"
+        description="Stock, kardex y valorizacion operativa"
+      />
+    )
+  },
+  {
+    key: 'caja',
+    label: 'Caja',
+    component: () => (
+      <AuditoriaHallazgosView
+        viewKey="caja"
+        title="Auditoria de caja"
+        description="Diferencias de saldo, movimientos y conciliacion por turno"
+      />
+    )
+  },
+  {
+    key: 'transformaciones',
+    label: 'Transformaciones',
+    component: () => (
+      <AuditoriaHallazgosView
+        viewKey="transformaciones"
+        title="Auditoria de transformaciones"
+        description="Conservacion de costo, mermas y descuadres de cantidades"
+      />
+    )
+  },
+  { key: 'eventos', label: 'Eventos', component: AuditoriaEventosView }
 ];
 
 export default function AuditoriaPage() {
-  const { eventos, meta, loading, error, cargarEventos } = useAuditoriaStore();
-  const [filters, setFilters] = useState(getDefaultAuditFilters());
+  const [params, setParams] = useSearchParams();
+
+  const currentTab = useMemo(() => {
+    const currentValue = params.get('tab');
+    return AUDITORIA_TABS.find((tab) => tab.key === currentValue)?.key || AUDITORIA_TABS[0].key;
+  }, [params]);
 
   useEffect(() => {
-    cargarEventos(filters).catch(() => {});
-  }, [cargarEventos]);
+    if (!params.get('tab')) {
+      setParams({ tab: AUDITORIA_TABS[0].key }, { replace: true });
+    }
+  }, [params, setParams]);
 
-  const updateFilter = (field, value) => {
-    setFilters((state) => ({ ...state, [field]: value }));
-  };
-
-  const onSearch = async () => {
-    await cargarEventos(filters);
-  };
-
-  const onReset = async () => {
-    const defaults = getDefaultAuditFilters();
-    setFilters(defaults);
-    await cargarEventos(defaults);
-  };
+  const ActiveTab = AUDITORIA_TABS.find((tab) => tab.key === currentTab)?.component || AuditoriaResumen;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
-        title="Auditoria operativa"
-        description="Rastreo de acciones críticas del POS para supervisión y diagnóstico"
+        title="Auditoria"
+        description="Supervision operativa para detectar errores criticos, advertencias y trazabilidad faltante"
       />
 
-      {error && <Alert tone="error">{error}</Alert>}
+      <Tabs
+        ariaLabel="Pestanas de auditoria"
+        items={AUDITORIA_TABS}
+        value={currentTab}
+        onChange={(tabKey) => setParams({ tab: tabKey })}
+      />
 
-      <Card className="space-y-4 p-4">
-        <div className="grid gap-3 lg:grid-cols-5">
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha inicio
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_inicio}
-              onChange={(event) => updateFilter('fecha_inicio', event.target.value)}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Fecha fin
-            <Input
-              className="mt-1"
-              type="date"
-              value={filters.fecha_fin}
-              onChange={(event) => updateFilter('fecha_fin', event.target.value)}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Usuario
-            <Input
-              className="mt-1"
-              placeholder="Nombre o login"
-              value={filters.usuario}
-              onChange={(event) => updateFilter('usuario', event.target.value)}
-            />
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Modulo
-            <Select
-              className="mt-1"
-              value={filters.modulo}
-              onChange={(event) => updateFilter('modulo', event.target.value)}
-            >
-              {MODULE_OPTIONS.map((option) => (
-                <option key={option.value || 'all'} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </label>
-
-          <label className="text-sm font-medium text-[var(--color-text)]">
-            Accion
-            <Input
-              className="mt-1"
-              placeholder="VENTA, ABONO, ACTUALIZAR"
-              value={filters.accion}
-              onChange={(event) => updateFilter('accion', event.target.value.toUpperCase())}
-            />
-          </label>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-[var(--color-text-muted)]">
-            Eventos encontrados: <span className="font-semibold text-[var(--color-text)]">{meta.total || eventos.length}</span>
-          </p>
-
-          <div className="flex gap-2">
-            <Button tone="secondary" onClick={onReset} disabled={loading}>
-              Limpiar filtros
-            </Button>
-            <Button onClick={onSearch} disabled={loading}>
-              {loading ? 'Consultando...' : 'Consultar'}
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="p-0">
-        {loading ? (
-          <div className="p-6">
-            <LoadingState title="Cargando auditoria" description="Consultando eventos operativos del sistema" />
-          </div>
-        ) : eventos.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              title="Sin eventos para estos filtros"
-              description="Ajuste el rango de fechas o quite filtros para ampliar la búsqueda."
-            />
-          </div>
-        ) : (
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">Fecha</TablaCelda>
-                <TablaCelda as="th">Usuario</TablaCelda>
-                <TablaCelda as="th">Modulo</TablaCelda>
-                <TablaCelda as="th">Accion</TablaCelda>
-                <TablaCelda as="th">Entidad</TablaCelda>
-                <TablaCelda as="th">Descripcion</TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {eventos.map((evento) => (
-                <TablaFila key={evento.id}>
-                  <TablaCelda>{formatDateQuito(evento.fecha)}</TablaCelda>
-                  <TablaCelda>
-                    <div className="space-y-0.5">
-                      <p>{evento.usuario}</p>
-                      {evento.usuario_login && (
-                        <p className="text-xs text-[var(--color-text-muted)]">{evento.usuario_login}</p>
-                      )}
-                    </div>
-                  </TablaCelda>
-                  <TablaCelda>{evento.modulo}</TablaCelda>
-                  <TablaCelda>{evento.accion}</TablaCelda>
-                  <TablaCelda>{evento.entidad} #{evento.entidad_id}</TablaCelda>
-                  <TablaCelda>{evento.descripcion || '-'}</TablaCelda>
-                </TablaFila>
-              ))}
-            </TablaCuerpo>
-          </Tabla>
-        )}
-      </Card>
+      <ActiveTab />
     </div>
   );
 }

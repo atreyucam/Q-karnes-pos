@@ -1,4 +1,5 @@
-export { posTokens, chartPalette } from '../tokens/posTokens';
+export { colors, chartPalette } from '../tokens/colorTokens';
+export { posTokens } from '../tokens/posTokens';
 export { uiClassTokens } from '../tokens/uiClassTokens';
 
 // Primitives
@@ -9,16 +10,18 @@ export { default as Textarea } from './primitives/Textarea';
 export { default as Checkbox } from './primitives/Checkbox';
 export { default as Switch } from './primitives/Switch';
 export { default as IconButton } from './primitives/IconButton';
-export { default as Field, FieldLabel, FieldHint, FieldStack } from './primitives/Field';
+export { default as Field, FieldLabel, FieldHint, FieldError, FieldStack } from './primitives/Field';
 
 // Layout / Surface
 export { default as Panel, PanelHeader, PanelSection } from './layout/Panel';
+export { default as FiltersBar } from './layout/FiltersBar';
 export { default as PageHeader } from './layout/PageHeader';
 export { default as PageSection } from './layout/PageSection';
 export { default as StatCard } from './layout/StatCard';
 
 // Data display
 export { Table, TableHead, TableBody, TableRow, TableCell } from './data-display/Table';
+export { default as TableActions, TableActionButton } from './data-display/TableActions';
 export { default as StatusChip, StatusBadge, TipoBadge, getStatusClasses, getTipoClasses, resolveStatusTone } from './data-display/StatusChip';
 export { default as Paginador } from './data-display/Paginador';
 export { default as KpiCard } from './data-display/KpiCard';
@@ -39,6 +42,8 @@ export { default as DeactivateEntityDialogs } from './overlays/DeactivateEntityD
 
 // Navigation
 export { default as Dropdown } from './navigation/Dropdown';
+export { default as Tabs } from './navigation/Tabs';
+export { default as BackButton } from './navigation/BackButton';
 export { default as SidebarItem } from './navigation/SidebarItem';
 export { default as SidebarSection } from './navigation/SidebarSection';
 export { default as TopbarAction } from './navigation/TopbarAction';

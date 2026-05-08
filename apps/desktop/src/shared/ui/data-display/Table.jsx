@@ -25,8 +25,24 @@ export function TableHead({ children }) {
   return <thead>{decorateRows(children, uiClassTokens.table.headRow)}</thead>;
 }
 
-export function TableBody({ children }) {
-  return <tbody className={uiClassTokens.table.body}>{children}</tbody>;
+export function TableBody({
+  children,
+  emptyMessage = 'No existen registros.',
+  emptyColSpan = 99
+}) {
+  const rows = Children.toArray(children);
+
+  return (
+    <tbody className={uiClassTokens.table.body}>
+      {rows.length > 0 ? rows : (
+        <tr>
+          <td colSpan={emptyColSpan} className={clsx(uiClassTokens.table.cell, uiClassTokens.table.empty, 'text-text-muted')}>
+            {emptyMessage}
+          </td>
+        </tr>
+      )}
+    </tbody>
+  );
 }
 
 export function TableRow({ children, className }) {

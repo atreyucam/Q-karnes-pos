@@ -1,36 +1,63 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   PiArrowsLeftRightBold,
   PiCashRegister,
+  PiChartBarBold,
   PiCreditCardBold,
-  PiCurrencyDollarSimpleBold,
   PiEye,
+  PiLockKeyOpenBold,
   PiReceipt,
   PiWallet
 } from 'react-icons/pi';
 import {
   Alert,
   Button,
-  Card,
-  IconButton,
+  EmptyState,
   Input,
   Modal,
   PageHeader,
+  Panel,
+  PanelHeader,
+  PanelSection,
   StatusBadge,
-  Tabla,
-  TablaCabecera,
-  TablaCuerpo,
-  TablaFila,
-  TablaCelda,
+  Switch,
+  Table,
+  TableActionButton,
+  TableActions,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   Textarea
-} from '../../ui';
-import { useNavigate } from 'react-router-dom';
+} from '../../shared/ui';
 import { useCajaStore } from '../../stores/cajaStore';
+import { useAuthStore } from '../../stores/authStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
+import { sanitizeDecimalInput } from '../../lib/formatQty';
+import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
+
+const MAX_CASH_OPERATION_AMOUNT = 5000;
+
+const timeFormatter = new Intl.DateTimeFormat('es-EC', {
+  timeZone: 'America/Guayaquil',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false
+});
 
 function round2(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function formatTimeQuito(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return timeFormatter.format(date);
 }
 
 function formatMovementType(tipo) {
@@ -63,27 +90,454 @@ function formatPaymentMethod(metodo) {
 function resolveMovementSense(movimiento) {
   const tipo = String(movimiento?.tipo || '').toUpperCase();
   if (tipo === 'VENTA_TRANSFERENCIA' || tipo === 'VENTA_CREDITO') {
-    return {
-      tone: 'default',
-      label: '0 Informativo'
-    };
+    return { tone: 'default', label: 'Informativo' };
   }
 
   if (String(movimiento?.sentido || '').toUpperCase() === 'EGRESO') {
+    return { tone: 'danger', label: 'Egreso' };
+  }
+
+  return { tone: 'success', label: 'Ingreso' };
+}
+
+function extractVentaIdFromText(...candidates) {
+  for (const candidate of candidates) {
+    const text = String(candidate || '');
+    const ventaTag = text.match(/VENTA:(\d{1,10})/i);
+    if (ventaTag) return Number(ventaTag[1]);
+
+    const ventaRef = text.match(/venta\s*#?\s*(\d{1,10})/i);
+    if (ventaRef) return Number(ventaRef[1]);
+  }
+
+  return null;
+}
+
+function resolveMovementReference(movimiento) {
+  const tipo = String(movimiento?.tipo || '').toUpperCase();
+  const originId = Number(movimiento?.origen_id || 0);
+  const fallbackId = Number(movimiento?.id || 0);
+  const ventaId = extractVentaIdFromText(
+    movimiento?.documento_origen,
+    movimiento?.concepto,
+    movimiento?.referencia,
+    movimiento?.observacion
+  );
+
+  if (['VENTA_CONTADO', 'VENTA_TRANSFERENCIA', 'VENTA_CREDITO', 'ANULACION_VENTA_EFECTIVO', 'DEVOLUCION_EFECTIVO'].includes(tipo)) {
+    const id = originId > 0 ? originId : ventaId;
+    return id ? `Venta #${id}` : 'Venta';
+  }
+
+  if (tipo === 'INGRESO_MANUAL') {
+    return fallbackId > 0 ? `Ingreso #${fallbackId}` : 'Ingreso';
+  }
+
+  if (tipo === 'EGRESO_MANUAL') {
+    return fallbackId > 0 ? `Egreso #${fallbackId}` : 'Egreso';
+  }
+
+  if (tipo === 'ABONO_CLIENTE' || tipo === 'REVERSO_ABONO_CLIENTE') {
+    const id = originId > 0 ? originId : fallbackId;
+    return id ? `Abono #${id}` : 'Abono';
+  }
+
+  if (tipo === 'PAGO_PROVEEDOR' || tipo === 'REVERSO_PAGO_PROVEEDOR') {
+    const id = originId > 0 ? originId : fallbackId;
+    return id ? `Pago #${id}` : 'Pago';
+  }
+
+  if (tipo === 'COMPRA_CONTADO') {
+    const id = originId > 0 ? originId : fallbackId;
+    return id ? `Compra #${id}` : 'Compra';
+  }
+
+  return fallbackId > 0 ? `Movimiento #${fallbackId}` : '-';
+}
+
+function getCloseStatusMeta(difference) {
+  if (difference === 0) {
+    return {
+      tone: 'success',
+      label: 'Cuadrado',
+      message: 'El conteo coincide con el efectivo esperado del turno.',
+      badgeLabel: 'Cierre cuadrado'
+    };
+  }
+
+  if (difference < 0) {
     return {
       tone: 'danger',
-      label: '- Caja'
+      label: 'Faltante',
+      message: 'Se detectó una diferencia negativa en caja. Revisa conteo, egresos pendientes y registra observación.',
+      badgeLabel: 'Cierre con faltante'
     };
   }
 
   return {
-    tone: 'success',
-    label: '+ Caja'
+    tone: 'warning',
+    label: 'Sobrante',
+    message: 'Se detectó efectivo adicional. Confirma el conteo y deja trazabilidad del motivo antes de cerrar.',
+    badgeLabel: 'Cierre con sobrante'
   };
+}
+
+function getPendingCloseStatusMeta() {
+  return {
+    tone: 'default',
+    label: 'Pendiente',
+    message: 'Ingresa el efectivo contado para validar el estado del cierre.',
+    badgeLabel: 'Cierre pendiente'
+  };
+}
+
+function sanitizeCashAmountInput(value) {
+  return sanitizeDecimalInput(value, 2);
+}
+
+function ResultRow({ label, value, tone = 'default' }) {
+  const toneClass = tone === 'danger'
+    ? 'text-[var(--color-danger)]'
+    : tone === 'warning'
+      ? 'text-[var(--color-warning-text)]'
+      : tone === 'success'
+        ? 'text-[var(--color-success-text)]'
+        : 'text-[var(--color-text)]';
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-3 last:border-b-0 last:pb-0">
+      <span className="text-sm text-[var(--color-text-muted)]">{label}</span>
+      <span className={`text-sm font-semibold ${toneClass}`}>{value}</span>
+    </div>
+  );
+}
+
+function StatTile({ icon, label, value, hint, accentClass }) {
+  return (
+    <div className="rounded-[1.2rem] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${accentClass}`}>
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{label}</p>
+          <p className="mt-2 text-[1.6rem] font-bold leading-none text-[var(--color-text)]">{value}</p>
+          <p className="mt-2 text-xs text-[var(--color-text-muted)]">{hint}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ManualMovementModal({
+  open,
+  onClose,
+  type,
+  form,
+  errors,
+  numericWarning,
+  loading,
+  onChange,
+  onSubmit
+}) {
+  return (
+    <Modal open={open} onClose={onClose} maxWidthClass="max-w-md" panelClassName="p-5">
+      <div className="space-y-4">
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
+            <h3 className="ui-panel-title">
+              {type === 'EGRESO' ? 'Registrar egreso manual' : 'Registrar ingreso manual'}
+            </h3>
+            <p className="ui-panel-description">Ingresa concepto y monto para afectar el turno actual.</p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={onClose}>
+            X
+          </Button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <Input
+              error={Boolean(errors.concepto)}
+              placeholder="Concepto"
+              value={form.concepto}
+              onChange={(event) => onChange('concepto', event.target.value)}
+            />
+            {errors.concepto ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.concepto}</p> : null}
+          </div>
+
+          <div>
+            <Input
+              inputMode="decimal"
+              min="0"
+              max={MAX_CASH_OPERATION_AMOUNT}
+              error={Boolean(errors.monto)}
+              placeholder="Monto"
+              value={form.monto}
+              onChange={(event) => onChange('monto', sanitizeCashAmountInput(event.target.value))}
+            />
+            {errors.monto ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.monto}</p> : null}
+            {!errors.monto && numericWarning ? <p className="mt-2 text-sm text-[var(--color-danger)]">{numericWarning}</p> : null}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+            Cancelar
+          </Button>
+          <Button type="button" variant={type === 'EGRESO' ? 'danger' : 'primary'} onClick={onSubmit} disabled={loading}>
+            Guardar movimiento
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CashClosingModal({
+  open,
+  onClose,
+  onPrint,
+  onConfirm,
+  turnoActual,
+  user,
+  summary,
+  form,
+  auth,
+  errors,
+  errorMessage,
+  loading,
+  onFormChange,
+  onAuthChange
+}) {
+  const [step, setStep] = useState(1);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const efectivoEsperado = Number(summary?.efectivo_esperado || 0);
+  const contado = Number(form.efectivo_contado || 0);
+  const diferencia = round2(contado - efectivoEsperado);
+  const hasCountedCash = String(form.efectivo_contado || '').trim() !== '';
+  const hasDifference = hasCountedCash && Math.abs(diferencia) > 0.009;
+  const statusMeta = hasCountedCash ? getCloseStatusMeta(hasDifference ? diferencia : 0) : getPendingCloseStatusMeta();
+  const turnoLabel = turnoActual?.id ? `Turno #${turnoActual.id}` : 'Sin turno';
+
+  useEffect(() => {
+    if (!open) {
+      setStep(1);
+      setAuthModalOpen(false);
+    }
+  }, [open]);
+
+  const handleContinue = async () => {
+    try {
+      const canContinue = await onConfirm({ mode: 'step1' });
+      if (canContinue) setStep(2);
+    } catch (_) {
+      // parent keeps error state
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (hasDifference) {
+      setAuthModalOpen(true);
+      return;
+    }
+
+    try {
+      await onConfirm({ mode: 'final' });
+    } catch (_) {
+      // parent keeps error state
+    }
+  };
+
+  const handleAuthorize = async () => {
+    try {
+      const success = await onConfirm({
+        mode: 'authorize',
+        authorization: {
+          usuario: auth.usuario,
+          password: auth.password
+        }
+      });
+
+      if (success) setAuthModalOpen(false);
+    } catch (_) {
+      // parent keeps error state
+    }
+  };
+
+  return (
+    <>
+      <Modal open={open} onClose={onClose} maxWidthClass="max-w-xl" panelClassName="p-6">
+        <div className="space-y-5">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="ui-panel-title">{step === 1 ? 'Cerrar caja' : 'Confirmar cierre'}</h3>
+                <StatusBadge tone={step === 1 ? 'default' : statusMeta.tone}>
+                  {step === 1 ? 'Paso 1 de 2' : 'Paso 2 de 2'}
+                </StatusBadge>
+              </div>
+              <p className="ui-panel-description">
+                {turnoLabel} · {turnoActual?.usuario_nombre || user?.nombre || 'Usuario no identificado'}
+              </p>
+            </div>
+            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={onClose}>
+              X
+            </Button>
+          </div>
+
+          {errorMessage ? <Alert tone="error">{errorMessage}</Alert> : null}
+
+          {step === 1 ? (
+            <div className="space-y-4">
+              <div className="rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+                <p className="text-sm font-semibold text-[var(--color-text)]">Resumen del turno</p>
+                <div className="mt-3 space-y-3">
+                  <ResultRow label="Saldo inicial" value={formatMoney(summary?.resumen_caja?.saldo_inicial || turnoActual?.fondo_inicial || 0)} />
+                  <ResultRow label="Ingresos efectivo" value={formatMoney(summary?.resumen_caja?.ingresos_efectivo || 0)} />
+                  <ResultRow label="Egresos efectivo" value={formatMoney(summary?.resumen_caja?.egresos_efectivo || 0)} />
+                  <ResultRow label="Efectivo esperado" value={formatMoney(efectivoEsperado)} tone="success" />
+                </div>
+              </div>
+
+              <div className={`rounded-[1.1rem] border p-4 ${
+                hasDifference
+                  ? statusMeta.tone === 'danger'
+                    ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger-soft)]'
+                    : 'border-[var(--color-warning)]/35 bg-[var(--color-warning-soft)]'
+                  : 'border-[var(--color-border)] bg-[var(--color-surface)]'
+              }`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Conteo físico</p>
+                  <StatusBadge tone={statusMeta.tone}>
+                    {statusMeta.badgeLabel}
+                  </StatusBadge>
+                </div>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Efectivo contado</label>
+                    <Input
+                      inputMode="decimal"
+                      min="0"
+                      max={MAX_CASH_OPERATION_AMOUNT}
+                      error={Boolean(errors.efectivo_contado)}
+                      placeholder="$0.00"
+                      value={form.efectivo_contado}
+                      onChange={(event) => onFormChange('efectivo_contado', sanitizeCashAmountInput(event.target.value))}
+                    />
+                    {errors.efectivo_contado ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.efectivo_contado}</p> : null}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Observación {hasDifference ? '(obligatoria)' : '(opcional)'}</label>
+                    <Textarea
+                      rows={3}
+                      placeholder={hasDifference ? 'Describe el motivo de la diferencia detectada.' : 'Notas del cierre.'}
+                      value={form.observacion}
+                      onChange={(event) => onFormChange('observacion', event.target.value)}
+                    />
+                    {errors.observacion ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.observacion}</p> : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+                  Cancelar
+                </Button>
+                <Button type="button" onClick={handleContinue} disabled={loading}>
+                  Continuar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className={`rounded-[1.1rem] border p-4 ${
+                statusMeta.tone === 'danger'
+                  ? 'border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)]'
+                  : statusMeta.tone === 'warning'
+                    ? 'border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)]'
+                    : 'border-[var(--color-success)]/20 bg-[var(--color-success-soft)]'
+              }`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge tone={statusMeta.tone}>{statusMeta.badgeLabel}</StatusBadge>
+                </div>
+                <div className="mt-4 space-y-3">
+                  <ResultRow label="Esperado" value={formatMoney(efectivoEsperado)} />
+                  <ResultRow label="Contado" value={formatMoney(contado)} />
+                  <ResultRow label="Diferencia" value={formatMoney(diferencia)} tone={statusMeta.tone} />
+                </div>
+                <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+                  {hasDifference ? 'Se detectó una diferencia en caja.' : 'Sin diferencias detectadas.'}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+                  Cancelar
+                </Button>
+                <Button type="button" variant={hasDifference ? 'danger' : 'primary'} onClick={handleConfirm} disabled={loading}>
+                  {hasDifference ? 'Confirmar cierre con diferencia' : 'Confirmar cierre'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      <Modal open={authModalOpen} onClose={() => setAuthModalOpen(false)} maxWidthClass="max-w-md" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+              <h3 className="ui-panel-title">Autorización administrativa</h3>
+              <p className="ui-panel-description">Se requiere autorización para cerrar caja con diferencia.</p>
+            </div>
+          </div>
+
+          {errorMessage ? <Alert tone="error">{errorMessage}</Alert> : null}
+
+          <div className="space-y-3">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Usuario admin</label>
+              <Input
+                error={Boolean(errors.usuario)}
+                placeholder="Usuario admin"
+                value={auth.usuario}
+                onChange={(event) => onAuthChange('usuario', event.target.value)}
+              />
+              {errors.usuario ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.usuario}</p> : null}
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Clave admin</label>
+              <Input
+                type="password"
+                error={Boolean(errors.password)}
+                placeholder="Clave admin"
+                value={auth.password}
+                onChange={(event) => onAuthChange('password', event.target.value)}
+              />
+              {errors.password ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.password}</p> : null}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setAuthModalOpen(false)} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="danger" onClick={handleAuthorize} disabled={loading}>
+              Autorizar cierre
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
+  );
 }
 
 export default function CajaPage() {
   const navigate = useNavigate();
+  const currentUser = useAuthStore((state) => state.user);
   const {
     turnoActual,
     resumen,
@@ -101,12 +555,36 @@ export default function CajaPage() {
   const [fondo, setFondo] = useState('100.00');
   const [manualModal, setManualModal] = useState(null);
   const [manualForm, setManualForm] = useState({ concepto: '', monto: '' });
-  const [corteData, setCorteData] = useState({ efectivo_contado: '', observacion: '' });
-  const [corteAuth, setCorteAuth] = useState({ usuario: '', password: '' });
+  const [manualNumericWarning, setManualNumericWarning] = useState('');
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [closeForm, setCloseForm] = useState({ efectivo_contado: '', observacion: '' });
+  const [closeAuth, setCloseAuth] = useState({ usuario: '', password: '' });
   const [movimientoDetalle, setMovimientoDetalle] = useState(null);
   const [movementFilter, setMovementFilter] = useState('TODOS');
+  const [showOnlyBalanceImpact, setShowOnlyBalanceImpact] = useState(false);
   const [movimientosPage, setMovimientosPage] = useState(1);
-  const pageSize = 10;
+  const aperturaErrors = useFormErrors();
+  const manualFormErrors = useFormErrors();
+  const cierreFormErrors = useFormErrors();
+  const pageSize = GLOBAL_PAGE_SIZE;
+
+  const resolveVentaId = (movimiento) => {
+    const tipo = String(movimiento?.tipo || '').toUpperCase();
+    const modulo = String(movimiento?.modulo_origen || '').toUpperCase();
+    const directId = Number(movimiento?.origen_id || 0);
+    const isVentaMovement = modulo.includes('VENTAS')
+      || ['VENTA_CONTADO', 'VENTA_TRANSFERENCIA', 'VENTA_CREDITO', 'DEVOLUCION_EFECTIVO', 'ANULACION_VENTA_EFECTIVO'].includes(tipo);
+
+    if (!isVentaMovement) return null;
+    if (directId > 0 && tipo !== 'DEVOLUCION_EFECTIVO') return directId;
+
+    return extractVentaIdFromText(
+      movimiento?.documento_origen,
+      movimiento?.concepto,
+      movimiento?.referencia,
+      movimiento?.observacion
+    );
+  };
 
   const resolveCompraOrdenId = (movimiento) => {
     const tipo = String(movimiento?.tipo || '').toUpperCase();
@@ -145,44 +623,51 @@ export default function CajaPage() {
   };
 
   const onViewMovimiento = (movimiento) => {
+    const ventaId = resolveVentaId(movimiento);
+    if (ventaId) {
+      navigate(`/ventas/${ventaId}`);
+      return;
+    }
+
     const compraOrdenId = resolveCompraOrdenId(movimiento);
     if (compraOrdenId) {
       navigate(`/compras/ordenes/${compraOrdenId}?readonly=1`);
       return;
     }
+
     setMovimientoDetalle(movimiento);
   };
 
   const refreshTurnoData = async (filterValue = movementFilter) => {
     try {
-      const turno = await fetchTurnoActual();
+      const turno = await fetchTurnoActual({ silent: true });
       if (!turno?.id) return;
       await Promise.all([
         corteX(),
         cargarMovimientosTurno(turno.id, { limit: 500, offset: 0, filter: filterValue })
       ]);
     } catch (_) {
-      // handled by store
+      // store handles error state
     }
   };
 
   useEffect(() => {
-    refreshTurnoData(movementFilter);
+    void refreshTurnoData(movementFilter);
   }, [movementFilter]);
 
   useEffect(() => {
     setMovimientosPage(1);
-  }, [movementFilter, movimientos.length]);
+  }, [movementFilter, showOnlyBalanceImpact, movimientos.length]);
 
   useEffect(() => {
     if (!turnoActual?.id) return undefined;
 
     const interval = setInterval(() => {
-      refreshTurnoData(movementFilter);
+      void refreshTurnoData(movementFilter);
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [turnoActual?.id]);
+  }, [turnoActual?.id, movementFilter]);
 
   const resumenCaja = resumen?.resumen_caja || {
     saldo_inicial: Number(turnoActual?.fondo_inicial || 0),
@@ -196,258 +681,278 @@ export default function CajaPage() {
     credito: 0,
     total_ventas: 0
   };
+
   const ingresos = useMemo(() => round2(Number(resumenCaja.ingresos_efectivo || 0)), [resumenCaja]);
   const egresos = useMemo(() => round2(Number(resumenCaja.egresos_efectivo || 0)), [resumenCaja]);
-  const saldoActual = Number(resumenCaja.saldo_actual || 0);
-  const efectivoContado = Number(corteData.efectivo_contado || 0);
-  const diferenciaCierre = round2(efectivoContado - saldoActual);
-  const requiereAutorizacionAdmin = corteData.efectivo_contado !== '' && Math.abs(diferenciaCierre) > 0.009;
+  const efectivoEsperado = Number(resumen?.efectivo_esperado || resumenCaja.saldo_actual || 0);
+  const closeCountedCash = Number(closeForm.efectivo_contado || 0);
+  const closeDifference = round2(closeCountedCash - efectivoEsperado);
+  const closeHasDifference = closeForm.efectivo_contado !== '' && Math.abs(closeDifference) > 0.009;
   const cajaAbiertaPor = turnoActual?.usuario_nombre || (turnoActual?.usuario_id ? `Usuario #${turnoActual.usuario_id}` : 'Usuario no identificado');
   const cajaAbiertaEn = turnoActual?.fecha_apertura ? formatDateQuito(turnoActual.fecha_apertura) : null;
-  const totalMovimientosPages = Math.max(1, Math.ceil(movimientos.length / pageSize));
+  const turnoResumen = turnoActual?.id ? `Turno #${turnoActual.id}` : 'Sin turno';
+
+  const movimientosFiltrados = useMemo(
+    () => (showOnlyBalanceImpact ? movimientos.filter((movimiento) => movimiento?.afecta_saldo) : movimientos),
+    [movimientos, showOnlyBalanceImpact]
+  );
+  const totalMovimientosPages = Math.max(1, Math.ceil(movimientosFiltrados.length / pageSize));
   const movimientosPaginados = useMemo(() => {
     const start = (movimientosPage - 1) * pageSize;
-    return movimientos.slice(start, start + pageSize);
-  }, [movimientos, movimientosPage]);
+    return movimientosFiltrados.slice(start, start + pageSize);
+  }, [movimientosFiltrados, movimientosPage]);
 
   useEffect(() => {
-    if (!requiereAutorizacionAdmin && (corteAuth.usuario || corteAuth.password)) {
-      setCorteAuth({ usuario: '', password: '' });
+    if (!closeHasDifference && (closeAuth.usuario || closeAuth.password)) {
+      setCloseAuth({ usuario: '', password: '' });
     }
-  }, [requiereAutorizacionAdmin, corteAuth.usuario, corteAuth.password]);
+  }, [closeHasDifference, closeAuth.usuario, closeAuth.password]);
 
   const onAbrir = async () => {
-    await abrirTurno({ fondo_inicial: Number(fondo || 0), observacion: 'Apertura manual desktop' });
+    const fondoInicial = Number(fondo || 0);
+    const nextErrors = {};
+    if (!String(fondo || '').trim()) nextErrors.fondo = 'Este campo es obligatorio.';
+    else if (!Number.isFinite(fondoInicial) || fondoInicial < 0) nextErrors.fondo = 'Ingresa un valor válido.';
+    if (!aperturaErrors.setErrors(nextErrors)) return;
+
+    await abrirTurno({ fondo_inicial: fondoInicial, observacion: 'Apertura manual desktop' });
     await refreshTurnoData();
   };
 
   const openManualModal = (tipo) => {
     setManualModal(tipo);
     setManualForm({ concepto: '', monto: '' });
+    setManualNumericWarning('');
+    manualFormErrors.resetErrors();
   };
 
   const onManual = async () => {
     if (!manualModal) return;
+    const monto = Number(manualForm.monto || 0);
+    const nextErrors = {};
+
+    if (!manualForm.concepto.trim()) nextErrors.concepto = 'Este campo es obligatorio.';
+    if (!String(manualForm.monto || '').trim()) nextErrors.monto = 'Este campo es obligatorio.';
+    else if (!(monto > 0)) nextErrors.monto = 'El monto debe ser mayor a 0.';
+    else if (monto > MAX_CASH_OPERATION_AMOUNT) nextErrors.monto = `El monto no puede superar ${MAX_CASH_OPERATION_AMOUNT}.`;
+    if (!manualFormErrors.setErrors(nextErrors)) return;
+
     await movimientoManual({
       tipo: manualModal,
-      concepto: manualForm.concepto,
-      monto: Number(manualForm.monto || 0)
+      concepto: manualForm.concepto.trim(),
+      monto
     });
+
     setManualModal(null);
     setManualForm({ concepto: '', monto: '' });
+    setManualNumericWarning('');
+    manualFormErrors.resetErrors();
     await refreshTurnoData();
   };
 
-  const onCorteX = async () => {
-    await corteX();
-    if (turnoActual?.id) {
-      await cargarMovimientosTurno(turnoActual.id, { limit: 500, offset: 0, filter: movementFilter });
-    }
+  const handleOpenCloseModal = async () => {
+    cierreFormErrors.resetErrors();
+    setCloseForm({ efectivo_contado: '', observacion: '' });
+    setCloseAuth({ usuario: '', password: '' });
+    await refreshTurnoData();
+    setCloseModalOpen(true);
   };
 
-  const onCorteZ = async () => {
+  const validateCloseCountStep = () => {
+    const nextErrors = {};
+
+    if (!String(closeForm.efectivo_contado || '').trim()) nextErrors.efectivo_contado = 'Este campo es obligatorio.';
+    else if (!Number.isFinite(closeCountedCash) || closeCountedCash < 0) nextErrors.efectivo_contado = 'El efectivo contado no puede ser negativo.';
+    else if (closeCountedCash > MAX_CASH_OPERATION_AMOUNT) nextErrors.efectivo_contado = `El efectivo contado no puede superar ${MAX_CASH_OPERATION_AMOUNT}.`;
+
+    if (closeHasDifference) {
+      if (!closeForm.observacion.trim()) nextErrors.observacion = 'La observación es obligatoria cuando existe diferencia.';
+    }
+
+    return cierreFormErrors.setErrors(nextErrors);
+  };
+
+  const validateCloseAuthorization = () => {
+    const nextErrors = {};
+    if (!closeAuth.usuario.trim()) nextErrors.usuario = 'Este campo es obligatorio.';
+    if (!closeAuth.password.trim()) nextErrors.password = 'Este campo es obligatorio.';
+    return cierreFormErrors.setErrors(nextErrors);
+  };
+
+  const onCloseShift = async ({ mode, authorization } = {}) => {
+    if (mode === 'step1') {
+      return validateCloseCountStep();
+    }
+
+    if (mode === 'authorize' && !validateCloseAuthorization()) {
+      return false;
+    }
+
+    if (!validateCloseCountStep()) return false;
+
     await corteZ({
-      efectivo_contado: efectivoContado,
-      observacion: corteData.observacion || undefined,
-      autorizacion: requiereAutorizacionAdmin && corteAuth.usuario.trim() && corteAuth.password
-        ? { usuario: corteAuth.usuario.trim(), password: corteAuth.password }
+      efectivo_contado: closeCountedCash,
+      observacion: closeForm.observacion.trim() || undefined,
+      autorizacion: closeHasDifference
+        ? { usuario: authorization?.usuario?.trim() || closeAuth.usuario.trim(), password: authorization?.password || closeAuth.password }
         : undefined
     });
-    setCorteData({ efectivo_contado: '', observacion: '' });
-    setCorteAuth({ usuario: '', password: '' });
+
+    setCloseModalOpen(false);
+    setCloseForm({ efectivo_contado: '', observacion: '' });
+    setCloseAuth({ usuario: '', password: '' });
+    cierreFormErrors.resetErrors();
     await refreshTurnoData();
+    return true;
   };
+
+  const quickActions = turnoActual ? (
+    <>
+      <Button onClick={() => openManualModal('INGRESO')}>+ Ingreso manual</Button>
+      <Button variant="secondary" onClick={() => openManualModal('EGRESO')}>+ Egreso manual</Button>
+      <Button variant="danger" onClick={handleOpenCloseModal}>
+        <PiLockKeyOpenBold className="h-4 w-4" />
+        Cerrar caja
+      </Button>
+    </>
+  ) : null;
 
   return (
     <div className="space-y-5">
       <PageHeader
+        eyebrow="Operación POS"
         title="Caja"
-        description="Resumen del turno actual, movimientos y control de efectivo."
-        actions={
-          turnoActual ? (
-            <>
-              <Button onClick={() => openManualModal('INGRESO')}>
-                Ingreso manual
-              </Button>
-              <Button variant="danger" onClick={() => openManualModal('EGRESO')}>
-                Egreso manual
-              </Button>
-            </>
-          ) : null
-        }
+        description="Estado del turno, acciones rápidas, resumen financiero y movimientos auditables del día."
+        actions={quickActions}
       />
+
       {turnoActual ? (
-        <div className="-mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
-          <StatusBadge tone="success">ABIERTO</StatusBadge>
-          <span>
-            Caja abierta por <span className="font-semibold text-[var(--color-text)]">{cajaAbiertaPor}</span>
-            {cajaAbiertaEn ? ` a las ${cajaAbiertaEn}` : ''}.
-          </span>
-        </div>
+        <Panel className="overflow-hidden border-[var(--color-success)]/20 bg-[linear-gradient(135deg,rgba(10,112,72,0.08),rgba(255,255,255,0.95))]">
+          <PanelSection className="px-5 py-4">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge tone="success">Caja abierta</StatusBadge>
+                <span className="text-sm font-semibold text-[var(--color-text)]">{turnoResumen}</span>
+              </div>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                {cajaAbiertaPor}
+                {cajaAbiertaEn ? ` · ${cajaAbiertaEn}` : ''}
+              </p>
+            </div>
+          </PanelSection>
+        </Panel>
       ) : null}
 
-      {error && <Alert tone="error">{error}</Alert>}
+      {error ? <Alert tone="error">{error}</Alert> : null}
 
       {!turnoActual ? (
-        <div className="min-h-[19rem] rounded-[1.35rem] border border-dashed border-[var(--color-border-strong)] bg-[color-mix(in_oklab,var(--color-surface-muted)_78%,#f8fafc_22%)] px-6 py-10">
-          <div className="mx-auto flex h-full max-w-sm flex-col items-center justify-center text-center">
-            <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-brand)] shadow-sm">
-              <PiCurrencyDollarSimpleBold className="h-7 w-7" />
-            </div>
-
-            <h3 className="text-xl font-bold text-[var(--color-text)]">Caja no iniciada</h3>
-            <p className="mt-2 max-w-md text-sm text-[var(--color-text-muted)]">
-              Todavia no hay un turno abierto. Define el fondo inicial para comenzar la operacion de caja.
-            </p>
-
-            <div className="mt-6 flex w-full max-w-xs flex-col items-center gap-3">
-              <label className="w-full text-left text-sm font-medium text-[var(--color-text)]">
-                Fondo inicial
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="shrink-0 text-base font-semibold text-[var(--color-text-muted)]">$</span>
-                  <Input
-                    className="!bg-white !border-[#9ca3af]"
-                    value={fondo}
-                    onChange={(e) => setFondo(e.target.value)}
-                  />
-                </div>
-              </label>
+        <Panel className="p-6">
+          <div className="mx-auto max-w-md space-y-5 py-4">
+            <EmptyState
+              title="Caja no iniciada"
+              description="Todavía no hay un turno abierto. Define el fondo inicial para comenzar la operación de caja."
+            />
+            <div className="space-y-3">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Fondo inicial</label>
+                <Input
+                  error={Boolean(aperturaErrors.errors.fondo)}
+                  value={fondo}
+                  onChange={(event) => {
+                    aperturaErrors.clearFieldError('fondo');
+                    setFondo(event.target.value);
+                  }}
+                />
+                {aperturaErrors.errors.fondo ? <p className="mt-2 text-sm text-[var(--color-danger)]">{aperturaErrors.errors.fondo}</p> : null}
+              </div>
               <Button className="w-full" onClick={onAbrir} disabled={loading}>
                 Abrir turno
               </Button>
             </div>
           </div>
-        </div>
+        </Panel>
       ) : (
         <>
-          <section className="ui-kpi-summary-shell">
-            <div className="ui-kpi-summary-grid grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div
-                className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #bfdbfe 72%, white 28%)' }}
-              >
-                <span className="ui-kpi-summary-icon h-11 w-11">
-                  <PiWallet className="text-[1rem]" />
-                </span>
-                <div className="space-y-1">
-                  <p className="ui-kpi-summary-label">Saldo inicial</p>
-                  <p className="ui-kpi-summary-value text-[1.85rem]">{formatMoney(turnoActual.fondo_inicial)}</p>
-                </div>
-                <p className="ui-kpi-summary-hint">Base de efectivo al abrir el turno</p>
+          <Panel className="p-4">
+            <PanelHeader title="Estado de caja" description="Entradas, salidas y efectivo esperado." />
+            <PanelSection className="px-0 pb-0 pt-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <StatTile
+                  icon={<PiWallet className="h-5 w-5 text-[var(--color-brand)]" />}
+                  label="Saldo inicial"
+                  value={formatMoney(turnoActual.fondo_inicial)}
+                  hint="Base de efectivo al abrir el turno."
+                  accentClass="bg-[var(--color-brand-soft)]"
+                />
+                <StatTile
+                  icon={<PiCashRegister className="h-5 w-5 text-[var(--color-success-text)]" />}
+                  label="Ingresos efectivo"
+                  value={formatMoney(ingresos)}
+                  hint="Ventas contado, cobranzas e ingresos manuales."
+                  accentClass="bg-[var(--color-success-soft)]"
+                />
+                <StatTile
+                  icon={<PiReceipt className="h-5 w-5 text-[var(--color-warning-text)]" />}
+                  label="Egresos efectivo"
+                  value={formatMoney(egresos)}
+                  hint="Compras, pagos y egresos registrados."
+                  accentClass="bg-[var(--color-warning-soft)]"
+                />
+                <StatTile
+                  icon={<PiCashRegister className="h-5 w-5 text-[var(--color-danger)]" />}
+                  label="Efectivo esperado"
+                  value={formatMoney(efectivoEsperado)}
+                  hint="Disponible esperado al cierre del turno."
+                  accentClass="bg-[var(--color-danger-soft)]"
+                />
               </div>
+            </PanelSection>
+          </Panel>
 
-              <div
-                className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #a7f3d0 78%, white 22%)' }}
-              >
-                <span className="ui-kpi-summary-icon h-11 w-11">
-                  <PiCashRegister className="text-[1rem]" />
-                </span>
-                <div className="space-y-1">
-                  <p className="ui-kpi-summary-label">Ingresos efectivo</p>
-                  <p className="ui-kpi-summary-value text-[1.85rem]">{formatMoney(ingresos)}</p>
-                </div>
-                <p className="ui-kpi-summary-hint">Ventas contado + cobros + ingresos manuales</p>
+          <Panel className="p-4">
+            <PanelHeader title="Ventas del turno" description="Ventas por método de pago." />
+            <PanelSection className="px-0 pb-0 pt-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <StatTile
+                  icon={<PiWallet className="h-5 w-5 text-[var(--color-brand)]" />}
+                  label="Efectivo"
+                  value={formatMoney(resumenVentas.efectivo)}
+                  hint="Ventas cobradas en caja."
+                  accentClass="bg-[var(--color-brand-soft)]"
+                />
+                <StatTile
+                  icon={<PiArrowsLeftRightBold className="h-5 w-5 text-[var(--color-info-text)]" />}
+                  label="Transferencia"
+                  value={formatMoney(resumenVentas.transferencia)}
+                  hint="Ventas registradas por transferencia."
+                  accentClass="bg-[var(--color-info-soft)]"
+                />
+                <StatTile
+                  icon={<PiCreditCardBold className="h-5 w-5 text-[var(--color-warning-text)]" />}
+                  label="Crédito"
+                  value={formatMoney(resumenVentas.credito)}
+                  hint="Ventas enviadas a crédito."
+                  accentClass="bg-[var(--color-warning-soft)]"
+                />
+                <StatTile
+                  icon={<PiChartBarBold className="h-5 w-5 text-[var(--color-danger)]" />}
+                  label="Total ventas"
+                  value={formatMoney(resumenVentas.total_ventas)}
+                  hint="Suma comercial del turno."
+                  accentClass="bg-[var(--color-danger-soft)]"
+                />
               </div>
+            </PanelSection>
+          </Panel>
 
-              <div
-                className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #fde68a 72%, white 28%)' }}
-              >
-                <span className="ui-kpi-summary-icon h-11 w-11">
-                  <PiReceipt className="text-[1rem]" />
-                </span>
-                <div className="space-y-1">
-                  <p className="ui-kpi-summary-label">Egresos</p>
-                  <p className="ui-kpi-summary-value text-[1.85rem]">{formatMoney(egresos)}</p>
-                </div>
-                <p className="ui-kpi-summary-hint">Egresos manuales y otros movimientos efectivos</p>
-              </div>
+          <Panel className="p-4">
+            <PanelHeader
+              title="Movimientos del turno"
+              description="Bloque principal de operación y auditoría del turno activo."
+            />
 
-              <div
-                className="ui-kpi-summary-item px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #e9d5ff 78%, white 22%)' }}
-              >
-                <span className="ui-kpi-summary-icon h-11 w-11">
-                  <PiCurrencyDollarSimpleBold className="text-[1rem]" />
-                </span>
-                <div className="space-y-1">
-                  <p className="ui-kpi-summary-label">Saldo actual</p>
-                  <p className="ui-kpi-summary-value text-[1.85rem]">{formatMoney(saldoActual)}</p>
-                </div>
-                <p className="ui-kpi-summary-hint">Efectivo esperado del turno en curso</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="ui-kpi-summary-shell">
-            <div className="mb-3">
-              <div>
-                <p className="text-sm font-semibold text-[var(--color-text)]">Ventas del turno</p>
-                <p className="text-xs text-[var(--color-text-muted)]">Solo el efectivo impacta la caja.</p>
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div
-                className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #bfdbfe 72%, white 28%)' }}
-              >
-                <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
-                  <PiWallet className="text-[1.05rem]" />
-                </span>
-                <div className="min-w-0 space-y-1">
-                  <p className="text-[1.55rem] font-bold leading-none text-[var(--color-text)]">{formatMoney(resumenVentas.efectivo)}</p>
-                  <p className="text-sm text-[var(--color-text-muted)]">Efectivo</p>
-                </div>
-              </div>
-
-              <div
-                className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #c7d2fe 72%, white 28%)' }}
-              >
-                <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
-                  <PiArrowsLeftRightBold className="text-[1.05rem]" />
-                </span>
-                <div className="min-w-0 space-y-1">
-                  <p className="text-[1.55rem] font-bold leading-none text-[var(--color-text)]">{formatMoney(resumenVentas.transferencia)}</p>
-                  <p className="text-sm text-[var(--color-text-muted)]">Transferencia</p>
-                </div>
-              </div>
-
-              <div
-                className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #fde68a 72%, white 28%)' }}
-              >
-                <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
-                  <PiCreditCardBold className="text-[1.05rem]" />
-                </span>
-                <div className="min-w-0 space-y-1">
-                  <p className="text-[1.55rem] font-bold leading-none text-[var(--color-text)]">{formatMoney(resumenVentas.credito)}</p>
-                  <p className="text-sm text-[var(--color-text-muted)]">Crédito</p>
-                </div>
-              </div>
-
-              <div
-                className="flex items-center gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4"
-                style={{ '--dashboard-card-icon-bg': 'color-mix(in oklab, #ddd6fe 74%, white 26%)' }}
-              >
-                <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--color-text)]" style={{ background: 'var(--dashboard-card-icon-bg)' }}>
-                  <PiCurrencyDollarSimpleBold className="text-[1.05rem]" />
-                </span>
-                <div className="min-w-0 space-y-1">
-                  <p className="text-[1.55rem] font-bold leading-none text-[var(--color-text)]">{formatMoney(resumenVentas.total_ventas)}</p>
-                  <p className="text-sm text-[var(--color-text-muted)]">Total ventas</p>
-                </div>
-              </div>
-            </div>
-          </section>
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-            <Card className="space-y-3 p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-[var(--color-text)]">Movimientos del turno actual</p>
-                  <p className="text-xs text-[var(--color-text-muted)]">Ventas, ingresos y egresos con sentido contable del turno.</p>
-                </div>
+            <PanelSection className="space-y-4 px-0 pb-0 pt-4">
+              <div className="flex flex-col gap-3 rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex flex-wrap gap-2">
                   {['TODOS', 'VENTAS', 'INGRESOS', 'EGRESOS'].map((item) => (
                     <Button
@@ -461,213 +966,151 @@ export default function CajaPage() {
                     </Button>
                   ))}
                 </div>
+
+                <Switch
+                  checked={showOnlyBalanceImpact}
+                  onChange={setShowOnlyBalanceImpact}
+                  label="Mostrar solo movimientos que afectan saldo"
+                  description="Oculta ventas informativas por transferencia y crédito."
+                />
               </div>
 
-              <Tabla>
-                <TablaCabecera>
-                  <tr>
-                    <TablaCelda as="th">Fecha</TablaCelda>
-                    <TablaCelda as="th">Método</TablaCelda>
-                    <TablaCelda as="th">Sentido</TablaCelda>
-                    <TablaCelda as="th">Origen</TablaCelda>
-                    <TablaCelda as="th" className="text-right">Monto</TablaCelda>
-                    <TablaCelda as="th">Usuario</TablaCelda>
-                    <TablaCelda as="th">Accion</TablaCelda>
-                  </tr>
-                </TablaCabecera>
-                <TablaCuerpo>
-                  {movimientos.length === 0 ? (
-                    <TablaFila>
-                      <TablaCelda colSpan={7} className="text-center text-[var(--color-text-muted)]">
-                        Sin movimientos registrados en este turno.
-                      </TablaCelda>
-                    </TablaFila>
-                  ) : (
-                    movimientosPaginados.map((m) => {
-                      const sense = resolveMovementSense(m);
-                      return (
-                      <TablaFila key={m.id}>
-                        <TablaCelda>{formatDateQuito(m.fecha)}</TablaCelda>
-                        <TablaCelda>
-                          <div className="space-y-1">
-                            <div>{formatPaymentMethod(m.metodo_pago)}</div>
-                            <div className="text-xs text-[var(--color-text-muted)]">{formatMovementType(m.tipo)}</div>
-                          </div>
-                        </TablaCelda>
-                        <TablaCelda><StatusBadge tone={sense.tone}>{sense.label}</StatusBadge></TablaCelda>
-                        <TablaCelda>{m.documento_origen || m.modulo_origen || '-'}</TablaCelda>
-                        <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(m.monto)}</TablaCelda>
-                        <TablaCelda>{m.usuario_nombre || (m.usuario_id ? `Usuario #${m.usuario_id}` : '-')}</TablaCelda>
-                        <TablaCelda>
-                          <IconButton
-                            variant="iconView"
-                            size="sm"
-                            aria-label="Ver detalle"
-                            title="Ver detalle"
-                            onClick={() => onViewMovimiento(m)}
-                          >
-                            <PiEye className="text-lg" />
-                          </IconButton>
-                        </TablaCelda>
-                      </TablaFila>
-                    )})
-                  )}
-                </TablaCuerpo>
-              </Tabla>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell as="th">Hora</TableCell>
+                    <TableCell as="th">Movimiento</TableCell>
+                    <TableCell as="th">Método</TableCell>
+                    <TableCell as="th">Referencia</TableCell>
+                    <TableCell as="th" className="text-right">Monto</TableCell>
+                    <TableCell as="th">Usuario</TableCell>
+                    <TableCell as="th">Acción</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody emptyMessage="Sin movimientos registrados en este turno." emptyColSpan={7}>
+                  {movimientosPaginados.map((movimiento) => {
+                    const sense = resolveMovementSense(movimiento);
+                    const signedAmount = `${sense.label === 'Egreso' ? '-' : '+'}${formatMoney(movimiento.monto)}`;
 
-              {movimientos.length > pageSize ? (
+                    return (
+                      <TableRow key={movimiento.id} className={!movimiento.afecta_saldo ? 'bg-[var(--color-surface-muted)]' : undefined}>
+                        <TableCell>{formatTimeQuito(movimiento.fecha)}</TableCell>
+                        <TableCell>{formatMovementType(movimiento.tipo)}</TableCell>
+                        <TableCell>{formatPaymentMethod(movimiento.metodo_pago)}</TableCell>
+                        <TableCell>{resolveMovementReference(movimiento)}</TableCell>
+                        <TableCell className="text-right font-semibold text-[var(--color-text)]">{signedAmount}</TableCell>
+                        <TableCell>{movimiento.usuario_nombre || (movimiento.usuario_id ? `Usuario #${movimiento.usuario_id}` : '-')}</TableCell>
+                        <TableCell>
+                          <TableActions>
+                            <TableActionButton
+                              variant="neutral"
+                              icon={<PiEye />}
+                              aria-label="Ver detalle"
+                              title="Ver detalle"
+                              onClick={() => onViewMovimiento(movimiento)}
+                            >
+                              Ver
+                            </TableActionButton>
+                          </TableActions>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+
+              {movimientosFiltrados.length > pageSize ? (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
                   <p className="text-sm text-[var(--color-text-muted)]">
-                    Mostrando {(movimientosPage - 1) * pageSize + 1}-{Math.min(movimientosPage * pageSize, movimientos.length)} de {movimientos.length} movimientos
+                    Mostrando {(movimientosPage - 1) * pageSize + 1}-{Math.min(movimientosPage * pageSize, movimientosFiltrados.length)} de {movimientosFiltrados.length} movimientos
                   </p>
                   <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={movimientosPage <= 1}
-                      onClick={() => setMovimientosPage((page) => Math.max(1, page - 1))}
-                    >
+                    <Button type="button" size="sm" variant="secondary" disabled={movimientosPage <= 1} onClick={() => setMovimientosPage((page) => Math.max(1, page - 1))}>
                       Anterior
                     </Button>
                     <span className="min-w-[5.5rem] text-center text-sm font-medium text-[var(--color-text)]">
                       {movimientosPage} / {totalMovimientosPages}
                     </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={movimientosPage >= totalMovimientosPages}
-                      onClick={() => setMovimientosPage((page) => Math.min(totalMovimientosPages, page + 1))}
-                    >
+                    <Button type="button" size="sm" variant="secondary" disabled={movimientosPage >= totalMovimientosPages} onClick={() => setMovimientosPage((page) => Math.min(totalMovimientosPages, page + 1))}>
                       Siguiente
                     </Button>
                   </div>
                 </div>
               ) : null}
-            </Card>
-
-            <Card className="space-y-4 p-5">
-              <div>
-                <p className="font-semibold text-[var(--color-text)]">Cierre de caja</p>
-                <p className="text-sm text-[var(--color-text-muted)]">Ejecuta corte X o cierre definitivo del turno.</p>
-              </div>
-
-              <Input
-                placeholder="Efectivo contado"
-                value={corteData.efectivo_contado}
-                onChange={(e) => setCorteData((s) => ({ ...s, efectivo_contado: e.target.value }))}
-              />
-
-              <Textarea
-                placeholder="Observacion (si hay diferencia)"
-                value={corteData.observacion}
-                onChange={(e) => setCorteData((s) => ({ ...s, observacion: e.target.value }))}
-              />
-
-              <div className="grid gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm text-[var(--color-text-muted)]">
-                <p>Saldo esperado: <strong className="text-[var(--color-text)]">{formatMoney(saldoActual)}</strong></p>
-                <p>Efectivo contado: <strong className="text-[var(--color-text)]">{formatMoney(efectivoContado)}</strong></p>
-                <p>
-                  Diferencia:{' '}
-                  <strong className={diferenciaCierre > 0 ? 'text-emerald-600' : diferenciaCierre < 0 ? 'text-rose-600' : 'text-[var(--color-text)]'}>
-                    {formatMoney(diferenciaCierre)}
-                  </strong>
-                </p>
-                <p>
-                  Estado:{' '}
-                  <strong className="text-[var(--color-text)]">
-                    {diferenciaCierre === 0 ? 'Cuadre exacto' : diferenciaCierre > 0 ? 'Sobrante' : 'Faltante'}
-                  </strong>
-                </p>
-              </div>
-
-              {requiereAutorizacionAdmin && (
-                <div className="grid gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <Input
-                    className="border-amber-300"
-                    placeholder="Usuario admin"
-                    value={corteAuth.usuario}
-                    onChange={(e) => setCorteAuth((s) => ({ ...s, usuario: e.target.value }))}
-                  />
-                  <Input
-                    type="password"
-                    className="border-amber-300"
-                    placeholder="Clave admin"
-                    value={corteAuth.password}
-                    onChange={(e) => setCorteAuth((s) => ({ ...s, password: e.target.value }))}
-                  />
-                </div>
-              )}
-
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={onCorteX}>
-                  Corte X
-                </Button>
-                <Button variant="danger" onClick={onCorteZ} disabled={corteData.efectivo_contado === ''}>
-                  Cerrar turno
-                </Button>
-              </div>
-            </Card>
-          </div>
+            </PanelSection>
+          </Panel>
         </>
       )}
 
-      <Modal open={Boolean(manualModal)} onClose={() => setManualModal(null)} maxWidthClass="max-w-md" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">
-              {manualModal === 'EGRESO' ? 'Registrar egreso manual' : 'Registrar ingreso manual'}
-            </h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Ingresa concepto y monto para el turno actual.</p>
-          </div>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setManualModal(null)}>
-            X
-          </Button>
-        </div>
+      <ManualMovementModal
+        open={Boolean(manualModal)}
+        onClose={() => {
+          setManualModal(null);
+          setManualNumericWarning('');
+        }}
+        type={manualModal}
+        form={manualForm}
+        errors={manualFormErrors.errors}
+        numericWarning={manualNumericWarning}
+        loading={loading}
+        onChange={(field, value) => {
+          manualFormErrors.clearFieldError(field);
+          if (field === 'monto') {
+            setManualNumericWarning(/[a-zA-Z]/.test(String(value || '')) ? 'Solo valores numéricos.' : '');
+            setManualForm((state) => ({ ...state, [field]: sanitizeCashAmountInput(value) }));
+            return;
+          }
+          setManualForm((state) => ({ ...state, [field]: value }));
+        }}
+        onSubmit={onManual}
+      />
 
-        <div className="mt-4 space-y-3">
-          <Input
-            placeholder="Concepto"
-            value={manualForm.concepto}
-            onChange={(e) => setManualForm((s) => ({ ...s, concepto: e.target.value }))}
-          />
-          <Input
-            placeholder="Monto"
-            value={manualForm.monto}
-            onChange={(e) => setManualForm((s) => ({ ...s, monto: e.target.value }))}
-          />
-        </div>
-
-        <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={() => setManualModal(null)}>
-            Cancelar
-          </Button>
-          <Button type="button" variant={manualModal === 'EGRESO' ? 'danger' : 'primary'} onClick={onManual}>
-            Guardar
-          </Button>
-        </div>
-      </Modal>
+      <CashClosingModal
+        open={closeModalOpen}
+        onClose={() => setCloseModalOpen(false)}
+        onPrint={() => void corteX()}
+        onConfirm={onCloseShift}
+        turnoActual={turnoActual}
+        user={currentUser}
+        summary={resumen}
+        form={closeForm}
+        auth={closeAuth}
+        errors={cierreFormErrors.errors}
+        errorMessage={error}
+        loading={loading}
+        onFormChange={(field, value) => {
+          cierreFormErrors.clearFieldError(field);
+          setCloseForm((state) => ({ ...state, [field]: value }));
+        }}
+        onAuthChange={(field, value) => {
+          cierreFormErrors.clearFieldError(field);
+          setCloseAuth((state) => ({ ...state, [field]: value }));
+        }}
+      />
 
       <Modal open={Boolean(movimientoDetalle)} onClose={() => setMovimientoDetalle(null)} maxWidthClass="max-w-md" panelClassName="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="text-lg font-semibold text-[var(--color-text)]">Detalle movimiento</h3>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setMovimientoDetalle(null)}>
-            X
-          </Button>
-        </div>
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+              <h3 className="ui-panel-title">Detalle movimiento</h3>
+            </div>
+            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setMovimientoDetalle(null)}>
+              X
+            </Button>
+          </div>
 
-        <div className="mt-3 space-y-2 text-sm text-[var(--color-text)]">
-          <p><span className="font-semibold">Fecha:</span> {formatDateQuito(movimientoDetalle?.fecha)}</p>
-          <p><span className="font-semibold">Tipo:</span> {movimientoDetalle?.tipo}</p>
-          <p><span className="font-semibold">Método:</span> {formatPaymentMethod(movimientoDetalle?.metodo_pago)}</p>
-          <p><span className="font-semibold">Sentido:</span> {movimientoDetalle?.sentido || '-'}</p>
-          <p><span className="font-semibold">Concepto:</span> {movimientoDetalle?.concepto}</p>
-          <p><span className="font-semibold">Modulo origen:</span> {movimientoDetalle?.modulo_origen || '-'}</p>
-          <p><span className="font-semibold">Documento origen:</span> {movimientoDetalle?.documento_origen || '-'}</p>
-          <p><span className="font-semibold">Actor:</span> {movimientoDetalle?.usuario_nombre || movimientoDetalle?.usuario_id || '-'}</p>
-          <p><span className="font-semibold">Observacion:</span> {movimientoDetalle?.observacion || '-'}</p>
-          <p><span className="font-semibold">Monto:</span> {formatMoney(movimientoDetalle?.monto)}</p>
+          <div className="space-y-2 text-sm text-[var(--color-text)]">
+            <p><span className="font-semibold">Fecha:</span> {formatDateQuito(movimientoDetalle?.fecha)}</p>
+            <p><span className="font-semibold">Tipo:</span> {movimientoDetalle?.tipo}</p>
+            <p><span className="font-semibold">Método:</span> {formatPaymentMethod(movimientoDetalle?.metodo_pago)}</p>
+            <p><span className="font-semibold">Sentido:</span> {movimientoDetalle?.sentido || '-'}</p>
+            <p><span className="font-semibold">Concepto:</span> {movimientoDetalle?.concepto}</p>
+            <p><span className="font-semibold">Módulo origen:</span> {movimientoDetalle?.modulo_origen || '-'}</p>
+            <p><span className="font-semibold">Documento origen:</span> {movimientoDetalle?.documento_origen || '-'}</p>
+            <p><span className="font-semibold">Actor:</span> {movimientoDetalle?.usuario_nombre || movimientoDetalle?.usuario_id || '-'}</p>
+            <p><span className="font-semibold">Observación:</span> {movimientoDetalle?.observacion || '-'}</p>
+            <p><span className="font-semibold">Monto:</span> {formatMoney(movimientoDetalle?.monto)}</p>
+          </div>
         </div>
       </Modal>
     </div>

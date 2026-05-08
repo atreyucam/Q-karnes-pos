@@ -30,7 +30,7 @@ export default function VentasMetodoChart({ ventas = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
       <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Ventas contado vs credito</p>
       <Chart type="donut" height={280} options={options} series={[contado, credito]} />
     </div>

@@ -12,3 +12,5 @@ apps/desktop/.vite/
 .env
 docs/
 apps/api/data/test-runs/
+.codex-tmp/
+test-results/

@@ -10,6 +10,7 @@ import {
 import { Alert, LoadingState, PageHeader, StatusChip } from '../../shared/ui';
 import { useDashboardStore } from '../../stores/dashboardStore';
 import DashboardAlertsCard from './DashboardAlertsCard';
+import DashboardCashStatus from './DashboardCashStatus';
 import DashboardKpiCard from './DashboardKpiCard';
 import DashboardLatestSalesTable from './DashboardLatestSalesTable';
 import DashboardQuickActions from './DashboardQuickActions';
@@ -78,20 +79,22 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Dashboard"
-        description="Resumen rápido del negocio"
-        actions={(
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/80 px-3 py-2 text-xs font-semibold text-[var(--color-text-muted)] shadow-[var(--shadow-sm)]">
-              <PiCalendarBlank className="text-sm text-[var(--color-brand)]" />
-              <span>{formatDashboardDate(dashboardData.business_date)}</span>
+    <div className="space-y-6 bg-[#F6F7F9] rounded-2xl">
+      <div className="overflow-hidden rounded-2xl bg-[#F6F7F9] px-4 py-3 sm:px-5">
+        <PageHeader
+          title="Dashboard POS"
+          description="Panel operativo del día"
+          actions={(
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-surface px-3 py-2 text-xs font-semibold text-[var(--color-text-muted)] shadow-[var(--shadow-sm)]">
+                <PiCalendarBlank className="text-sm text-[var(--color-brand)]" />
+                <span>{formatDashboardDate(dashboardData.business_date)}</span>
+              </div>
+              {loading && hasLoaded ? <StatusChip tone="info">Actualizando</StatusChip> : null}
             </div>
-            {loading && hasLoaded ? <StatusChip tone="info">Actualizando</StatusChip> : null}
-          </div>
-        )}
-      />
+          )}
+        />
+      </div>
 
       {error ? <Alert tone="error">{error}</Alert> : null}
 
@@ -107,17 +110,20 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
             <DashboardQuickActions />
-            <DashboardAlertsCard alerts={dashboardData.alertas_operativas} />
+            <DashboardCashStatus kpis={kpis} />
           </div>
 
-          <DashboardLatestSalesTable items={dashboardData.ultimas_ventas} />
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <DashboardAlertsCard alerts={dashboardData.alertas_operativas} />
+            <DashboardLatestSalesTable items={dashboardData.ultimas_ventas} />
+          </div>
         </>
       )}
 
       {!loading && !error && dashboardData.alertas_operativas.length === 0 && kpis.stock_bajo === 0 && kpis.transacciones_hoy === 0 ? (
-        <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[color-mix(in_oklab,var(--color-surface)_84%,#f5f5f4_16%)] px-4 py-3 text-sm text-[var(--color-text-muted)]">
+        <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-alt)] px-4 py-3 text-sm text-[var(--color-text-muted)]">
           <PiWarningCircle className="text-base text-[var(--color-warning)]" />
           <span>Sin operación registrada hoy. El layout se mantiene estable y mostrará datos en cuanto entren movimientos.</span>
         </div>

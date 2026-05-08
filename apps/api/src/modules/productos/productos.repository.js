@@ -16,7 +16,11 @@ async function list(filters = {}, trx = db) {
       'p.precio_venta',
       'p.stock_actual',
       'p.stock_minimo',
-      'p.activo'
+      'p.activo',
+      'p.es_vendible',
+      'p.es_transformable',
+      'p.es_insumo',
+      'p.es_merma'
     )
     .orderBy('p.codigo', 'asc');
 
@@ -29,6 +33,10 @@ async function list(filters = {}, trx = db) {
   }
 
   if (filters.activo !== undefined) query.where('p.activo', filters.activo ? 1 : 0);
+  if (filters.es_vendible !== undefined) query.where('p.es_vendible', filters.es_vendible ? 1 : 0);
+  if (filters.es_transformable !== undefined) query.where('p.es_transformable', filters.es_transformable ? 1 : 0);
+  if (filters.es_insumo !== undefined) query.where('p.es_insumo', filters.es_insumo ? 1 : 0);
+  if (filters.es_merma !== undefined) query.where('p.es_merma', filters.es_merma ? 1 : 0);
 
   return query;
 }
@@ -39,6 +47,13 @@ async function getById(id, trx = db) {
 
 async function getByCodigo(codigo, trx = db) {
   return trx('productos').whereRaw('LOWER(codigo) = LOWER(?)', [codigo]).first();
+}
+
+async function getLastGeneratedCode(trx = db) {
+  return trx('productos')
+    .whereRaw("LOWER(codigo) LIKE 'qk-%'")
+    .orderByRaw('CAST(SUBSTR(codigo, 4) AS INTEGER) DESC')
+    .first();
 }
 
 async function create(payload, trx = db) {
@@ -60,6 +75,7 @@ module.exports = {
   list,
   getById,
   getByCodigo,
+  getLastGeneratedCode,
   create,
   update,
   deactivate

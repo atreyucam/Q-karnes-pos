@@ -34,7 +34,7 @@ export default function SidebarGroup({
           'w-full relative flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-semibold tracking-[0.01em]',
           'transition-colors duration-200',
           groupActive
-            ? 'bg-[linear-gradient(135deg,var(--color-primary)_0%,var(--color-primary-strong)_100%)] text-white shadow-[0_14px_24px_-20px_rgba(180,20,40,0.9)]'
+            ? 'bg-[var(--color-primary)] text-[var(--color-text-inverse)] shadow-[var(--shadow-sm)]'
             : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]'
         )}
       >
@@ -65,7 +65,7 @@ export default function SidebarGroup({
                     clsx(
                       'block rounded-[var(--radius-sm)] px-3 py-2 text-sm font-medium transition-colors duration-200',
                       isGroupChildActive(child, location)
-                        ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)] shadow-[inset_0_0_0_1px_rgba(180,20,40,0.14)]'
+                        ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)] shadow-[inset_0_0_0_1px_var(--color-primary)]'
                         : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]'
                     )
                   }

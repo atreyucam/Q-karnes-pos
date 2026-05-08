@@ -7,11 +7,11 @@ export function formatQtyByUnit(value, unidad, options = {}) {
   const numberValue = Number(value || 0);
   if (unit === 'UND') return String(Math.trunc(numberValue));
 
-  const fixed = options.fixedLB === true;
-  if (fixed) return numberValue.toFixed(2);
+  const fixed = options.fixedLB === true || options.fixedWeight === true;
+  if (fixed) return numberValue.toFixed(3);
   return numberValue.toLocaleString('en-US', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 2
+    maximumFractionDigits: 3
   });
 }
 
@@ -28,5 +28,5 @@ export function sanitizeDecimalInput(raw, maxDecimals = 2) {
 export function sanitizeQtyInput(raw, unidad) {
   const unit = getUnidad(unidad);
   if (unit === 'UND') return String(raw || '').replace(/[^0-9]/g, '');
-  return sanitizeDecimalInput(raw, 2);
+  return sanitizeDecimalInput(raw, 3);
 }

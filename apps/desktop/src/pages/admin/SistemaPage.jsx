@@ -3,24 +3,43 @@ import {
   Alert,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
+  Field,
   Input,
   LoadingState,
+  Paginador,
   PageHeader,
+  Toast,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
   TablaCelda
-} from '../../ui';
+} from '../../shared/ui';
 import { useSistemaStore } from '../../stores/sistemaStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
+
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 function formatBytes(bytes) {
   const value = Number(bytes || 0);
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function toneClass(ok) {
+  return ok
+    ? 'border-[color-mix(in_oklab,var(--color-success)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-success)_12%,white_88%)]'
+    : 'border-[color-mix(in_oklab,var(--color-warning)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-warning)_14%,white_86%)]';
+}
+
+function toneTextClass(ok) {
+  return ok ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]';
 }
 
 export default function SistemaPage() {
@@ -42,6 +61,11 @@ export default function SistemaPage() {
 
   const [backupLabel, setBackupLabel] = useState('manual');
   const [success, setSuccess] = useState('');
+  const [pagina, setPagina] = useState(1);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [restoreDialog, setRestoreDialog] = useState(null);
+  const [restoreConfirmation, setRestoreConfirmation] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
     cargarTodo().catch(() => {});
@@ -51,6 +75,28 @@ export default function SistemaPage() {
     () => backups?.items?.[0] || null,
     [backups]
   );
+  const totalBackups = Number(backups?.items?.length || 0);
+  const totalPaginas = Math.max(1, Math.ceil(totalBackups / PAGE_SIZE));
+  const backupsPaginados = useMemo(() => {
+    const items = backups?.items || [];
+    const start = (pagina - 1) * PAGE_SIZE;
+    return items.slice(start, start + PAGE_SIZE);
+  }, [backups?.items, pagina]);
+
+  useEffect(() => {
+    if (pagina > totalPaginas) setPagina(totalPaginas);
+  }, [pagina, totalPaginas]);
+
+  useEffect(() => {
+    if (!success) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setSuccess(''), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [success]);
 
   const onCreateBackup = async () => {
     setSuccess('');
@@ -66,38 +112,46 @@ export default function SistemaPage() {
     }
   };
 
-  const onScheduleRestore = async (filename) => {
-    const typed = window.prompt(
-      `Para programar la restauración desde ${filename}, escriba RESTAURAR`
-    );
-    if (typed !== 'RESTAURAR') return;
-
+  const onConfirmRestore = async () => {
+    if (!restoreDialog) return;
     setSuccess('');
-    const result = await programarRestauracion(filename);
+    const result = await programarRestauracion(restoreDialog);
+    setRestoreDialog(null);
+    setRestoreConfirmation('');
     setSuccess(result.mensaje || 'Restauración programada');
   };
 
-  const onDeleteBackup = async (filename) => {
-    const confirmed = window.confirm(`¿Eliminar el backup ${filename}? Esta acción no se puede deshacer.`);
-    if (!confirmed) return;
-
+  const onConfirmDeleteBackup = async () => {
+    if (!deleteTarget) return;
     setSuccess('');
-    const result = await eliminarBackup(filename);
+    const result = await eliminarBackup(deleteTarget);
+    setDeleteTarget(null);
     setSuccess(`Backup eliminado: ${result.filename}`);
   };
 
   return (
     <div className="space-y-5">
+      {success ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone="success"
+            title="Operacion completada"
+            description={success}
+            onClose={() => {
+              setToastVisible(false);
+              setSuccess('');
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
+
       <PageHeader
         title="Sistema y mantenimiento"
         description="Salud local, integridad SQLite, backups y restauración controlada"
       />
 
-      {(error || success) && (
-        <Alert tone={error ? 'error' : 'success'}>
-          {error || success}
-        </Alert>
-      )}
+      {error && <Alert tone="error">{error}</Alert>}
 
       {backups?.pending_restore && (
         <Alert tone="warning">
@@ -121,22 +175,22 @@ export default function SistemaPage() {
             <LoadingState title="Consultando salud" description="Leyendo runtime local y base de datos" />
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+              <div className={`rounded-xl border p-3 ${toneClass(String(health?.status || '').toUpperCase() === 'OK')}`}>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Estado</p>
-                <p className="mt-1 text-lg font-semibold">{health?.status || '-'}</p>
+                <p className={`mt-1 text-lg font-semibold ${toneTextClass(String(health?.status || '').toUpperCase() === 'OK')}`}>{health?.status || '-'}</p>
               </div>
               <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Verificación</p>
                 <p className="mt-1 text-lg font-semibold">{health?.timestamp ? formatDateQuito(health.timestamp) : '-'}</p>
               </div>
-              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+              <div className={`rounded-xl border p-3 ${toneClass(Boolean(health?.db_ok))}`}>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Base de datos</p>
-                <p className="mt-1 text-sm font-semibold">{health?.db_ok ? 'Conectada' : 'Sin acceso'}</p>
+                <p className={`mt-1 text-sm font-semibold ${toneTextClass(Boolean(health?.db_ok))}`}>{health?.db_ok ? 'Conectada' : 'Sin acceso'}</p>
                 <p className="text-xs text-[var(--color-text-muted)]">{formatBytes(health?.runtime?.db_size_bytes)}</p>
               </div>
-              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+              <div className={`rounded-xl border p-3 ${toneClass(Boolean(health?.config_ok))}`}>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Configuración</p>
-                <p className="mt-1 text-sm font-semibold">{health?.config_ok ? 'Legible' : 'Con error'}</p>
+                <p className={`mt-1 text-sm font-semibold ${toneTextClass(Boolean(health?.config_ok))}`}>{health?.config_ok ? 'Legible' : 'Con error'}</p>
                 <p className="text-xs text-[var(--color-text-muted)]">Versión API {health?.version || '-'}</p>
               </div>
             </div>
@@ -159,13 +213,13 @@ export default function SistemaPage() {
           ) : (
             <div className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+                <div className={`rounded-xl border p-3 ${toneClass(Boolean(integridad?.resumen?.integrity_ok))}`}>
                   <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Estado</p>
-                  <p className="mt-1 text-lg font-semibold">{integridad?.status || '-'}</p>
+                  <p className={`mt-1 text-lg font-semibold ${toneTextClass(Boolean(integridad?.resumen?.integrity_ok))}`}>{integridad?.status || '-'}</p>
                 </div>
-                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+                <div className={`rounded-xl border p-3 ${toneClass(Number(integridad?.resumen?.foreign_key_violations ?? 0) === 0)}`}>
                   <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Violaciones FK</p>
-                  <p className="mt-1 text-lg font-semibold">{integridad?.resumen?.foreign_key_violations ?? 0}</p>
+                  <p className={`mt-1 text-lg font-semibold ${toneTextClass(Number(integridad?.resumen?.foreign_key_violations ?? 0) === 0)}`}>{integridad?.resumen?.foreign_key_violations ?? 0}</p>
                 </div>
               </div>
 
@@ -190,15 +244,13 @@ export default function SistemaPage() {
           </div>
 
           <div className="flex flex-wrap items-end gap-2">
-            <label className="text-sm font-medium text-[var(--color-text)]">
-              Etiqueta
+            <Field label="Etiqueta" className="min-w-[200px]">
               <Input
-                className="mt-1"
                 value={backupLabel}
                 onChange={(event) => setBackupLabel(event.target.value)}
                 placeholder="manual"
               />
-            </label>
+            </Field>
             <Button onClick={onCreateBackup} disabled={working}>
               {working ? 'Procesando...' : 'Crear backup'}
             </Button>
@@ -216,48 +268,98 @@ export default function SistemaPage() {
         ) : !backups?.items?.length ? (
           <EmptyState title="Sin backups disponibles" description="Cree un backup manual antes de ejecutar mantenimiento sensible." />
         ) : (
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">Archivo</TablaCelda>
-                <TablaCelda as="th">Tipo</TablaCelda>
-                <TablaCelda as="th">Fecha</TablaCelda>
-                <TablaCelda as="th">Tamaño</TablaCelda>
-                <TablaCelda as="th">Acciones</TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {backups.items.map((backup) => (
-                <TablaFila key={backup.filename}>
-                  <TablaCelda>{backup.filename}</TablaCelda>
-                  <TablaCelda>{backup.tipo}</TablaCelda>
-                  <TablaCelda>{formatDateQuito(backup.mtime)}</TablaCelda>
-                  <TablaCelda>{formatBytes(backup.sizeBytes)}</TablaCelda>
-                  <TablaCelda>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => onScheduleRestore(backup.filename)}
-                        disabled={working}
-                      >
-                        Restaurar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => onDeleteBackup(backup.filename)}
-                        disabled={working || backup.filename === backups?.pending_restore?.source_backup?.filename}
-                      >
-                        Eliminar
-                      </Button>
-                    </div>
-                  </TablaCelda>
-                </TablaFila>
-              ))}
-            </TablaCuerpo>
-          </Tabla>
+          <>
+            <Tabla>
+              <TablaCabecera>
+                <tr>
+                  <TablaCelda as="th">Archivo</TablaCelda>
+                  <TablaCelda as="th">Tipo</TablaCelda>
+                  <TablaCelda as="th">Fecha</TablaCelda>
+                  <TablaCelda as="th">Tamaño</TablaCelda>
+                  <TablaCelda as="th">Acciones</TablaCelda>
+                </tr>
+              </TablaCabecera>
+              <TablaCuerpo>
+                {backupsPaginados.map((backup) => (
+                  <TablaFila key={backup.filename}>
+                    <TablaCelda>{backup.filename}</TablaCelda>
+                    <TablaCelda>{backup.tipo}</TablaCelda>
+                    <TablaCelda>{formatDateQuito(backup.mtime)}</TablaCelda>
+                    <TablaCelda>{formatBytes(backup.sizeBytes)}</TablaCelda>
+                    <TablaCelda>
+                      <TableActions align="start">
+                        <TableActionButton
+                          variant="primary"
+                          onClick={() => {
+                            setRestoreDialog(backup.filename);
+                            setRestoreConfirmation('');
+                          }}
+                          disabled={working}
+                        >
+                          Restaurar
+                        </TableActionButton>
+                        <TableActionButton
+                          variant="danger"
+                          onClick={() => setDeleteTarget(backup.filename)}
+                          disabled={working || backup.filename === backups?.pending_restore?.source_backup?.filename}
+                        >
+                          Eliminar
+                        </TableActionButton>
+                      </TableActions>
+                    </TablaCelda>
+                  </TablaFila>
+                ))}
+              </TablaCuerpo>
+            </Tabla>
+            <div className="px-5 pb-5">
+              <Paginador
+                paginaActual={pagina}
+                totalPaginas={totalPaginas}
+                totalRegistros={totalBackups}
+                mostrarSiempre
+                onPageChange={setPagina}
+              />
+            </div>
+          </>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={Boolean(restoreDialog)}
+        onClose={() => {
+          setRestoreDialog(null);
+          setRestoreConfirmation('');
+        }}
+        onConfirm={onConfirmRestore}
+        title="Programar restauración"
+        description={restoreDialog ? `Para restaurar desde ${restoreDialog}, escriba RESTAURAR.` : ''}
+        confirmLabel={working ? 'Programando...' : 'Programar restauración'}
+        confirmVariant="primary"
+        confirmDisabled={restoreConfirmation !== 'RESTAURAR'}
+        confirmLoading={working}
+      >
+        <Field
+          label="Confirmación requerida"
+          hint="Esta acción deja una restauración pendiente para el siguiente reinicio de la aplicación."
+        >
+          <Input
+            value={restoreConfirmation}
+            onChange={(event) => setRestoreConfirmation(event.target.value.toUpperCase())}
+            placeholder="RESTAURAR"
+          />
+        </Field>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={onConfirmDeleteBackup}
+        title="Eliminar backup"
+        description={deleteTarget ? `¿Eliminar el backup ${deleteTarget}? Esta acción no se puede deshacer.` : ''}
+        confirmLabel={working ? 'Eliminando...' : 'Eliminar'}
+        confirmVariant="danger"
+        confirmLoading={working}
+      />
     </div>
   );
 }

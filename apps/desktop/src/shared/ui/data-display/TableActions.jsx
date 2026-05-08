@@ -1,0 +1,63 @@
+import clsx from 'clsx';
+import Button from '../primitives/Button';
+import { uiClassTokens } from '../../tokens/uiClassTokens';
+
+const alignMap = {
+  start: 'justify-start',
+  center: 'justify-center',
+  end: 'justify-end'
+};
+
+const variantMap = {
+  neutral: uiClassTokens.button.tableActionNeutral,
+  warning: uiClassTokens.button.tableActionWarning,
+  success: uiClassTokens.button.tableActionSuccess,
+  primary: uiClassTokens.button.tableActionSuccess,
+  danger: uiClassTokens.button.tableActionDanger,
+  secondary: uiClassTokens.button.tableActionSecondary
+};
+
+export function TableActions({ children, align = 'end', wrap = true, className }) {
+  return (
+    <div
+      className={clsx(
+        'flex w-full items-center gap-2',
+        alignMap[align] || alignMap.end,
+        wrap ? 'flex-wrap' : 'flex-nowrap',
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function TableActionButton({
+  children,
+  variant = 'neutral',
+  icon,
+  iconOnly = false,
+  loading = false,
+  disabled = false,
+  className,
+  ...props
+}) {
+  return (
+    <Button
+      variant={variant === 'success' ? 'primary' : variant === 'warning' ? 'secondary' : variant}
+      size={iconOnly ? 'icon' : 'table'}
+      icon={icon}
+      disabled={disabled || loading}
+      className={clsx(
+        uiClassTokens.button.tableActionBase,
+        variantMap[variant] || variantMap.neutral,
+        className
+      )}
+      {...props}
+    >
+      {iconOnly ? null : <span className="hidden lg:inline">{loading ? 'Procesando...' : children}</span>}
+    </Button>
+  );
+}
+
+export default TableActions;

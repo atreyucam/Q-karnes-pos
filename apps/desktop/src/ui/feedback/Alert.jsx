@@ -1,1 +1,1 @@
-export { default } from '../../components/ui/Alert';
+export { default } from '../../shared/ui/feedback/Alert';

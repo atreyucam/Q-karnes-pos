@@ -70,7 +70,7 @@ export default function DashboardSalesChart({ data = [] }) {
           </div>
 
           <div className="mt-6 overflow-x-auto pb-2">
-            <div className="min-w-[860px] rounded-[24px] border border-[var(--color-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(247,242,234,0.78)_100%)] p-4">
+            <div className="min-w-[860px] rounded-[24px] border border-[var(--color-border)] bg-[linear-gradient(180deg,var(--color-surface)_0%,var(--color-surface-alt)_100%)] p-4">
               <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="h-[280px] w-full">
                 <defs>
                   <linearGradient id="dashboard-line-gradient" x1="0%" x2="100%" y1="0%" y2="0%">
@@ -90,7 +90,7 @@ export default function DashboardSalesChart({ data = [] }) {
                     x2={CHART_WIDTH - PADDING_X}
                     y1={guide}
                     y2={guide}
-                    stroke="rgba(184, 178, 170, 0.6)"
+                    stroke="var(--color-border-strong)"
                     strokeDasharray="5 8"
                   />
                 ))}

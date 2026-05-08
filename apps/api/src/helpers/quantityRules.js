@@ -1,21 +1,9 @@
 const { createDomainError, DOMAIN_ERROR_CODES } = require('./domainErrors');
-
-const SUPPORTED_PRODUCT_UNITS = new Set(['UND', 'LB']);
-
-function normalizeUnit(unit) {
-  return String(unit || '').trim().toUpperCase();
-}
-
-function assertSupportedUnit(unit, details = undefined) {
-  const normalizedUnit = normalizeUnit(unit);
-  if (!SUPPORTED_PRODUCT_UNITS.has(normalizedUnit)) {
-    throw createDomainError(
-      DOMAIN_ERROR_CODES.INVALID_UNIT,
-      { unit, normalized_unit: normalizedUnit, ...(details || {}) }
-    );
-  }
-  return normalizedUnit;
-}
+const {
+  SUPPORTED_PRODUCT_UNITS,
+  normalizeUnit,
+  assertSupportedUnit
+} = require('./unitPolicy');
 
 function toFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return NaN;
@@ -55,6 +43,16 @@ function assertQuantityByUnit(value, unit, options = {}) {
       DOMAIN_ERROR_CODES.QUANTITY_MUST_BE_INTEGER,
       { field, value: numericValue, unit: normalizedUnit, ...(details || {}) }
     );
+  }
+
+  if (normalizedUnit !== 'UND') {
+    const text = String(value ?? '').trim().replace(',', '.');
+    if (/^\d+\.\d{4,}$/.test(text) || /^-\d+\.\d{4,}$/.test(text)) {
+      throw createDomainError(
+        DOMAIN_ERROR_CODES.INVALID_QUANTITY_FOR_UNIT,
+        { field, value: numericValue, unit: normalizedUnit, max_decimals: 3, ...(details || {}) }
+      );
+    }
   }
 
   return numericValue;

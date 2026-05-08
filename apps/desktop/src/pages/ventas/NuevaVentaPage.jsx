@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PiX } from 'react-icons/pi';
-import { useNavigate, useParams } from 'react-router-dom';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
+import { PiTrash, PiX } from 'react-icons/pi';
+import { useNavigate } from 'react-router-dom';
 import { useVentasStore } from '../../stores/ventasStore';
 import {
   Alert,
@@ -10,27 +9,29 @@ import {
   Input,
   Modal,
   PageHeader,
-  Select,
-  Tabla,
-  TablaCabecera,
-  TablaCuerpo,
-  TablaFila,
-  TablaCelda
+  Toast
 } from '../../ui';
 import FacturaModal from './FacturaModal';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
-import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { useVentaCatalogo } from './hooks/useVentaCatalogo';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { printSaleTicketDocument } from './printTicket';
+import { useCajaStore } from '../../stores/cajaStore';
+import {
+  PAYMENT_CODES,
+  buildVentaCreatePayload,
+  normalizePaymentMethods,
+  paymentAffectsCash,
+  paymentRequiresClient
+} from './ventaUtils';
 
 function round2(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 }
 
 function defaultQtyInput(unidad) {
-  return getUnidad(unidad) === 'UND' ? '1' : '1.00';
+  return getUnidad(unidad) === 'UND' ? '1' : '1.000';
 }
 
 function parseDecimal(value) {
@@ -50,23 +51,27 @@ function parseQtyByUnidad(value, unidad) {
 
 function formatStock(value, unidad) {
   const n = Number(value || 0);
-  return getUnidad(unidad) === 'UND' ? String(Math.trunc(n)) : n.toFixed(2);
+  return getUnidad(unidad) === 'UND'
+    ? String(Math.trunc(n))
+    : n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+}
+
+function formatQtyWithUnit(value, unidad) {
+  const unit = getUnidad(unidad);
+  const qty = Number(value || 0);
+  if (unit === 'UND') return `${Math.trunc(qty)} ${unit}`;
+  return `${qty.toFixed(3)} ${unit}`;
 }
 
 export default function NuevaVentaPage() {
   const navigate = useNavigate();
-  const { id: ventaIdParam } = useParams();
-  const isReadOnlyMode = Boolean(ventaIdParam);
-  const ventaId = ventaIdParam ? Number(ventaIdParam) : null;
   const crearVenta = useVentasStore((s) => s.crear);
-  const ventaDetalle = useVentasStore((s) => s.ventaDetalle);
-  const ticketVenta = useVentasStore((s) => s.ticket);
-  const detalleVenta = useVentasStore((s) => s.detalle);
   const cargarTicket = useVentasStore((s) => s.cargarTicket);
-  const loadingVenta = useVentasStore((s) => s.loading);
   const errorVenta = useVentasStore((s) => s.error);
   const configuracion = useConfiguracionStore((s) => s.configuracion);
   const metodosPago = useConfiguracionStore((s) => s.metodosPago);
+  const turnoActual = useCajaStore((s) => s.turnoActual);
+  const fetchTurnoActual = useCajaStore((s) => s.fetchTurnoActual);
   const {
     categorias,
     categoriaActiva,
@@ -77,177 +82,84 @@ export default function NuevaVentaPage() {
     debouncedSearch,
     loadingCatalogo,
     catalogError
-  } = useVentaCatalogo({ enabled: !isReadOnlyMode });
+  } = useVentaCatalogo();
 
   const [carrito, setCarrito] = useState([]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [modalFacturaOpen, setModalFacturaOpen] = useState(false);
   const [descuento, setDescuento] = useState('0');
-  const [selectedPaymentCode, setSelectedPaymentCode] = useState('EFECTIVO');
+  const [selectedPaymentCode, setSelectedPaymentCode] = useState(PAYMENT_CODES.EFECTIVO);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
-  const [successModal, setSuccessModal] = useState({ open: false, total: 0, progress: 100 });
+  const [successToast, setSuccessToast] = useState({ open: false, total: 0 });
   const [selectedProductoIndex, setSelectedProductoIndex] = useState(-1);
+  const [cajaRequiredModalOpen, setCajaRequiredModalOpen] = useState(false);
+  const [stockIssue, setStockIssue] = useState(null);
+  const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
+  const [checkoutMethodCode, setCheckoutMethodCode] = useState(PAYMENT_CODES.EFECTIVO);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [cashReceivedInput, setCashReceivedInput] = useState('');
+  const [transferBank, setTransferBank] = useState('');
+  const [transferReference, setTransferReference] = useState('');
+  const [transferObservation, setTransferObservation] = useState('');
+  const [creditType, setCreditType] = useState('PENDIENTE_TOTAL');
+  const [creditAbonoInput, setCreditAbonoInput] = useState('');
+  const [checkoutSubmitPhase, setCheckoutSubmitPhase] = useState('confirm');
+  const [checkoutConfirmPromptVisible, setCheckoutConfirmPromptVisible] = useState(false);
 
   const productRefs = useRef([]);
-  const currentVentaDetalle = !isReadOnlyMode || !ventaId || Number(ventaDetalle?.venta?.id) === ventaId ? ventaDetalle : null;
-  const currentTicketVenta = !isReadOnlyMode || !ventaId || Number(ticketVenta?.venta?.id) === ventaId ? ticketVenta : null;
+  const cashReceivedInputRef = useRef(null);
 
   const enabledPaymentMethods = useMemo(() => {
-    const defaults = [
-      { codigo: 'EFECTIVO', nombre: 'Efectivo', habilitado: true, es_efectivo: true },
-      { codigo: 'TRANSFERENCIA', nombre: 'Transferencia', habilitado: true, es_efectivo: false },
-      { codigo: 'CREDITO_CLIENTE', nombre: 'Credito cliente', habilitado: true, es_efectivo: false }
-    ];
+    const methods = normalizePaymentMethods(metodosPago);
+    return methods.filter((method) => {
+      if (method.codigo === PAYMENT_CODES.CREDITO_CLIENTE) {
+        return Boolean(configuracion?.permitir_ventas_credito);
+      }
+      return true;
+    });
+  }, [configuracion?.permitir_ventas_credito, metodosPago]);
 
-    const source = metodosPago.length ? metodosPago : defaults;
-    return source.filter((method) => method.habilitado);
-  }, [metodosPago]);
+  const defaultCashPaymentCode = useMemo(
+    () => enabledPaymentMethods.find((method) => method.codigo === PAYMENT_CODES.EFECTIVO)?.codigo
+      || enabledPaymentMethods.find((method) => !paymentRequiresClient(method.codigo))?.codigo
+      || enabledPaymentMethods[0]?.codigo
+      || PAYMENT_CODES.EFECTIVO,
+    [enabledPaymentMethods]
+  );
 
-  const creditoHabilitado = Boolean(configuracion?.permitir_ventas_credito)
-    && enabledPaymentMethods.some((method) => method.codigo === 'CREDITO_CLIENTE');
-
-  const paymentOptions = useMemo(() => {
-    return enabledPaymentMethods
-      .filter((method) => {
-        if (method.codigo === 'CREDITO_CLIENTE') return Boolean(clienteSeleccionado) && creditoHabilitado;
-        return true;
-      })
-      .map((method) => ({
-        value: method.codigo,
-        label: method.nombre,
-        ventaMode: method.codigo === 'CREDITO_CLIENTE' ? 'CREDITO' : 'CONTADO',
-        isCash: Boolean(method.es_efectivo)
-      }));
-  }, [clienteSeleccionado, creditoHabilitado, enabledPaymentMethods]);
-
-  useEffect(() => {
-    if (isReadOnlyMode) return;
-    if (!paymentOptions.length) return;
-    if (!paymentOptions.some((option) => option.value === selectedPaymentCode)) {
-      setSelectedPaymentCode(paymentOptions[0].value);
-    }
-  }, [isReadOnlyMode, paymentOptions, selectedPaymentCode]);
-
-  useEffect(() => {
-    if (!isReadOnlyMode || !ventaId) return;
-    detalleVenta(ventaId);
-    cargarTicket(ventaId);
-  }, [cargarTicket, detalleVenta, isReadOnlyMode, ventaId]);
-
-  useEffect(() => {
-    if (!isReadOnlyMode || !currentVentaDetalle?.detalle) return;
-
-    setCarrito(
-      currentVentaDetalle.detalle.map((item) => {
-        const unidad = getUnidad(item.unidad_medida || item.unidad);
-        const cantidad = Number(item.cantidad || 0);
-        return {
-          producto_id: item.producto_id,
-          codigo: item.producto_codigo,
-          nombre: item.producto_nombre,
-          unidad_medida: unidad,
-          stock_actual: Number(item.stock_actual || cantidad),
-          cantidadInput: unidad === 'UND' ? String(Math.trunc(cantidad)) : Number(cantidad).toFixed(2),
-          precio_venta: round2(item.precio_unit || 0)
-        };
-      })
-    );
-    setClienteSeleccionado(currentVentaDetalle.venta?.cliente || null);
-    setDescuento(String(round2(currentVentaDetalle.venta?.descuento_total || 0)));
-  }, [currentVentaDetalle, isReadOnlyMode]);
-
-  useEffect(() => {
-    if (!isReadOnlyMode || !currentTicketVenta) return;
-
-    const ticketCode = String(currentTicketVenta.codigo_metodo_pago || '').trim().toUpperCase();
-    if (ticketCode) {
-      setSelectedPaymentCode(ticketCode);
-      return;
-    }
-
-    const metodo = String(currentTicketVenta.metodo_pago || '').trim().toUpperCase();
-    if (metodo === 'CREDITO') {
-      setSelectedPaymentCode('CREDITO_CLIENTE');
-      return;
-    }
-    if (metodo === 'TRANSFERENCIA') {
-      setSelectedPaymentCode('TRANSFERENCIA');
-      return;
-    }
-    setSelectedPaymentCode('EFECTIVO');
-  }, [currentTicketVenta, isReadOnlyMode]);
+  const paymentOptions = useMemo(
+    () => enabledPaymentMethods.map((method) => ({
+      codigo: method.codigo,
+      nombre: method.nombre,
+      es_efectivo: Boolean(method.es_efectivo),
+      requiere_cliente: paymentRequiresClient(method.codigo)
+    })),
+    [enabledPaymentMethods]
+  );
 
   const selectedPaymentOption = useMemo(
-    () => paymentOptions.find((option) => option.value === selectedPaymentCode) || null,
+    () => paymentOptions.find((option) => option.codigo === selectedPaymentCode) || null,
     [paymentOptions, selectedPaymentCode]
   );
 
-  const ventaClienteLabel = String(
-    currentTicketVenta?.cliente?.nombre
-      || currentVentaDetalle?.venta?.cliente_nombre
-      || clienteSeleccionado?.nombre
-      || ''
-  ).trim() || 'Consumidor final';
+  const cajaAbierta = Boolean(turnoActual?.id);
+  const paymentImpactsCash = useMemo(
+    () => paymentAffectsCash(selectedPaymentCode, enabledPaymentMethods),
+    [enabledPaymentMethods, selectedPaymentCode]
+  );
+  const requiresOpenCashShift = paymentImpactsCash && (configuracion?.exigir_caja_abierta_para_cobros ?? true);
 
-  const ventaFechaLabel = currentVentaDetalle?.venta?.fecha ? formatDateQuito(currentVentaDetalle.venta.fecha) : '-';
-  const ventaMetodoLabel = String(currentTicketVenta?.metodo_pago || selectedPaymentOption?.label || '-');
+  useEffect(() => {
+    fetchTurnoActual({ silent: true }).catch(() => {});
+  }, [fetchTurnoActual]);
 
-  const handleGoBack = () => {
-    if (window.history.length > 1) {
-      navigate(-1);
-      return;
+  useEffect(() => {
+    if (!paymentOptions.length) return;
+    if (!paymentOptions.some((option) => option.codigo === selectedPaymentCode)) {
+      setSelectedPaymentCode(paymentOptions[0].codigo);
     }
-    navigate('/ventas');
-  };
-
-  const carritoConEstado = useMemo(
-    () =>
-      carrito.map((item) => {
-        const unidad = item.unidad_medida;
-        const qtyValue = parseQtyByUnidad(item.cantidadInput, unidad);
-
-        let cantidadError = '';
-        if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
-          cantidadError = 'Cantidad invalida';
-        } else if (unidad === 'UND' && !Number.isInteger(qtyValue)) {
-          cantidadError = 'UND solo permite enteros';
-        } else if (!isReadOnlyMode && qtyValue > Number(item.stock_actual || 0)) {
-          cantidadError = 'Stock insuficiente';
-        }
-
-        const cantidad = !cantidadError ? (unidad === 'UND' ? Math.trunc(qtyValue) : round2(qtyValue)) : 0;
-        const precio = round2(item.precio_venta);
-
-        return {
-          ...item,
-          cantidad,
-          precio,
-          subtotal: round2(cantidad * precio),
-          cantidadError,
-          invalido: Boolean(cantidadError)
-        };
-      }),
-    [carrito, isReadOnlyMode]
-  );
-
-  const hasInvalidItems = carritoConEstado.some((item) => item.invalido);
-
-  const subtotal = useMemo(
-    () => round2(carritoConEstado.reduce((acc, item) => acc + item.subtotal, 0)),
-    [carritoConEstado]
-  );
-
-  const descuentoValue = useMemo(() => {
-    const value = parseDecimal(descuento);
-    if (!Number.isFinite(value) || value < 0) return 0;
-    return round2(value);
-  }, [descuento]);
-
-  const total = useMemo(
-    () => Math.max(0, round2(subtotal - descuentoValue)),
-    [subtotal, descuentoValue]
-  );
+  }, [paymentOptions, selectedPaymentCode]);
 
   useEffect(() => {
     if (!productosMostrados.length) {
@@ -267,105 +179,135 @@ export default function NuevaVentaPage() {
   }, [selectedProductoIndex]);
 
   useEffect(() => {
-    if (!successModal.open) return undefined;
+    if (!successToast.open) return undefined;
+    const timer = window.setTimeout(() => {
+      setSuccessToast((current) => (current.open ? { ...current, open: false } : current));
+    }, 5600);
+    return () => window.clearTimeout(timer);
+  }, [successToast.open]);
 
-    const duration = 3000;
-    const startedAt = Date.now();
-    const interval = window.setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, duration - elapsed);
-      const progress = (remaining / duration) * 100;
+  const carritoConEstado = useMemo(
+    () => carrito.map((item) => {
+      const unidad = getUnidad(item.unidad_medida);
+      const qtyValue = parseQtyByUnidad(item.cantidadInput, unidad);
 
-      if (remaining <= 0) {
-        window.clearInterval(interval);
-        setSuccessModal((current) => (
-          current.open
-            ? { ...current, open: false, progress: 0 }
-            : current
-        ));
-        return;
+      let cantidadError = '';
+      if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
+        cantidadError = 'Cantidad invalida';
+      } else if (unidad === 'UND' && !Number.isInteger(qtyValue)) {
+        cantidadError = 'UND solo permite enteros';
+      } else if (qtyValue > Number(item.stock_actual || 0)) {
+        cantidadError = 'Stock insuficiente';
       }
 
-      setSuccessModal((current) => (
-        current.open
-          ? { ...current, progress }
-          : current
-      ));
-    }, 50);
+      const cantidad = !cantidadError
+        ? (unidad === 'UND' ? Math.trunc(qtyValue) : round2(qtyValue))
+        : 0;
+      const precio = round2(item.precio_venta);
 
-    return () => window.clearInterval(interval);
-  }, [successModal.open]);
+      return {
+        ...item,
+        cantidad,
+        precio,
+        subtotal: round2(cantidad * precio),
+        cantidadError,
+        invalido: Boolean(cantidadError)
+      };
+    }),
+    [carrito]
+  );
 
-  const addProductoToCarrito = (producto) => {
-    const unidad = getUnidad(producto.unidad_medida || producto.unidad);
-    const qtyToAdd = 1;
-    const stockActual = Number(producto.stock_actual || 0);
+  const hasInvalidItems = carritoConEstado.some((item) => item.invalido);
+  const subtotal = useMemo(
+    () => round2(carritoConEstado.reduce((acc, item) => acc + item.subtotal, 0)),
+    [carritoConEstado]
+  );
+  const descuentoValue = useMemo(() => {
+    const value = parseDecimal(descuento);
+    if (!Number.isFinite(value) || value < 0) return 0;
+    return round2(value);
+  }, [descuento]);
+  const total = useMemo(
+    () => Math.max(0, round2(subtotal - descuentoValue)),
+    [descuentoValue, subtotal]
+  );
+  const creditAbonoValue = useMemo(() => {
+    const value = parseDecimal(creditAbonoInput);
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    return round2(value);
+  }, [creditAbonoInput]);
+  const creditSaldoPendiente = useMemo(
+    () => Math.max(0, round2(total - creditAbonoValue)),
+    [creditAbonoValue, total]
+  );
+  const cashReceivedValue = useMemo(() => {
+    const value = parseDecimal(cashReceivedInput);
+    if (!Number.isFinite(value) || value < 0) return 0;
+    return round2(value);
+  }, [cashReceivedInput]);
+  const cashChangeValue = useMemo(
+    () => Math.max(0, round2(cashReceivedValue - total)),
+    [cashReceivedValue, total]
+  );
+  const checkoutMethodIsEfectivo = checkoutMethodCode === PAYMENT_CODES.EFECTIVO;
+  const checkoutMethodIsTransfer = checkoutMethodCode === PAYMENT_CODES.TRANSFERENCIA;
+  const checkoutMethodIsCredito = checkoutMethodCode === PAYMENT_CODES.CREDITO_CLIENTE;
+  const checkoutClienteEsConsumidorFinal = !clienteSeleccionado?.id;
+  const checkoutCanConfirm = useMemo(() => {
+    if (submitting || !checkoutModalOpen || !carritoConEstado.length || hasInvalidItems || total <= 0) return false;
+    if (!paymentOptions.some((option) => option.codigo === checkoutMethodCode)) return false;
 
-    setLocalError('');
-    setCarrito((prev) => {
-      const existing = prev.find((item) => item.producto_id === producto.id);
+    if (checkoutMethodIsEfectivo) {
+      return cashReceivedValue >= total;
+    }
+    if (checkoutMethodIsTransfer) return Boolean(transferBank.trim());
+    if (checkoutMethodIsCredito) {
+      if (checkoutClienteEsConsumidorFinal) return false;
+      if (creditType === 'ABONO_PARCIAL') return creditAbonoValue > 0 && creditAbonoValue < total;
+      return true;
+    }
+    return false;
+  }, [
+    submitting,
+    checkoutModalOpen,
+    carritoConEstado.length,
+    hasInvalidItems,
+    total,
+    paymentOptions,
+    checkoutMethodCode,
+    checkoutMethodIsEfectivo,
+    checkoutMethodIsTransfer,
+    checkoutMethodIsCredito,
+    cashReceivedValue,
+    transferBank,
+    checkoutClienteEsConsumidorFinal,
+    creditType,
+    creditAbonoValue
+  ]);
+  const checkoutPrimaryLabel = useMemo(() => {
+    if (checkoutMethodIsTransfer) return `Confirmar transferencia ${formatMoney(total)}`;
+    if (checkoutMethodIsCredito) return `Confirmar crédito ${formatMoney(total)}`;
+    return `Cobrar ${formatMoney(total)}`;
+  }, [checkoutMethodIsCredito, checkoutMethodIsTransfer, total]);
+  const checkoutPrimaryLoadingLabel = checkoutSubmitPhase === 'register'
+    ? 'Registrando venta...'
+    : 'Confirmando pago...';
+  const cashQuickAmounts = useMemo(() => [10, 15, 20, 50], []);
 
-      if (existing) {
-        const existingQty = parseQtyByUnidad(existing.cantidadInput, unidad);
-        const newQty = (Number.isFinite(existingQty) ? existingQty : 0) + qtyToAdd;
-        if (newQty > stockActual) {
-          setLocalError(`Stock insuficiente para ${producto.codigo}`);
-          return prev;
-        }
+  useEffect(() => {
+    if (!checkoutModalOpen || !checkoutMethodIsEfectivo) return;
+    const timer = window.setTimeout(() => {
+      cashReceivedInputRef.current?.focus();
+      cashReceivedInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [checkoutMethodIsEfectivo, checkoutModalOpen]);
 
-        return prev.map((item) =>
-          item.producto_id === producto.id
-            ? { ...item, cantidadInput: unidad === 'UND' ? String(newQty) : Number(newQty).toFixed(2) }
-            : item
-        );
-      }
-
-      if (qtyToAdd > stockActual) {
-        setLocalError(`Stock insuficiente para ${producto.codigo}`);
-        return prev;
-      }
-
-      return [
-        ...prev,
-        {
-          producto_id: producto.id,
-          codigo: producto.codigo,
-          nombre: producto.nombre,
-          unidad_medida: unidad,
-          stock_actual: stockActual,
-          cantidadInput: defaultQtyInput(unidad),
-          precio_venta: round2(producto.precio_venta || producto.precio_referencia || 0)
-        }
-      ];
-    });
-  };
-
-  const updateItemCantidadInput = (productoId, unidad, rawValue) => {
-    const normalized = sanitizeQtyInput(rawValue, unidad);
-    setCarrito((prev) =>
-      prev.map((item) =>
-        item.producto_id === productoId
-          ? { ...item, cantidadInput: normalized }
-          : item
-      )
-    );
-  };
-
-  const removeItem = (productoId) => {
-    setCarrito((prev) => prev.filter((item) => item.producto_id !== productoId));
-  };
-
-  const resetVentaDraft = () => {
-    setCarrito([]);
-    setClienteSeleccionado(null);
-    setDescuento('0');
-    setSelectedPaymentCode(paymentOptions[0]?.value || 'EFECTIVO');
-    setLocalError('');
-  };
-
-  const closeSuccessModal = () => {
-    setSuccessModal((current) => ({ ...current, open: false, progress: 0 }));
-  };
+  const ventaActionDisabled = submitting
+    || !carritoConEstado.length
+    || hasInvalidItems
+    || !paymentOptions.length
+    || (selectedPaymentOption?.requiere_cliente && !clienteSeleccionado);
 
   const handleSearchKeyDown = (event) => {
     if (!productosMostrados.length) return;
@@ -389,8 +331,103 @@ export default function NuevaVentaPage() {
     }
   };
 
-  const submitVenta = async () => {
+  const addProductoToCarrito = (producto) => {
+    const unidad = getUnidad(producto.unidad_medida || producto.unidad);
+    const qtyToAdd = unidad === 'UND' ? 1 : 1;
+    const stockActual = Number(producto.stock_actual || 0);
+
     setLocalError('');
+    setCarrito((prev) => {
+      const existing = prev.find((item) => item.producto_id === producto.id);
+
+      if (existing) {
+        const existingQty = parseQtyByUnidad(existing.cantidadInput, unidad);
+        const newQty = round2((Number.isFinite(existingQty) ? existingQty : 0) + qtyToAdd);
+
+        if (newQty > stockActual) {
+          setStockIssue({
+            producto: producto.nombre,
+            disponible: formatStock(stockActual, unidad),
+            unidad
+          });
+          return prev;
+        }
+
+        return prev.map((item) => (
+          item.producto_id === producto.id
+            ? { ...item, cantidadInput: unidad === 'UND' ? String(newQty) : Number(newQty).toFixed(3) }
+            : item
+        ));
+      }
+
+      if (qtyToAdd > stockActual) {
+        setStockIssue({
+          producto: producto.nombre,
+          disponible: formatStock(stockActual, unidad),
+          unidad
+        });
+        return prev;
+      }
+
+      return [
+        ...prev,
+        {
+          producto_id: producto.id,
+          codigo: producto.codigo,
+          nombre: producto.nombre,
+          unidad_medida: unidad,
+          stock_actual: stockActual,
+          cantidadInput: defaultQtyInput(unidad),
+          precio_venta: round2(producto.precio_venta || producto.precio_referencia || 0)
+        }
+      ];
+    });
+  };
+
+  const updateItemCantidadInput = (productoId, unidad, rawValue) => {
+    const normalized = sanitizeQtyInput(rawValue, unidad);
+    setCarrito((prev) => prev.map((item) => (
+      item.producto_id === productoId
+        ? { ...item, cantidadInput: normalized }
+        : item
+    )));
+  };
+
+  const removeItem = (productoId) => {
+    setCarrito((prev) => prev.filter((item) => item.producto_id !== productoId));
+  };
+
+  const resetVentaDraft = () => {
+    setCarrito([]);
+    setClienteSeleccionado(null);
+    setDescuento('0');
+    setSelectedPaymentCode(defaultCashPaymentCode);
+    setLocalError('');
+    setCheckoutModalOpen(false);
+    setCheckoutConfirmPromptVisible(false);
+    setCheckoutError('');
+    setCashReceivedInput('');
+    setTransferBank('');
+    setTransferReference('');
+    setTransferObservation('');
+    setCreditType('PENDIENTE_TOTAL');
+    setCreditAbonoInput('');
+  };
+
+  const closeSuccessToast = () => {
+    setSuccessToast((current) => ({ ...current, open: false }));
+  };
+
+  const handleClearCliente = () => {
+    setClienteSeleccionado(null);
+    if (paymentRequiresClient(selectedPaymentCode)) {
+      setSelectedPaymentCode(defaultCashPaymentCode);
+    }
+  };
+
+  const openCheckoutModal = () => {
+    setLocalError('');
+    setCheckoutError('');
 
     if (!carritoConEstado.length) {
       setLocalError('Agrega al menos un producto al carrito');
@@ -398,97 +435,240 @@ export default function NuevaVentaPage() {
     }
 
     if (hasInvalidItems) {
+      const stockItem = carritoConEstado.find((item) => item.cantidadError === 'Stock insuficiente');
+      if (stockItem) {
+        setStockIssue({
+          producto: stockItem.nombre,
+          disponible: formatStock(stockItem.stock_actual, stockItem.unidad_medida),
+          unidad: stockItem.unidad_medida
+        });
+        return;
+      }
       setLocalError('Corrige cantidades invalidas en el carrito');
       return;
     }
 
-    if (!selectedPaymentCode || !selectedPaymentOption) {
+    if (!selectedPaymentOption) {
       setLocalError('Selecciona un metodo de pago');
       return;
     }
 
-    if (selectedPaymentOption.ventaMode === 'CREDITO') {
-      if (!creditoHabilitado) {
-        setLocalError('El credito cliente esta deshabilitado en la configuracion');
+    setCheckoutMethodCode(selectedPaymentCode);
+    setCheckoutSubmitPhase('confirm');
+    setCreditType('PENDIENTE_TOTAL');
+    setCreditAbonoInput('');
+    setCashReceivedInput('');
+    setTransferBank('');
+    setTransferReference('');
+    setTransferObservation('');
+    setCheckoutModalOpen(true);
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const clearMethodSpecificFields = (methodCode) => {
+    if (methodCode === PAYMENT_CODES.EFECTIVO) {
+      setCashReceivedInput('');
+      return;
+    }
+    if (methodCode === PAYMENT_CODES.TRANSFERENCIA) {
+      setTransferBank('');
+      setTransferReference('');
+      setTransferObservation('');
+      return;
+    }
+    if (methodCode === PAYMENT_CODES.CREDITO_CLIENTE) {
+      setCreditType('PENDIENTE_TOTAL');
+      setCreditAbonoInput('');
+    }
+  };
+
+  const handleCheckoutMethodChange = (nextMethodCode) => {
+    if (nextMethodCode === checkoutMethodCode) return;
+    clearMethodSpecificFields(checkoutMethodCode);
+    setCheckoutMethodCode(nextMethodCode);
+    setCheckoutError('');
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const applyCashQuickAmount = (amount) => {
+    setCashReceivedInput(Number(amount || 0).toFixed(2));
+    setCheckoutError('');
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const closeCheckoutModal = () => {
+    if (submitting) return;
+    setCheckoutModalOpen(false);
+    setCheckoutError('');
+    setCheckoutSubmitPhase('confirm');
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const closeCheckoutConfirmModal = () => {
+    if (submitting) return;
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const handleCheckoutPrimaryAction = () => {
+    if (!checkoutCanConfirm) return;
+    setCheckoutConfirmPromptVisible(true);
+  };
+
+  const handleCheckoutKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      return;
+    }
+    if (event.key === 'Enter') {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement
+        && (target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) return;
+      event.preventDefault();
+      if (checkoutCanConfirm) handleCheckoutPrimaryAction();
+    }
+  };
+
+  const submitVenta = async () => {
+    if (!checkoutCanConfirm) return;
+    setCheckoutError('');
+    setCheckoutSubmitPhase('confirm');
+
+    const methodCode = checkoutMethodCode;
+    setSelectedPaymentCode(methodCode);
+    const isCredito = methodCode === PAYMENT_CODES.CREDITO_CLIENTE;
+    const isTransfer = methodCode === PAYMENT_CODES.TRANSFERENCIA;
+    const isEfectivo = methodCode === PAYMENT_CODES.EFECTIVO;
+
+    if (!paymentOptions.some((option) => option.codigo === methodCode)) {
+      setCheckoutError('Selecciona un metodo de pago valido');
+      return;
+    }
+
+    if (isCredito && !clienteSeleccionado) {
+      setCheckoutError('Se requiere un cliente para vender a credito');
+      return;
+    }
+
+    if (isCredito && !clienteSeleccionado?.id) {
+      setCheckoutError('No se puede usar credito con Consumidor final');
+      return;
+    }
+
+    const checkoutRequiresCashShift = isEfectivo || (isCredito && creditType === 'ABONO_PARCIAL');
+    if (configuracion?.exigir_caja_abierta_para_cobros && checkoutRequiresCashShift && !cajaAbierta) {
+      setCheckoutModalOpen(false);
+      setCajaRequiredModalOpen(true);
+      return;
+    }
+
+    const pagos = { contado: 0, transferencia: 0, credito: 0 };
+    const cobro = {};
+    let referencia = undefined;
+    let observacion = undefined;
+
+    if (isEfectivo) {
+      if (cashReceivedValue <= 0) {
+        setCheckoutError('Ingresa el monto recibido');
         return;
       }
-      if (!clienteSeleccionado) {
-        setLocalError('Selecciona un cliente antes de vender a credito');
+      if (cashReceivedValue < total) {
+        setCheckoutError('El monto recibido debe ser mayor o igual al total');
         return;
+      }
+      pagos.contado = total;
+      cobro.efectivo = {
+        monto_recibido: round2(cashReceivedValue),
+        cambio: round2(cashChangeValue)
+      };
+    } else if (isTransfer) {
+      if (!transferBank.trim()) {
+        setCheckoutError('Ingresa el banco o metodo de transferencia');
+        return;
+      }
+      pagos.transferencia = total;
+      referencia = transferReference.trim() || undefined;
+      observacion = [
+        `Banco: ${transferBank.trim()}`,
+        transferObservation.trim() ? `Obs: ${transferObservation.trim()}` : ''
+      ].filter(Boolean).join(' | ');
+      cobro.transferencia = {
+        banco: transferBank.trim(),
+        referencia: transferReference.trim() || undefined,
+        observacion: transferObservation.trim() || undefined
+      };
+    } else {
+      if (creditType === 'ABONO_PARCIAL') {
+        if (creditAbonoValue <= 0) {
+          setCheckoutError('Ingresa un monto abonado mayor a 0');
+          return;
+        }
+        if (creditAbonoValue >= total) {
+          setCheckoutError('El abono parcial debe ser menor al total');
+          return;
+        }
+        pagos.contado = creditAbonoValue;
+        pagos.credito = creditSaldoPendiente;
+        cobro.credito = {
+          tipo_credito: 'ABONO_PARCIAL',
+          monto_abonado: round2(creditAbonoValue),
+          saldo_pendiente: round2(creditSaldoPendiente)
+        };
+      } else {
+        pagos.credito = total;
+        cobro.credito = {
+          tipo_credito: 'PENDIENTE_TOTAL',
+          monto_abonado: 0,
+          saldo_pendiente: round2(total)
+        };
       }
     }
 
-    const contadoValue = selectedPaymentOption.ventaMode === 'CONTADO' ? total : 0;
-    const creditoValue = selectedPaymentOption.ventaMode === 'CREDITO' ? total : 0;
-
-    const payload = {
-      cliente_id: clienteSeleccionado?.id ?? null,
+    const payload = buildVentaCreatePayload({
+      clienteId: clienteSeleccionado?.id ?? null,
       items: carritoConEstado.map((item) => ({
         producto_id: item.producto_id,
         cantidad: item.cantidad
       })),
-      pagos: {
-        metodo: selectedPaymentOption.ventaMode,
-        codigo: selectedPaymentCode,
-        contado: contadoValue,
-        credito: creditoValue
-      },
-      descuento_total: descuentoValue
-    };
+      descuentoTotal: descuentoValue,
+      paymentCode: methodCode,
+      total,
+      pagosInput: pagos,
+      cobro,
+      referencia,
+      observacion
+    });
 
     setSubmitting(true);
     try {
+      setCheckoutSubmitPhase('register');
       const totalVenta = total;
       const result = await crearVenta(payload);
       const ventaId = result?.venta?.id;
       if (ventaId) {
-        const ticketResponse = await apiClient.get(`/api/ventas/${ventaId}/ticket`);
-        const ticketData = normalizeResponse(ticketResponse.data);
-        printSaleTicketDocument(ticketData, { metodoLabel: selectedPaymentOption.label });
+        const ticketData = await cargarTicket(ventaId);
+        printSaleTicketDocument(ticketData);
       }
       resetVentaDraft();
-      setSuccessModal({ open: true, total: totalVenta, progress: 100 });
+      await fetchTurnoActual({ silent: true }).catch(() => {});
+      setSuccessToast({ open: true, total: totalVenta });
     } catch (_) {
-      // handled by store
+      setCheckoutError('No se pudo registrar la venta. Intenta nuevamente.');
     } finally {
       setSubmitting(false);
+      setCheckoutSubmitPhase('confirm');
     }
   };
 
-  return (
-    <div className="sales-page-layout sales-page-shell flex h-full min-h-0 flex-col gap-4 overflow-hidden">
-      {isReadOnlyMode && (
-        <div className="shrink-0">
-          <Button type="button" variant="ghost" onClick={handleGoBack}>
-            ← Volver
-          </Button>
-        </div>
-      )}
+  const clienteLabel = clienteSeleccionado?.nombre || 'Consumidor final';
+  const metodoPagoLabel = (codigo, nombre) => (codigo === PAYMENT_CODES.CREDITO_CLIENTE ? 'Crédito' : nombre);
 
-      <PageHeader
-        title={isReadOnlyMode ? `Detalle de venta #${currentVentaDetalle?.venta?.id || ventaId || ''}` : 'Nueva venta'}
-        description={isReadOnlyMode ? 'Vista en modo lectura del comprobante registrado.' : 'Busca productos, arma el carrito y procesa el cobro.'}
-        actions={(
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="ui-badge ui-badge-neutral px-3 py-1 text-sm">
-              Cliente: {ventaClienteLabel}
-            </span>
-            {!isReadOnlyMode && clienteSeleccionado && (
-              <Button type="button" variant="ghost" onClick={() => setClienteSeleccionado(null)}>
-                Quitar cliente
-              </Button>
-            )}
-            {isReadOnlyMode ? (
-              <Button type="button" variant="secondary" onClick={() => currentTicketVenta && printSaleTicketDocument(currentTicketVenta)} disabled={!currentTicketVenta}>
-                Imprimir ticket
-              </Button>
-            ) : (
-              <Button type="button" onClick={() => setModalFacturaOpen(true)}>
-                Factura
-              </Button>
-            )}
-          </div>
-        )}
+  return (
+    <div className="sales-page-layout sales-page-shell flex h-full min-h-0 flex-col gap-1 overflow-hidden p-1 sm:p-1.5 lg:p-2">
+      <PageHeader className="mb-2"
+        title="Nueva venta"
+        description="Busca productos, agrega al carrito y cobra la venta."
       />
 
       {(localError || errorVenta || catalogError) && (
@@ -497,354 +677,661 @@ export default function NuevaVentaPage() {
         </Alert>
       )}
 
-      {!isReadOnlyMode && !paymentOptions.length && (
+      {!paymentOptions.length && (
         <Alert tone="warning" className="shrink-0">
-          No hay metodos de pago compatibles habilitados para esta venta.
+          No hay metodos de pago habilitados para ventas en la configuracion actual.
         </Alert>
       )}
 
-      {isReadOnlyMode && loadingVenta && !currentVentaDetalle && (
-        <Alert tone="info" className="shrink-0">
-          Cargando detalle de la venta...
-        </Alert>
-      )}
+      <div className="flex-1 min-h-0 grid gap-1.5 lg:grid-cols-[1fr_1.35fr]">
+        <Card className="min-h-0 border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] p-2 shadow-none">
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 space-y-2">
+              <p className="font-semibold text-[var(--color-text)]">Buscar producto</p>
 
-      <div className="flex-1 min-h-0 grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
-        <Card className="min-h-0 p-4">
-          {isReadOnlyMode ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 space-y-3">
-                <p className="font-semibold text-[var(--color-text)]">Resumen de venta</p>
+              <div className="flex items-center gap-2">
+                <Input
+                  className="min-w-0 flex-1"
+                  placeholder="Buscar por nombre, codigo o SKU"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="shrink-0"
+                  onClick={() => setSearchTerm('')}
+                >
+                  Limpiar
+                </Button>
               </div>
 
-              <div className="mt-2 flex-1 min-h-0 overflow-auto">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Cliente</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{ventaClienteLabel}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Fecha</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{ventaFechaLabel}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Método de pago</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{ventaMetodoLabel}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Referencia</p>
-                    <p className="mt-2 text-base font-semibold text-[var(--color-text)]">{currentVentaDetalle?.venta?.referencia || '-'}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 space-y-3">
-                <p className="font-semibold text-[var(--color-text)]">Categorias</p>
-
-                <div className="relative">
-                  <Input
-                    className="pr-11"
-                    placeholder="Buscar por codigo o nombre"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    onKeyDown={handleSearchKeyDown}
-                  />
-                  {searchTerm ? (
-                    <button
-                      type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-                      onClick={() => setSearchTerm('')}
-                      aria-label="Limpiar busqueda"
-                    >
-                      <PiX className="text-lg" />
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
+              <div className="overflow-x-auto">
+                <div className="inline-flex min-h-10 items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-1 mt-2 mb-1">
                   {categorias.map((categoria) => (
-                    <Button
+                    <button
                       key={categoria.id}
                       type="button"
-                      size="md"
-                      variant={categoriaActiva === categoria.id ? 'primary' : 'secondary'}
-                      className="min-h-11 rounded-xl px-4"
+                      className={`min-h-8 rounded-full px-3.5 text-xs font-semibold transition-colors ${
+                        categoriaActiva === categoria.id
+                          ? 'bg-[var(--color-text)] text-white shadow-sm'
+                          : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                      }`}
                       onClick={() => setCategoriaActiva(categoria.id)}
                     >
                       {categoria.nombre}
-                    </Button>
+                    </button>
                   ))}
                 </div>
-
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-[var(--color-text)]">Productos</p>
-                  {debouncedSearch && <p className="text-xs text-[var(--color-text-muted)]">Resultados: {productosMostrados.length}</p>}
-                </div>
-
-                {loadingCatalogo && <p className="text-sm text-[var(--color-text-muted)]">Cargando productos...</p>}
               </div>
 
-              <div className="flex-1 min-h-0 overflow-auto pt-2 pr-1">
-                {!loadingCatalogo && productosMostrados.length === 0 && (
-                  <p className="text-sm text-[var(--color-text-muted)]">No hay productos para este filtro.</p>
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-[var(--color-text)]">Productos</p>
+                {debouncedSearch && (
+                  <p className="text-xs text-[var(--color-text-muted)]">Resultados: {productosMostrados.length}</p>
                 )}
+              </div>
 
-                <div className="space-y-2">
-                  {productosMostrados.map((producto, index) => {
-                    const unidad = getUnidad(producto.unidad_medida || producto.unidad);
-                    const selected = index === selectedProductoIndex;
+              {loadingCatalogo && <p className="text-sm text-[var(--color-text-muted)]">Cargando productos...</p>}
+            </div>
 
-                    return (
-                      <button
-                        key={producto.id}
-                        type="button"
-                        ref={(node) => { productRefs.current[index] = node; }}
-                        onMouseEnter={() => setSelectedProductoIndex(index)}
-                        onClick={() => addProductoToCarrito(producto)}
-                        className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                          selected
-                            ? 'border-[var(--color-brand)] bg-[var(--color-brand-soft)]'
-                            : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[var(--color-text)]">
-                              {producto.codigo} - {producto.nombre}
+            <div className="flex-1 min-h-0 overflow-auto pt-1.5 pr-1 pb-1">
+              {!loadingCatalogo && productosMostrados.length === 0 && (
+                <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-4 py-6 text-center">
+                  <p className="text-sm font-semibold text-[var(--color-text)]">No se encontraron productos.</p>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                    Prueba con otro nombre, codigo o categoria.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                {productosMostrados.map((producto, index) => {
+                  const unidad = getUnidad(producto.unidad_medida || producto.unidad);
+                  const selected = index === selectedProductoIndex;
+                  const stockActual = Number(producto.stock_actual || 0);
+                  const stockMinimo = Number(producto.stock_minimo || 0);
+                  const isOut = stockActual <= 0;
+                  const isLow = !isOut && ((stockMinimo > 0 && stockActual <= stockMinimo) || stockActual <= 5);
+                  const stockBadgeLabel = isOut ? 'SIN STOCK' : (isLow ? 'BAJO STOCK' : null);
+                  const stockBadgeClass = isOut
+                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_74%,white_26%)] text-[var(--color-danger)]'
+                    : isLow
+                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_83%,white_17%)] text-[var(--color-warning)]'
+                      : '';
+                  const stateTintClass = isOut
+                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)]'
+                    : isLow
+                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_40%,white_60%)]'
+                      : 'bg-[var(--color-surface)]';
+                  const priceText = `${formatMoney(producto.precio_venta || producto.precio_referencia || 0)} / ${unidad}`;
+                  const stockText = `${formatStock(producto.stock_actual, unidad)} ${unidad} disponibles`;
+
+                  return (
+                    <button
+                      key={producto.id}
+                      type="button"
+                      ref={(node) => { productRefs.current[index] = node; }}
+                      onMouseEnter={() => setSelectedProductoIndex(index)}
+                      onClick={() => addProductoToCarrito(producto)}
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${stateTintClass} ${
+                        selected
+                          ? 'border-[var(--color-border-strong)]'
+                          : 'border-[var(--color-border)] hover:bg-[color-mix(in_oklab,var(--color-surface-muted)_65%,white_35%)]'
+                      } ${isOut ? 'opacity-90' : ''}`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="min-w-0 truncate text-sm font-semibold leading-tight text-[var(--color-text)]">
+                            {producto.nombre}
+                          </p>
+                          <div className="shrink-0 flex items-center gap-4">
+                            <p className="text-sm font-bold leading-none text-[var(--color-text)]">
+                              {isOut ? 'AGOTADO' : priceText}
                             </p>
-                            <p className="text-sm text-[var(--color-text-muted)]">
-                              {unidad} | Stock: {formatStock(producto.stock_actual, unidad)}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                            <div className="text-right">
-                              <p className="text-sm font-semibold text-[var(--color-text)]">
-                                {formatMoney(producto.precio_referencia || producto.precio_venta || 0)}
-                              </p>
-                              <p className="text-xs text-[var(--color-text-muted)]">P. unit</p>
-                            </div>
-                            <Button type="button" variant="primary" size="sm" onClick={(event) => {
-                              event.stopPropagation();
-                              addProductoToCarrito(producto);
-                            }}>
-                              Agregar
+                            <Button
+                              type="button"
+                              variant={isOut ? 'secondary' : 'primary'}
+                              size="sm"
+                              className="min-h-7 px-2 py-0 text-[11px] font-semibold leading-none"
+                              disabled={isOut}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                addProductoToCarrito(producto);
+                              }}
+                            >
+                              {isOut ? 'No vender' : 'Agregar'}
                             </Button>
                           </div>
                         </div>
-                      </button>
-                    );
-                  })}
+
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-[var(--color-text-muted)]">
+                            {stockText}
+                          </p>
+                          {stockBadgeLabel ? (
+                            <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stockBadgeClass}`}>
+                              {stockBadgeLabel}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="relative min-h-0 overflow-hidden border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] p-0 shadow-none">
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 border-b border-[color-mix(in_oklab,var(--color-border)_75%,transparent)] bg-[var(--color-surface-alt)] px-3 py-2">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-lg font-medium text-[var(--color-text)]">Cliente: {clienteLabel}</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold text-[var(--color-text)]">Carrito:</h3>
+                    <span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-sm font-semibold text-[var(--color-text-muted)]">
+                      {carrito.length} items
+                    </span>
+                  </div>
+                </div>
+
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                  {clienteSeleccionado ? (
+                    <Button type="button" variant="ghost" size="sm" onClick={handleClearCliente}>
+                      Quitar cliente
+                    </Button>
+                  ) : null}
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setModalFacturaOpen(true)}>
+                    Buscar cliente
+                  </Button>
                 </div>
               </div>
             </div>
-          )}
-        </Card>
 
-        <Card className="min-h-0 p-4">
-          <div className="flex h-full min-h-0 flex-col">
-            <div className="mb-2 flex shrink-0 items-center justify-between">
-              <p className="font-semibold text-[var(--color-text)]">Carrito</p>
-              <p className="text-sm font-medium text-[var(--color-text-muted)]">Items: {carrito.length}</p>
-            </div>
-
-            <div className="flex-1 min-h-0 overflow-auto">
-              <Tabla>
-                <TablaCabecera>
-                  <tr>
-                    <TablaCelda as="th">Producto</TablaCelda>
-                    <TablaCelda as="th" className="w-[118px]">Cant</TablaCelda>
-                    <TablaCelda as="th" className="text-right">P. unit</TablaCelda>
-                    <TablaCelda as="th" className="text-right">Subtotal</TablaCelda>
-                    {!isReadOnlyMode && <TablaCelda as="th" className="w-[64px] text-center">Accion</TablaCelda>}
-                  </tr>
-                </TablaCabecera>
-                <TablaCuerpo>
-                  {carritoConEstado.length === 0 && (
-                    <TablaFila>
-                      <TablaCelda colSpan={isReadOnlyMode ? 4 : 5} className="text-center text-[var(--color-text-muted)]">
-                        Sin productos en carrito
-                      </TablaCelda>
-                    </TablaFila>
-                  )}
-
+            <div className={`flex-[0.88] min-h-0 overflow-auto bg-[var(--color-surface)] px-2 py-2 ${
+              carritoConEstado.length === 0 ? 'pb-2' : 'pb-24'
+            }`}>
+              {carritoConEstado.length === 0 ? (
+                <div className="flex h-full min-h-full flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-6 text-center">
+                  <p className="text-base font-semibold text-[var(--color-text)]">El carrito esta vacio.</p>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                    Agrega productos para iniciar la venta.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
                   {carritoConEstado.map((item) => (
-                    <TablaFila key={item.producto_id} className="bg-[color-mix(in_oklab,var(--color-warning-soft)_45%,white_55%)]">
-                      <TablaCelda>
-                        <div className="min-w-[120px]">
-                          <p className="font-medium text-[var(--color-text)]">{item.nombre}</p>
-                        </div>
-                      </TablaCelda>
-                      <TablaCelda>
-                        {isReadOnlyMode ? (
-                          <div className="inline-flex min-w-[108px] items-center gap-2 px-1 py-2 text-sm font-semibold text-[var(--color-text)]">
-                            <span>{item.cantidadInput}</span>
-                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                              {item.unidad_medida}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="flex min-w-[108px] items-center gap-2">
-                            <Input
-                              type="text"
-                              inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
-                              className="w-[4.5rem] px-2 py-1 text-sm"
-                              value={item.cantidadInput}
-                              onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
-                            />
-                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                              {item.unidad_medida}
-                            </span>
-                          </div>
-                        )}
-                        {item.cantidadError && <p className="mt-1 text-[11px] text-[var(--color-danger)]">{item.cantidadError}</p>}
-                      </TablaCelda>
-                      <TablaCelda className="text-right">
-                        <div className="inline-flex min-w-[75px] justify-end px-1 py-2 text-right text-sm font-semibold text-[var(--color-text)]">
-                          {formatMoney(item.precio)}
-                        </div>
-                      </TablaCelda>
-                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                        <div className="inline-flex min-w-[75px] justify-end px-1 py-2 text-right text-sm font-semibold text-[var(--color-text)]">
+                    <article
+                      key={item.producto_id}
+                      className={`rounded-lg border px-3 py-2 ${
+                        item.cantidadError
+                          ? 'border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-soft)_52%,white_48%)]'
+                          : 'border-[var(--color-border)] bg-[var(--color-surface-alt)]'
+                      }`}
+                    >
+                      <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:gap-3">
+                        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">
+                          {item.nombre}
+                        </p>
 
-                        {formatMoney(item.subtotal)}
+                        <div className="flex shrink-0 items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                          <input
+                            type="text"
+                            inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
+                            className="h-8 w-[78px] shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0 text-right text-sm font-semibold text-[var(--color-text)] outline-none transition focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--color-brand)_25%,transparent)]"
+                            value={item.cantidadInput}
+                            onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
+                          />
+
+                          <span className="shrink-0 font-semibold uppercase">
+                            {getUnidad(item.unidad_medida)}
+                          </span>
+
+                          <span className="shrink-0">x</span>
+
+                          <span className="shrink-0 font-semibold text-[var(--color-text)]">
+                            {formatMoney(item.precio)}
+                          </span>
                         </div>
-                      </TablaCelda>
-                      {!isReadOnlyMode && (
-                        <TablaCelda className="text-center">
-                          <Button
-                            type="button"
-                            variant="iconDanger"
-                            size="sm"
-                            className="font-bold"
-                            aria-label={`Quitar ${item.nombre}`}
-                            title="Quitar"
-                            onClick={() => removeItem(item.producto_id)}
-                          >
-                            <span className="text-xl font-extrabold leading-none text-current">×</span>
-                          </Button>
-                        </TablaCelda>
-                      )}
-                    </TablaFila>
+
+                        <p className="w-[74px] shrink-0 text-right text-sm font-bold text-[var(--color-text)]">
+                          {formatMoney(item.subtotal)}
+                        </p>
+
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[color-mix(in_oklab,var(--color-danger)_30%,transparent)] bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)] text-[var(--color-danger)] transition hover:bg-[color-mix(in_oklab,var(--color-danger-soft)_58%,white_42%)]"
+                          aria-label={`Quitar ${item.nombre}`}
+                          title="Quitar"
+                          onClick={() => removeItem(item.producto_id)}
+                        >
+                          <PiTrash className="text-base" />
+                        </button>
+                      </div>
+
+                      {item.cantidadError ? (
+                        <p className="mt-1.5 text-xs font-semibold text-[var(--color-danger)]">{item.cantidadError}</p>
+                      ) : null}
+                    </article>
                   ))}
-                </TablaCuerpo>
-              </Tabla>
+                </div>
+              )}
             </div>
 
-            <div className="mt-3 shrink-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="sticky bottom-0 z-10 flex-[0.12] shrink-0 border-t border-[color-mix(in_oklab,var(--color-border)_75%,transparent)] bg-[var(--color-surface-alt)] p-3">
+              <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(220px,290px)]">
                 <div className="space-y-2">
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Metodo de pago</label>
-                    {isReadOnlyMode ? (
-                      <div className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-2.5 text-sm font-medium text-[var(--color-text)]">
-                        {ventaMetodoLabel}
-                      </div>
-                    ) : (
-                      <Select value={selectedPaymentCode} onChange={(e) => setSelectedPaymentCode(e.target.value)} disabled={!paymentOptions.length}>
-                        {paymentOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                    )}
-                  </div>
-
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Descuento</label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Descuento</label>
                     <Input
                       type="text"
                       inputMode="decimal"
+                      className="h-9"
                       value={descuento}
-                      disabled={isReadOnlyMode}
                       onChange={(e) => setDescuento(sanitizeDecimalInput(e.target.value, 2))}
                     />
                   </div>
                 </div>
 
-                <div className="space-y-2 text-right lg:pt-4">
-                  <div className="flex items-center justify-end gap-6 text-sm text-[var(--color-text-muted)]">
-                    <span>Subtotal</span>
-                    <span className="min-w-[110px] font-semibold text-[var(--color-text)]">{formatMoney(subtotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-end gap-6 text-sm text-[var(--color-text-muted)]">
-                    <span>Descuento</span>
-                    <span className="min-w-[110px] font-semibold text-[var(--color-text)]">{formatMoney(descuentoValue)}</span>
-                  </div>
-                  <div className="flex items-center justify-end gap-6 border-t border-[var(--color-border)] pt-3 text-base">
-                    <span className="font-semibold text-[var(--color-text)]">Total</span>
-                    <span className="min-w-[110px] text-2xl font-bold text-[var(--color-text)]">{formatMoney(total)}</span>
+                <div className="ml-auto w-full max-w-[300px] rounded-lg border border-[color-mix(in_oklab,var(--color-border)_70%,transparent)] bg-[var(--color-surface)] px-3 py-2.5 text-right">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+                      <span>Subtotal</span>
+                      <span className="font-semibold text-[var(--color-text)]">{formatMoney(subtotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+                      <span>Descuento</span>
+                      <span className="font-semibold text-[var(--color-text)]">{formatMoney(descuentoValue)}</span>
+                    </div>
+                    <div className="mt-1 border-t border-[var(--color-border)] pt-2">
+                      <p className="text-[10px] font-semibold tracking-wider text-[var(--color-text-muted)]">TOTAL</p>
+                      <p className="text-3xl font-black leading-none text-[var(--color-text)]">{formatMoney(total)}</p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {isReadOnlyMode ? (
-                <div className="mt-3 flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={handleGoBack}>
-                    Volver
-                  </Button>
-                </div>
-              ) : (
-                <div className="mt-3 flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={resetVentaDraft}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="cashier"
-                    disabled={submitting || !carritoConEstado.length || hasInvalidItems || !paymentOptions.length}
-                    onClick={submitVenta}
-                  >
-                    {submitting ? 'Procesando...' : 'Cobrar'}
-                  </Button>
-                </div>
-              )}
+              <div className="mt-2.5 flex flex-wrap justify-end gap-1.5">
+                <Button type="button" size="sm" variant="secondary" onClick={resetVentaDraft}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  className="min-w-[150px] px-4 py-1.5 text-sm font-semibold"
+                  disabled={ventaActionDisabled}
+                  onClick={openCheckoutModal}
+                >
+                  {submitting ? 'Procesando...' : 'Cobrar'}
+                </Button>
+              </div>
             </div>
           </div>
         </Card>
       </div>
-
-      {!isReadOnlyMode && (
-        <FacturaModal
-          open={modalFacturaOpen}
-          onClose={() => setModalFacturaOpen(false)}
-          onSelectCliente={(cliente) => {
-            setClienteSeleccionado(cliente);
-            if (selectedPaymentCode === 'CREDITO_CLIENTE') return;
-            if (creditoHabilitado) setSelectedPaymentCode('CREDITO_CLIENTE');
-          }}
-        />
-      )}
-
-      <Modal open={!isReadOnlyMode && successModal.open} onClose={closeSuccessModal} maxWidthClass="max-w-md" panelClassName="overflow-hidden p-0">
-        <div className="p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-xl font-semibold text-[var(--color-text)]">La venta ha sido exitosa</h3>
-              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                Se registró correctamente el cobro por <span className="font-semibold text-emerald-600">{formatMoney(successModal.total)}</span>.
-              </p>
+      
+      <Modal open={checkoutModalOpen} onClose={() => {}} maxWidthClass="max-w-2xl" panelClassName="p-0">
+        <div className="max-h-[86vh] overflow-y-auto" onKeyDown={handleCheckoutKeyDown}>
+          <div className="space-y-3 p-4 sm:p-5">
+          <div className="ui-modal-header">
+            <div className="relative w-full">
+              <div className="ui-modal-header-copy pr-10">
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">Cobrar venta</h3>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                onClick={closeCheckoutModal}
+                aria-label="Cerrar modal de cobro"
+                icon={<PiX className="text-lg" />}
+              />
             </div>
-            <Button type="button" variant="ghost" size="sm" onClick={closeSuccessModal}>
-              X
-            </Button>
           </div>
 
-          <div className="mt-6 flex justify-end">
-            <Button type="button" variant="secondary" onClick={closeSuccessModal}>
-              Cerrar
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Cliente: <span className="font-semibold text-[var(--color-text)]">{clienteLabel}</span>
+              </p>
+              <Button type="button" size="sm" variant="secondary" onClick={() => setModalFacturaOpen(true)}>
+                Cambiar
+              </Button>
+            </div>
+            <div className="mt-3 border-t border-[var(--color-border)] pt-3 text-right">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Total a pagar</p>
+              <p className="mt-1 text-4xl font-black leading-none text-[var(--color-text)]">{formatMoney(total)}</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Metodo de pago</p>
+            <div className="flex flex-wrap gap-2">
+              {paymentOptions.map((option) => (
+                <Button
+                  key={option.codigo}
+                  type="button"
+                  size="sm"
+                  variant={checkoutMethodCode === option.codigo ? 'primary' : 'secondary'}
+                  onClick={() => handleCheckoutMethodChange(option.codigo)}
+                >
+                  {metodoPagoLabel(option.codigo, option.nombre)}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {checkoutMethodIsEfectivo ? (
+            <section className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+              <p className="text-sm font-semibold text-[var(--color-text)]">Pago en efectivo</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Monto recibido</label>
+                  <Input
+                    ref={cashReceivedInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    value={cashReceivedInput}
+                    onChange={(e) => setCashReceivedInput(sanitizeDecimalInput(e.target.value, 2))}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Cambio</label>
+                  <div className="mt-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-right">
+                    <p className="text-2xl font-black leading-none text-[var(--color-text)]">{formatMoney(cashChangeValue)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="secondary" onClick={() => applyCashQuickAmount(total)}>
+                  Exacto
+                </Button>
+                {cashQuickAmounts.map((amount) => (
+                  <Button key={amount} type="button" size="sm" variant="secondary" onClick={() => applyCashQuickAmount(amount)}>
+                    {formatMoney(amount)}
+                  </Button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {checkoutMethodIsTransfer ? (
+            <section className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+              <p className="text-sm font-semibold text-[var(--color-text)]">Pago por transferencia</p>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Banco o metodo</label>
+                <select
+                  className="h-10 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none transition focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--color-brand)_25%,transparent)]"
+                  value={transferBank}
+                  onChange={(e) => setTransferBank(e.target.value)}
+                >
+                  <option value="">Selecciona banco</option>
+                  <option value="Banco del Pichincha">Banco del Pichincha</option>
+                  <option value="Banco del Pacifico">Banco del Pacifico</option>
+                  <option value="Banco del Austro">Banco del Austro</option>
+                  <option value="Banco de Guayaquil">Banco de Guayaquil</option>
+                  <option value="Produbanco">Produbanco</option>
+                  <option value="Banco Bolivariano">Banco Bolivariano</option>
+                  <option value="Otros">Otros</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Numero de referencia (opcional)</label>
+                <Input value={transferReference} onChange={(e) => setTransferReference(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Observacion (opcional)</label>
+                <Input value={transferObservation} onChange={(e) => setTransferObservation(e.target.value)} />
+              </div>
+            </section>
+          ) : null}
+
+          {checkoutMethodIsCredito ? (
+            <section className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+              <p className="text-sm font-semibold text-[var(--color-text)]">Venta a credito</p>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Cliente: <span className="font-semibold text-[var(--color-text)]">{clienteLabel}</span>
+              </p>
+              {!clienteSeleccionado?.id ? (
+                <p className="text-sm font-semibold text-[var(--color-danger)]">Se requiere un cliente para vender a credito.</p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={creditType === 'PENDIENTE_TOTAL' ? 'primary' : 'secondary'}
+                  onClick={() => setCreditType('PENDIENTE_TOTAL')}
+                >
+                  Pendiente total
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={creditType === 'ABONO_PARCIAL' ? 'primary' : 'secondary'}
+                  onClick={() => setCreditType('ABONO_PARCIAL')}
+                >
+                  Abono parcial
+                </Button>
+              </div>
+
+              {creditType === 'ABONO_PARCIAL' ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Monto abonado</label>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={creditAbonoInput}
+                      onChange={(e) => setCreditAbonoInput(sanitizeDecimalInput(e.target.value, 2))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Saldo restante</label>
+                    <Input
+                      type="text"
+                      disabled
+                      className="font-semibold text-[var(--color-text)] disabled:text-[var(--color-text)]"
+                      value={formatMoney(creditSaldoPendiente)}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm font-medium text-[var(--color-text)]">Saldo pendiente: {formatMoney(total)}</p>
+              )}
+            </section>
+          ) : null}
+
+          {checkoutError ? <Alert tone="error">{checkoutError}</Alert> : null}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" onClick={closeCheckoutModal} disabled={submitting}>
+              Cancelar
+            </Button>
+            <Button variant="primary" className="min-w-[230px]" disabled={!checkoutCanConfirm} onClick={handleCheckoutPrimaryAction}>
+              {submitting ? checkoutPrimaryLoadingLabel : checkoutPrimaryLabel}
             </Button>
           </div>
         </div>
+        </div>
+      </Modal>
 
-        <div className="h-3 w-full bg-emerald-100">
-          <div
-            className="h-full bg-emerald-500"
-            style={{ width: `${successModal.progress}%` }}
-          />
+      <Modal open={checkoutConfirmPromptVisible} onClose={() => {}} maxWidthClass="max-w-lg" panelClassName="p-0">
+        <div className="space-y-4 p-4 sm:p-5">
+          <div className="ui-modal-header">
+            <div className="relative w-full">
+              <div className="ui-modal-header-copy pr-10">
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">Confirmar cobro</h3>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                onClick={closeCheckoutConfirmModal}
+                aria-label="Cerrar confirmacion de cobro"
+                icon={<PiX className="text-lg" />}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[color-mix(in_oklab,var(--color-brand)_28%,transparent)] bg-[color-mix(in_oklab,var(--color-brand-soft)_28%,white_72%)] p-3">
+            {!clienteSeleccionado?.id ? (
+              <p className="text-sm text-[var(--color-text)]">
+                Se cobrara como <strong>Consumidor final</strong> por un total de <strong>{formatMoney(total)}</strong>.
+              </p>
+            ) : (
+              <p className="text-sm text-[var(--color-text)]">
+                Se cobrara a <strong>{clienteSeleccionado.nombre}</strong> por un total de <strong>{formatMoney(total)}</strong>.
+              </p>
+            )}
+
+            {checkoutMethodIsEfectivo ? (
+              <div className="mt-2 space-y-1 border-t border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] pt-2 text-sm">
+                <div className="flex items-center justify-between text-[var(--color-text)]">
+                  <span>Recibido</span>
+                  <strong>{formatMoney(cashReceivedValue)}</strong>
+                </div>
+                <div className="flex items-center justify-between text-[var(--color-text)]">
+                  <span>Cambio</span>
+                  <strong>{formatMoney(cashChangeValue)}</strong>
+                </div>
+              </div>
+            ) : null}
+
+            {checkoutMethodIsTransfer ? (
+              <div className="mt-2 space-y-1 border-t border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] pt-2 text-sm text-[var(--color-text)]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Banco</span>
+                  <strong className="text-right">{transferBank || '-'}</strong>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Nro. transferencia</span>
+                  <strong className="text-right">{transferReference || '-'}</strong>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <span>Observacion</span>
+                  <strong className="max-w-[60%] text-right font-semibold">{transferObservation || '-'}</strong>
+                </div>
+              </div>
+            ) : null}
+
+            {checkoutMethodIsCredito ? (
+              <div className="mt-2 space-y-1 border-t border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] pt-2 text-sm text-[var(--color-text)]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Tipo de credito</span>
+                  <strong className="text-right">
+                    {creditType === 'ABONO_PARCIAL' ? 'Abono parcial' : 'Pendiente total'}
+                  </strong>
+                </div>
+                {creditType === 'ABONO_PARCIAL' ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Abono</span>
+                      <strong className="text-right">{formatMoney(creditAbonoValue)}</strong>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Saldo pendiente</span>
+                      <strong className="text-right">{formatMoney(creditSaldoPendiente)}</strong>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeCheckoutConfirmModal} disabled={submitting}>
+              Cancelar
+            </Button>
+            <Button variant="primary" onClick={submitVenta} disabled={!checkoutCanConfirm || submitting}>
+              {submitting ? checkoutPrimaryLoadingLabel : 'Cobrar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <FacturaModal
+        open={modalFacturaOpen}
+        onClose={() => setModalFacturaOpen(false)}
+        onSelectCliente={(cliente) => {
+          setClienteSeleccionado(cliente);
+          setLocalError('');
+        }}
+      />
+
+      {successToast.open ? (
+        <div className="fixed right-5 top-5 z-[1200] max-w-sm">
+          <button type="button" className="block w-full border-0 bg-transparent p-0 text-left" onClick={closeSuccessToast}>
+            <Toast tone="success">
+              Venta aprobada correctamente por {formatMoney(successToast.total)}.
+            </Toast>
+          </button>
+        </div>
+      ) : null}
+
+      <Modal open={cajaRequiredModalOpen} onClose={() => setCajaRequiredModalOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Turno de caja requerido</h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              La venta en efectivo requiere un turno de caja abierto. Transferencia y credito pueden registrarse sin afectar caja fisica.
+            </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCajaRequiredModalOpen(false)}>
+              Entendido
+            </Button>
+            <Button onClick={() => navigate('/caja')}>
+              Ir a caja
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={Boolean(stockIssue)} onClose={() => setStockIssue(null)} maxWidthClass="max-w-lg" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="ui-modal-header">
+            <div className="relative w-full">
+              <div className="ui-modal-header-copy pr-10">
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">Stock insuficiente</h3>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  No hay stock suficiente para completar la venta del producto seleccionado.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                onClick={() => setStockIssue(null)}
+                aria-label="Cerrar modal de stock insuficiente"
+                icon={<PiX className="text-lg" />}
+              />
+            </div>
+          </div>
+          <div className="rounded-xl border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-warning-soft)_40%,white_60%)] p-3 text-sm text-[var(--color-text)]">
+            <p><strong>Producto:</strong> {stockIssue?.producto || '-'}</p>
+            <p><strong>Disponible:</strong> {stockIssue?.disponible || '0'} {stockIssue?.unidad || ''}</p>
+            <div className="mt-2">
+              <span className="rounded-md bg-[color-mix(in_oklab,var(--color-warning-soft)_83%,white_17%)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-warning)]">
+                BAJO STOCK
+              </span>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setStockIssue(null)}>
+              Entendido
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>

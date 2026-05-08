@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PiClock, PiList, PiSignOut, PiStorefront } from 'react-icons/pi';
+import { PiCalendarBlank, PiClock, PiList, PiSignOut, PiStorefront } from 'react-icons/pi';
 import { Dropdown, IconButton, TopbarAction } from '../../shared/ui';
 import { useAuthStore } from '../../stores/authStore';
 import { useCajaStore } from '../../stores/cajaStore';
@@ -45,6 +45,7 @@ function formatNowTime(date) {
 export default function PosTopbar({ user, onToggleMenu }) {
   const logout = useAuthStore((s) => s.logout);
   const turnoActual = useCajaStore((s) => s.turnoActual);
+  const fetchTurnoActual = useCajaStore((s) => s.fetchTurnoActual);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -66,75 +67,89 @@ export default function PosTopbar({ user, onToggleMenu }) {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const syncTurno = () => {
+      fetchTurnoActual({ silent: true }).catch(() => {});
+    };
+
+    syncTurno();
+    window.addEventListener('focus', syncTurno);
+    const timer = window.setInterval(syncTurno, 60000);
+
+    return () => {
+      window.removeEventListener('focus', syncTurno);
+      window.clearInterval(timer);
+    };
+  }, [fetchTurnoActual]);
+
   return (
-    <header className="fixed left-0 right-0 top-0 z-[31] h-[var(--topbar-height)] border-b border-[var(--color-border)] bg-white shadow-sm lg:left-[var(--sidebar-width)]">
-      <div className="flex h-full items-center justify-between gap-3 px-4 md:px-6 lg:px-8">
-        <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-30">
+      <div className="topbar">
+        <div className="topbar-left">
           <IconButton
             type="button"
-            variant="ghost"
+            variant="icon"
             onClick={onToggleMenu}
             aria-label="Alternar menu lateral"
-            className="text-[var(--color-text-muted)]"
+            className="topbar-menu-button text-[var(--color-text-muted)]"
           >
-            <PiList className="text-xl" />
+            <PiList className="text-lg" />
           </IconButton>
         </div>
 
-        <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:flex items-center gap-4">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-base font-extrabold text-[var(--color-text)] shadow-sm">
-            <PiClock className="text-lg text-[var(--color-info)]" />
+        <div className="topbar-spacer" />
+
+        <div className="topbar-right">
+          <div className="topbar-pill topbar-date">
+            <PiCalendarBlank />
             <span>{formatNowDate(now)}</span>
           </div>
-          <div className="inline-flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-base font-extrabold text-[var(--color-text)] shadow-sm">
+          <div className="topbar-pill topbar-time">
+            <PiClock />
             {formatNowTime(now)}
           </div>
-          <div className={`inline-flex items-center rounded-full border px-4 py-2.5 text-base font-extrabold shadow-sm ${
-            turnoActual?.id
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : 'border-slate-200 bg-slate-100 text-slate-700'
-          }`}>
-            {turnoActual?.id ? 'Caja abierta' : 'Caja cerrada'}
+          <div className={`cash-status ${turnoActual?.id ? 'open' : 'closed'}`}>
+            <span>{turnoActual?.id ? 'Caja abierta' : 'Caja cerrada'}</span>
           </div>
-        </div>
 
-        <div className="relative" ref={dropdownRef}>
-          <TopbarAction onClick={() => setOpen((prev) => !prev)}>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-brand)] text-xs font-semibold text-white">
-              {initials(user?.nombre)}
-            </div>
-            <div className="hidden text-left sm:block">
-              <p className="text-sm font-semibold text-[var(--color-text)]">{user?.nombre || 'Usuario'}</p>
-              <p className="text-xs text-[var(--color-text-muted)]">{user?.rol?.nombre || '-'}</p>
-            </div>
-          </TopbarAction>
+          <div className="relative" ref={dropdownRef}>
+            <TopbarAction onClick={() => setOpen((prev) => !prev)} className="user-menu-trigger">
+              <div className="user-avatar">
+                {initials(user?.nombre)}
+              </div>
+              <div className="topbar-user-text">
+                <p className="user-name">{user?.nombre || 'Usuario'}</p>
+                <p className="user-role">{user?.rol?.nombre || '-'}</p>
+              </div>
+            </TopbarAction>
 
-          <Dropdown open={open}>
-            <div className="rounded-[var(--radius-md)] px-3 py-2 text-sm text-[var(--color-text)]">
-              <p className="font-semibold">{user?.nombre || 'Usuario'}</p>
-              <p className="text-xs text-[var(--color-text-muted)]">{user?.rol?.nombre || '-'}</p>
-            </div>
-            <div className="my-1 border-t border-[var(--color-border)]" />
-            <button
-              type="button"
-              onClick={() => navigate('/caja')}
-              className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]"
-            >
-              <PiStorefront className="text-base text-[var(--color-info)]" />
-              Ir a caja
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                logout();
-                navigate('/login');
-              }}
-              className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm font-medium text-[var(--color-danger)] hover:bg-[color-mix(in_oklab,var(--color-danger)_10%,white_90%)]"
-            >
-              <PiSignOut className="text-base" />
-              Salir
-            </button>
-          </Dropdown>
+            <Dropdown open={open}>
+              <div className="rounded-[var(--radius-md)] px-3 py-2 text-sm text-[var(--color-text)]">
+                <p className="font-semibold">{user?.nombre || 'Usuario'}</p>
+                <p className="text-xs text-[var(--color-text-muted)]">{user?.rol?.nombre || '-'}</p>
+              </div>
+              <div className="my-1 border-t border-[var(--color-border)]" />
+              <button
+                type="button"
+                onClick={() => navigate('/caja')}
+                className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-alt)]"
+              >
+                <PiStorefront className="text-base text-[var(--color-info)]" />
+                Ir a caja
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  logout();
+                  navigate('/login');
+                }}
+                className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
+              >
+                <PiSignOut className="text-base" />
+                Salir
+              </button>
+            </Dropdown>
+          </div>
         </div>
       </div>
     </header>

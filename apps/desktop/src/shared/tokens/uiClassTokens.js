@@ -1,77 +1,83 @@
 export const uiClassTokens = {
   page: {
-    section: '-mx-4 -mb-4 min-h-screen bg-slate-50 px-4 pb-4 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6 lg:-mx-8 lg:-mb-8 lg:px-8 lg:pb-8',
-    container: 'mx-auto max-w-[1400px] rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:p-8',
-    title: 'text-2xl font-bold text-slate-900',
-    subtitle: 'text-slate-500',
+    section: '-mx-4 -mb-4 min-h-screen bg-background px-4 pb-4 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4 lg:-mx-6 lg:-mb-6 lg:px-6 lg:pb-6',
+    container: 'mx-auto max-w-[1400px] rounded-[16px] border border-border bg-surface p-4 shadow-posSm sm:p-5 lg:p-6',
+    title: 'text-2xl font-bold text-text',
+    subtitle: 'text-sm font-normal text-text-muted',
     header: {
-      layout: 'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'
+      layout: 'flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'
     }
   },
   card: {
-    base: 'rounded-2xl border border-slate-200 bg-white',
-    header: 'rounded-t-2xl border-b border-slate-100 bg-slate-50 px-4 py-4',
-    headerTitle: 'text-lg font-bold text-slate-900',
-    headerSubtitle: 'text-sm text-slate-500',
-    body: 'p-4'
+    base: 'rounded-[16px] border border-border bg-surface shadow-posSm',
+    header: 'rounded-t-[16px] border-b border-border bg-surface-muted px-5 py-4',
+    headerTitle: 'text-base font-semibold text-text',
+    headerSubtitle: 'text-sm text-text-muted',
+    body: 'p-5'
   },
   table: {
-    wrapper: 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm',
-    base: 'w-full text-left text-sm text-slate-600',
-    headRow: 'bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200',
-    headCell: 'px-6 py-3',
-    body: 'divide-y divide-slate-100 bg-white',
-    row: 'transition-colors hover:bg-slate-50/80',
-    cell: 'px-6 py-4',
+    wrapper: 'overflow-hidden rounded-[14px] border border-border bg-surface shadow-posSm',
+    base: 'w-full border-separate border-spacing-0 text-left text-[13px] text-text',
+    headRow: 'bg-background text-[12px] font-semibold uppercase tracking-[0.03em] text-text-muted',
+    headCell: 'h-11 px-4 py-0',
+    body: 'divide-y divide-border bg-surface',
+    row: 'transition-colors even:bg-[#FCFCFD] hover:bg-surface-alt',
+    cell: 'h-14 px-4 py-0 align-middle text-[13px] font-medium text-text-secondary',
     empty: 'py-16 text-center'
   },
   button: {
-    base: 'inline-flex cursor-pointer items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
-    primary: 'bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800',
-    secondary: 'bg-sky-600 text-white hover:bg-sky-700 active:bg-sky-800',
-    warning: 'bg-amber-600 text-white hover:bg-amber-700 active:bg-amber-800',
-    neutral: 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200',
-    ghost: 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-none',
-    icon: 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 hover:text-slate-700 shadow-none',
-    iconView: 'bg-white text-emerald-600 border border-emerald-100 hover:bg-emerald-50 hover:text-emerald-700 shadow-none',
-    iconEdit: 'bg-white text-amber-600 border border-amber-100 hover:bg-amber-50 hover:text-amber-700 shadow-none',
-    iconSecondary: 'bg-white text-sky-600 border border-sky-100 hover:bg-sky-50 hover:text-sky-700 shadow-none',
-    iconSuccess: 'bg-white text-emerald-600 border border-emerald-100 hover:bg-emerald-50 hover:text-emerald-700 shadow-none',
-    successOutline: 'bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 shadow-none',
-    warningOutline: 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50 shadow-none',
-    dangerOutline: 'bg-white text-rose-700 border border-rose-200 hover:bg-rose-50 shadow-none',
-    iconDanger: 'bg-white text-slate-500 border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 shadow-none',
-    tableAction: '!px-3 !py-1.5 text-xs border-slate-200',
-    iconAction: '!px-2.5 !py-2'
+    base: 'inline-flex items-center justify-center whitespace-nowrap transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 disabled:cursor-not-allowed disabled:shadow-none',
+    primary: 'bg-[#EF4444] text-white border border-[#EF4444] shadow-sm hover:bg-[#DC2626] hover:border-[#DC2626] disabled:bg-[#FEE2E2] disabled:text-[#991B1B] disabled:border-[#FEE2E2]',
+    secondary: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    danger: 'bg-white text-[#EF4444] border border-[#FECACA] hover:bg-[#FEE2E2] hover:border-[#FCA5A5] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    warning: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    neutral: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    ghost: 'bg-transparent text-[#374151] border border-transparent hover:bg-[#F3F4F6] disabled:text-[#9CA3AF]',
+    icon: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconView: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconEdit: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconSecondary: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconSuccess: 'bg-[#EF4444] text-white border border-[#EF4444] shadow-sm hover:bg-[#DC2626] hover:border-[#DC2626] disabled:bg-[#FEE2E2] disabled:text-[#991B1B] disabled:border-[#FEE2E2]',
+    successOutline: 'border border-success bg-surface text-success hover:bg-success-soft shadow-none',
+    warningOutline: 'border border-warning bg-surface text-warning hover:bg-warning-soft shadow-none',
+    dangerOutline: 'border border-danger bg-surface text-danger hover:bg-danger-soft shadow-none',
+    iconDanger: 'bg-white text-[#EF4444] border border-[#FECACA] hover:bg-[#FEE2E2] hover:border-[#FCA5A5] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionBase: '',
+    tableActionNeutral: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionWarning: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionSuccess: 'bg-[#EF4444] text-white border border-[#EF4444] shadow-sm hover:bg-[#DC2626] hover:border-[#DC2626] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionDanger: 'bg-white text-[#EF4444] border border-[#FECACA] hover:bg-[#FEE2E2] hover:border-[#FCA5A5] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionSecondary: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconAction: ''
   },
   input: {
-    label: 'block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide',
-    base: 'w-full rounded-xl border bg-white py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all',
-    normal: 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-100',
-    error: 'border-rose-300 focus:border-rose-500 focus:ring-rose-200',
+    label: 'mb-1.5 block text-xs font-bold uppercase tracking-[0.04em] text-text-muted',
+    base: 'h-10 w-full rounded-[10px] border bg-surface px-3 text-sm font-normal text-text placeholder:text-text-subtle disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none transition-all',
+    normal: 'border-border focus:border-[var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.16)]',
+    error: 'border-danger focus:border-danger focus:shadow-[0_0_0_3px_rgba(239,68,68,0.14)]',
     withIcon: 'pl-10 pr-3',
     withoutIcon: 'px-3'
   },
   select: {
-    base: 'w-full rounded-xl border bg-white py-2.5 pl-3 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 transition-all appearance-none',
-    normal: 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-100',
-    error: 'border-rose-300 focus:border-rose-500 focus:ring-rose-200'
+    base: 'h-10 w-full appearance-none rounded-[10px] border bg-surface py-0 pl-3 pr-10 text-sm font-normal text-text disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none transition-all',
+    normal: 'border-border focus:border-[var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.16)]',
+    error: 'border-danger focus:border-danger focus:shadow-[0_0_0_3px_rgba(239,68,68,0.14)]'
   },
   modal: {
     overlay: 'fixed inset-0 z-[1000] bg-black/50 backdrop-blur-[1px] p-0 sm:p-4 flex sm:items-center sm:justify-center',
-    panel: 'w-full h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-2rem)] rounded-none sm:rounded-2xl border border-slate-200 bg-white shadow-[0_24px_60px_rgba(0,0,0,.18)] overflow-hidden flex flex-col',
+    panel: 'flex h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-border bg-surface shadow-posLg sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl',
     width: {
       default: 'sm:max-w-[min(880px,calc(100vw-1rem))]',
       medium: 'sm:max-w-[min(840px,calc(100vw-1rem))]',
       large: 'sm:max-w-[min(1040px,calc(100vw-1rem))]',
       xlarge: 'sm:max-w-[min(1120px,calc(100vw-1rem))]'
     },
-    header: 'px-4 sm:px-6 lg:px-8 py-4 border-b border-slate-200 bg-slate-50/50',
-    headerTitle: 'text-lg sm:text-xl font-extrabold text-slate-900 leading-tight',
-    headerDescription: 'text-sm text-slate-500 mt-0.5',
-    close: 'inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors',
+    header: 'border-b border-border bg-background px-4 py-4 sm:px-6 lg:px-8',
+    headerTitle: 'text-lg font-extrabold leading-tight text-text sm:text-xl',
+    headerDescription: 'mt-0.5 text-sm text-text-muted',
+    close: 'inline-flex h-8 w-8 items-center justify-center rounded-md text-text-subtle transition-colors hover:bg-surface-alt hover:text-text',
     body: 'min-h-0 flex-1 overflow-y-auto',
-    footer: 'px-4 sm:px-6 lg:px-8 py-4 border-t border-slate-200 bg-white'
+    footer: 'border-t border-border bg-surface px-4 py-4 sm:px-6 lg:px-8'
   }
 };
 

@@ -23,6 +23,7 @@
     "restore:local": "npm --workspace apps/api run support:restore",
     "test:modulo1": "npm --workspace apps/api run test:modulo1",
     "test:modulo2": "npm --workspace apps/api run test:modulo2",
+    "test:modulo2:frontend": "npm --workspace apps/desktop run test:modulo2:frontend",
     "test:modulo3": "npm --workspace apps/api run test:modulo3",
     "test:modulo4": "npm --workspace apps/api run test:modulo4",
     "test:modulo5": "npm --workspace apps/api run test:modulo5",

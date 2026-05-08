@@ -10,36 +10,26 @@ import {
   PiStorefront,
   PiTag,
   PiTruck,
+  PiWarningCircle,
   PiUsersThree
 } from 'react-icons/pi';
 
 export const navigationItems = [
   { type: 'link', to: '/dashboard', label: 'Inicio', icon: PiHouseLine, roles: ['ADMIN', 'CAJERO'] },
   { type: 'link', to: '/caja', label: 'Caja', icon: PiCashRegister, roles: ['ADMIN', 'CAJERO'] },
-  {
-    type: 'group',
-    key: 'ventas',
-    label: 'Ventas',
-    icon: PiShoppingCartSimple,
-    roles: ['ADMIN', 'CAJERO'],
-    defaultTo: '/ventas/nueva',
-    basePath: '/ventas',
-    items: [
-      { to: '/ventas/nueva', label: 'Nueva venta' },
-      { to: '/ventas', label: 'Historial y devoluciones' }
-    ]
-  },
+  { type: 'link', to: '/ventas/nueva', label: 'Nueva venta', icon: PiShoppingCartSimple, roles: ['ADMIN', 'CAJERO'] },
+  { type: 'link', to: '/ventas', label: 'Ventas', icon: PiShoppingCartSimple, roles: ['ADMIN', 'CAJERO'] },
   {
     type: 'group',
     key: 'compras',
     label: 'Compras',
     icon: PiTruck,
     roles: ['ADMIN', 'CAJERO'],
-    defaultTo: '/compras',
+    defaultTo: '/compras/nueva',
     basePath: '/compras',
     items: [
-      { to: '/compras', label: 'Órdenes' },
-      { to: '/compras/nueva', label: 'Nueva orden' }
+      { to: '/compras/nueva', label: 'Nueva orden' },
+      { to: '/compras', label: 'Órdenes' }
     ]
   },
   {
@@ -65,18 +55,18 @@ export const navigationItems = [
     label: 'Reportes',
     icon: PiChartBar,
     roles: ['ADMIN', 'CAJERO'],
-    defaultTo: '/reportes?tab=ventas',
+    defaultTo: '/reportes/resumen',
     basePath: '/reportes',
     items: [
-      { to: '/reportes', search: 'tab=ventas', label: 'Ventas' },
-      { to: '/reportes', search: 'tab=ventasProducto', label: 'Ventas por producto' },
-      { to: '/reportes', search: 'tab=inventario', label: 'Inventario' },
-      { to: '/reportes', search: 'tab=caja', label: 'Caja' },
-      { to: '/reportes', search: 'tab=cxc', label: 'Cuentas por cobrar' },
-      { to: '/reportes', search: 'tab=cxp', label: 'Cuentas por pagar' },
-      { to: '/reportes', search: 'tab=compras', label: 'Compras' }
+      { to: '/reportes/resumen', label: 'Resumen' },
+      { to: '/reportes/ventas', label: 'Ventas' },
+      { to: '/reportes/caja', label: 'Caja' },
+      { to: '/reportes/inventario', label: 'Inventario' },
+      { to: '/reportes/compras', label: 'Compras' },
+      { to: '/reportes/despiece', label: 'Despiece' }
     ]
   },
+  { type: 'link', to: '/admin/auditoria', label: 'Auditoria', icon: PiWarningCircle, roles: ['ADMIN'] },
   { type: 'link', to: '/admin/configuracion', label: 'Configuración', icon: PiGearSix, roles: ['ADMIN'] },
   { type: 'link', to: '/admin/sistema', label: 'Sistema', icon: PiHardDrives, roles: ['ADMIN'] }
 ];

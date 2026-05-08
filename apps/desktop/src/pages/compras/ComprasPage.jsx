@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PiCalendarBlank, PiCheckCircle, PiEye, PiMagnifyingGlass, PiPackage, PiPlus, PiTruck, PiX } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Button, Card, IconButton, Input, MetricTile, Modal, PageHeader, Paginador, Select, StatusBadge, Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda, Textarea } from '../../ui';
+import { Alert, Button, Card, Field, FiltersBar, Input, MetricTile, Modal, PageHeader, Paginador, Select, StatusBadge, Tabla, TablaCabecera, TablaCuerpo, TablaFila, TablaCelda, TableActions, TableActionButton, Textarea } from '../../ui';
 import { parseApiError } from '../../lib/apiClient';
 import { useComprasStore } from '../../stores/comprasStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { resolveCompraStatus } from './comprasStatus';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 export default function ComprasPage() {
   const { ordenes, error, listarOrdenes, cancelarOrden, cerrarOrdenParcial } = useComprasStore();
@@ -91,7 +92,7 @@ export default function ComprasPage() {
     <div className="space-y-5">
       <PageHeader
         title="Órdenes de compra"
-        description="Crear orden no mueve stock. Solo la recepción confirmada ingresa inventario."
+        description="La orden solo registra intención de compra. El stock, costo visible y valorización se actualizan al recepcionar."
         actions={(
           <Button onClick={() => navigate('/compras/nueva')}>
             <PiPlus className="text-base" />
@@ -101,6 +102,9 @@ export default function ComprasPage() {
       />
 
       {error && <Alert tone="error">{error}</Alert>}
+      <Alert tone="info">
+        La orden no define costo final ni mete stock. Usa recepción para registrar costo real y actualizar inventario.
+      </Alert>
 
       <section className="ui-kpi-summary-shell">
         <div className="mb-3">
@@ -114,40 +118,53 @@ export default function ComprasPage() {
             icon={PiPackage}
             value={resumen.total}
             label="Total órdenes"
-            iconBg="color-mix(in oklab, #fecdd3 72%, white 28%)"
+            tone="danger"
           />
           <MetricTile
             icon={PiCalendarBlank}
             value={resumen.emitidas}
             label="Emitidas"
-            iconBg="color-mix(in oklab, #bfdbfe 72%, white 28%)"
+            tone="primary"
           />
           <MetricTile
             icon={PiPackage}
             value={resumen.parciales}
             label="Parciales"
-            iconBg="color-mix(in oklab, #a7f3d0 78%, white 22%)"
+            tone="success"
           />
           <MetricTile
             icon={PiCheckCircle}
             value={resumen.completas}
             label="Completas"
-            iconBg="color-mix(in oklab, #ddd6fe 74%, white 26%)"
+            tone="info"
           />
         </div>
       </section>
 
-      <Card className="grid gap-3 p-5 md:grid-cols-[minmax(0,1fr)_200px_180px]">
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Buscar</label>
-          <div className="relative mt-2">
-            <PiMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <Input className="pl-10" placeholder="Buscar proveedor, ID u observación" value={filtros.search} onChange={(e) => setFiltros((prev) => ({ ...prev, search: e.target.value }))} />
-          </div>
-        </div>
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</label>
-          <Select className="mt-2" value={filtros.estado} onChange={(e) => setFiltros((prev) => ({ ...prev, estado: e.target.value }))}>
+      <FiltersBar
+        search={(
+          <Field label="Buscar">
+            <div className="relative">
+              <PiMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+              <Input className="pl-10" placeholder="Buscar proveedor, ID u observación" value={filtros.search} onChange={(e) => setFiltros((prev) => ({ ...prev, search: e.target.value }))} />
+            </div>
+          </Field>
+        )}
+        actions={(
+          <Button
+            variant="neutral"
+            className="w-full xl:w-auto"
+            onClick={() => {
+              setPagina(1);
+              setFiltros({ search: '', estado: 'TODOS', fecha: '' });
+            }}
+          >
+            Limpiar filtros
+          </Button>
+        )}
+      >
+        <Field label="Estado">
+          <Select value={filtros.estado} onChange={(e) => setFiltros((prev) => ({ ...prev, estado: e.target.value }))}>
             <option value="TODOS">Todos</option>
             <option value="ABIERTA">Emitida</option>
             <option value="PARCIAL">Parcial</option>
@@ -155,12 +172,12 @@ export default function ComprasPage() {
             <option value="CANCELADA">Cancelada</option>
             <option value="CERRADA_PARCIAL">Cerrada parcial</option>
           </Select>
-        </div>
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Fecha</label>
-          <Input className="mt-2" type="date" value={filtros.fecha} onChange={(e) => setFiltros((prev) => ({ ...prev, fecha: e.target.value }))} />
-        </div>
-      </Card>
+        </Field>
+
+        <Field label="Fecha">
+          <Input type="date" value={filtros.fecha} onChange={(e) => setFiltros((prev) => ({ ...prev, fecha: e.target.value }))} />
+        </Field>
+      </FiltersBar>
 
       <Card className="overflow-hidden p-0">
         <Tabla>
@@ -170,6 +187,7 @@ export default function ComprasPage() {
               <TablaCelda as="th">Proveedor</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
               <TablaCelda as="th">Estado</TablaCelda>
+              <TablaCelda as="th" className="text-right">Líneas</TablaCelda>
               <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -184,51 +202,54 @@ export default function ComprasPage() {
                   <TablaCelda>
                     <StatusBadge status={estadoMeta.badgeStatus}>{orden.estado_label || estadoMeta.label}</StatusBadge>
                   </TablaCelda>
+                  <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                    {Number(orden.total_lineas || 0)}
+                  </TablaCelda>
                   <TablaCelda>
-                    <div className="flex justify-end gap-1">
-                      <IconButton
-                        variant="iconView"
-                        size="sm"
+                    <TableActions>
+                      <TableActionButton
+                        variant="neutral"
+                        icon={<PiEye />}
                         aria-label={`Ver orden ${orden.id}`}
                         title="Ver orden"
                         onClick={() => navigate(`/compras/ordenes/${orden.id}`)}
                       >
-                        <PiEye className="text-lg" />
-                      </IconButton>
+                        Ver
+                      </TableActionButton>
                       {orden.recepcionable && (
-                        <IconButton
-                          variant="iconSecondary"
-                          size="sm"
+                        <TableActionButton
+                          variant="secondary"
+                          icon={<PiTruck />}
                           aria-label={`Recibir orden ${orden.id}`}
                           title="Registrar recepción"
                           onClick={() => navigate(`/compras/ordenes/${orden.id}/cargar`)}
                         >
-                          <PiTruck className="text-lg" />
-                        </IconButton>
+                          Cargar
+                        </TableActionButton>
                       )}
                       {orden.estado === 'ABIERTA' && (
-                        <IconButton
-                          variant="iconDanger"
-                          size="sm"
+                        <TableActionButton
+                          variant="danger"
+                          icon={<PiX />}
                           aria-label={`Cancelar orden ${orden.id}`}
                           title="Cancelar orden"
                           onClick={() => openActionModal('cancelar', orden)}
                         >
-                          <PiX className="text-lg" />
-                        </IconButton>
+                          Anular
+                        </TableActionButton>
                       )}
                       {orden.estado === 'PARCIAL' && (
-                        <IconButton
-                          variant="iconSuccess"
-                          size="sm"
+                        <TableActionButton
+                          variant="primary"
+                          icon={<PiCheckCircle />}
                           aria-label={`Cerrar orden ${orden.id}`}
                           title="Cerrar pendiente"
                           onClick={() => openActionModal('cerrar', orden)}
                         >
-                          <PiCheckCircle className="text-lg" />
-                        </IconButton>
+                          Cerrar
+                        </TableActionButton>
                       )}
-                    </div>
+                    </TableActions>
                   </TablaCelda>
                 </TablaFila>
               );
@@ -243,7 +264,8 @@ export default function ComprasPage() {
 
       <Modal open={actionModal.open} onClose={closeActionModal} maxWidthClass="max-w-lg" panelClassName="p-5">
         <div className="space-y-4">
-          <div>
+          <div className="ui-modal-header">
+            <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">
               {actionModal.mode === 'cancelar' ? 'Cancelar orden' : 'Cerrar con pendiente residual'}
             </h3>
@@ -252,11 +274,12 @@ export default function ComprasPage() {
                 ? 'Solo debes usar esta acción si la orden no tuvo ninguna recepción.'
                 : 'Esta acción bloquea futuras recepciones y conserva el faltante pendiente en la trazabilidad.'}
             </p>
+            </div>
           </div>
 
           {actionError && <Alert tone="error">{actionError}</Alert>}
 
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
             <p><strong>Orden:</strong> #{actionModal.orden?.id}</p>
             <p><strong>Proveedor:</strong> {actionModal.orden?.proveedor_nombre || '-'}</p>
             <p><strong>Estado actual:</strong> {actionModal.orden?.estado_label || resolveCompraStatus(actionModal.orden?.estado).label}</p>
@@ -274,7 +297,7 @@ export default function ComprasPage() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={closeActionModal}>Volver</Button>
+            <Button variant="neutral" onClick={closeActionModal}>Volver</Button>
             <Button variant={actionModal.mode === 'cancelar' ? 'danger' : 'primary'} onClick={onConfirmAction} disabled={actionLoading}>
               {actionLoading ? 'Procesando...' : actionModal.mode === 'cancelar' ? 'Confirmar cancelación' : 'Cerrar orden'}
             </Button>

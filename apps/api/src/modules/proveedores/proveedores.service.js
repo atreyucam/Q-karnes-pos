@@ -6,6 +6,85 @@ const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
 const { computeDebtStatus } = require('../../helpers/credit');
 
+const PAYMENT_CODES = {
+  EFECTIVO: 'EFECTIVO',
+  TRANSFERENCIA: 'TRANSFERENCIA'
+};
+
+function toUpper(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function stripPaymentCodeTag(observacion) {
+  return String(observacion || '')
+    .replace(/^\[MP:[A-Z_]+\]\s*/i, '')
+    .trim();
+}
+
+function extractPaymentCodeTag(observacion) {
+  const match = String(observacion || '').match(/^\[MP:([A-Z_]+)\]/i);
+  return match ? String(match[1] || '').toUpperCase() : null;
+}
+
+function parseBankFromObservation(observacion = '') {
+  const match = String(observacion || '').match(/(?:^|\|)\s*Banco\s*:\s*([^|]+)/i);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function parseReferenceFromObservation(observacion = '') {
+  const match = String(observacion || '').match(/(?:^|\|)\s*Ref(?:erencia)?\s*:\s*([^|]+)/i);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function resolvePagoProveedorMethodCode(movimiento, cashMovement) {
+  const taggedCode = toUpper(extractPaymentCodeTag(movimiento?.observacion));
+  const cashCode = toUpper(cashMovement?.metodo_pago);
+  if (taggedCode) return taggedCode;
+  if (cashCode) return cashCode;
+
+  const inferredBank = parseBankFromObservation(movimiento?.observacion);
+  const inferredRef = parseReferenceFromObservation(movimiento?.observacion);
+  const hasTransferHint = Boolean(
+    inferredBank
+    || inferredRef
+    || String(movimiento?.referencia || '').trim()
+  );
+  return hasTransferHint ? PAYMENT_CODES.TRANSFERENCIA : PAYMENT_CODES.EFECTIVO;
+}
+
+function paymentLabelFromCode(code) {
+  const normalized = toUpper(code);
+  if (normalized === PAYMENT_CODES.TRANSFERENCIA) return 'Transferencia';
+  return 'Efectivo';
+}
+
+function conditionLabelFromMetodoPago(metodoPago) {
+  return toUpper(metodoPago) === 'CREDITO' ? 'Crédito' : 'Contado';
+}
+
+function mapFacturaResumenRow(row) {
+  const cargos = Number(row.cargos || 0);
+  const abonos = Number(row.abonos || 0);
+  const pendiente = moneyRound(cargos - abonos);
+  const pagado = moneyRound(abonos);
+  const total = moneyRound(row.total || cargos);
+
+  return {
+    ...row,
+    total,
+    cargos: moneyRound(cargos),
+    abonos: pagado,
+    pagado: pagado > total ? total : pagado,
+    pendiente: pendiente > 0 ? pendiente : 0,
+    condicion: conditionLabelFromMetodoPago(row.metodo_pago),
+    estado: pendiente > 0 ? 'PENDIENTE' : 'PAGADA',
+    estado_deuda: computeDebtStatus({
+      saldo: pendiente,
+      fecha_vencimiento: row.fecha_vencimiento
+    })
+  };
+}
+
 const createSchema = z.object({
   nombre: z.string().min(1),
   telefono: z.string().trim().optional().nullable(),
@@ -92,22 +171,7 @@ async function facturas(id) {
   if (!proveedor) throw new AppError(404, 'Proveedor no encontrado');
 
   const rows = await repository.listFacturasByProveedor(id);
-  const data = rows.map((row) => {
-    const cargos = Number(row.cargos || 0);
-    const abonos = Number(row.abonos || 0);
-    const pendiente = moneyRound(cargos - abonos);
-
-    return {
-      ...row,
-      cargos: moneyRound(cargos),
-      abonos: moneyRound(abonos),
-      pendiente: pendiente > 0 ? pendiente : 0,
-      estado_deuda: computeDebtStatus({
-        saldo: pendiente,
-        fecha_vencimiento: row.fecha_vencimiento
-      })
-    };
-  });
+  const data = rows.map(mapFacturaResumenRow);
 
   return { ok: true, data };
 }
@@ -119,17 +183,111 @@ async function facturaDetalle(id, facturaId) {
   const factura = await repository.getFacturaByProveedor(id, facturaId);
   if (!factura) throw new AppError(404, 'Factura no encontrada para el proveedor');
 
-  const [items, movimientos] = await Promise.all([
+  const [items, movimientos, facturaResumen] = await Promise.all([
     repository.listFacturaItemsByProveedor(id, factura.id, factura.numero_factura),
-    repository.listCxpMovimientosByFactura(factura.id)
+    repository.listCxpMovimientosByFactura(factura.id),
+    repository.getFacturaResumenByProveedor(id, factura.id)
   ]);
+
+  const facturaDoc = facturaResumen ? mapFacturaResumenRow(facturaResumen) : mapFacturaResumenRow({
+    ...factura,
+    cargos: factura.total,
+    abonos: 0
+  });
+
+  const subtotalItems = moneyRound(
+    (items || []).reduce((acc, item) => acc + Number(item.subtotal || 0), 0)
+  );
+  const totalFactura = moneyRound(facturaDoc.total || factura.total || subtotalItems);
+  const subtotalFactura = subtotalItems > 0 ? subtotalItems : totalFactura;
+  const descuentoFactura = moneyRound(Math.max(0, subtotalFactura - totalFactura));
+
+  const cargos = moneyRound(
+    (movimientos || [])
+      .filter((row) => row.tipo === 'CARGO')
+      .reduce((acc, row) => acc + Number(row.monto || 0), 0)
+  ) || totalFactura;
+  const pagado = moneyRound(
+    (movimientos || [])
+      .filter((row) => row.tipo === 'ABONO')
+      .reduce((acc, row) => acc + Number(row.monto || 0), 0)
+  );
+  const pendiente = moneyRound(Math.max(0, cargos - pagado));
+
+  const abonos = (movimientos || []).filter((row) => row.tipo === 'ABONO');
+  const cashRows = await repository.listCashMovementsByCxpOrigins(abonos.map((row) => row.id));
+  const cashByOrigin = new Map(cashRows.map((row) => [Number(row.origen_id), row]));
+
+  let runningSaldo = cargos;
+  const saldoDespuesByAbonoId = new Map();
+  const movimientosCronologicos = [...(movimientos || [])].sort((a, b) => {
+    const fechaA = a?.fecha ? new Date(a.fecha).getTime() : 0;
+    const fechaB = b?.fecha ? new Date(b.fecha).getTime() : 0;
+    if (fechaA !== fechaB) return fechaA - fechaB;
+    return Number(a.id || 0) - Number(b.id || 0);
+  });
+  for (const movimiento of movimientosCronologicos) {
+    const monto = moneyRound(Number(movimiento.monto || 0));
+    if (movimiento.tipo === 'ABONO') {
+      runningSaldo = moneyRound(Math.max(0, runningSaldo - monto));
+      saldoDespuesByAbonoId.set(Number(movimiento.id), runningSaldo);
+    } else if (movimiento.tipo === 'CARGO' && Number(movimiento.id) !== Number(movimientosCronologicos[0]?.id)) {
+      runningSaldo = moneyRound(runningSaldo + monto);
+    }
+  }
+
+  const pagos = abonos
+    .map((movimiento) => {
+      const cashMovement = cashByOrigin.get(Number(movimiento.id));
+      const metodoPago = resolvePagoProveedorMethodCode(movimiento, cashMovement);
+      const banco = parseBankFromObservation(movimiento.observacion);
+      const referenciaFromObs = parseReferenceFromObservation(movimiento.observacion);
+      const referencia = String(movimiento.referencia || '').trim() || referenciaFromObs || null;
+
+      return {
+        id: movimiento.id,
+        tipo: 'ABONO',
+        metodo_pago: metodoPago,
+        metodo_pago_label: paymentLabelFromCode(metodoPago),
+        monto: moneyRound(movimiento.monto),
+        fecha: movimiento.fecha,
+        banco: banco || null,
+        referencia,
+        observacion: stripPaymentCodeTag(movimiento.observacion) || null,
+        saldo_despues: moneyRound(saldoDespuesByAbonoId.get(Number(movimiento.id)) ?? pendiente)
+      };
+    })
+    .sort((a, b) => {
+      const fechaA = a?.fecha ? new Date(a.fecha).getTime() : 0;
+      const fechaB = b?.fecha ? new Date(b.fecha).getTime() : 0;
+      if (fechaA !== fechaB) return fechaB - fechaA;
+      return Number(b.id || 0) - Number(a.id || 0);
+    });
 
   return {
     ok: true,
     data: {
-      factura,
+      factura: {
+        ...factura,
+        condicion: conditionLabelFromMetodoPago(factura.metodo_pago),
+        pendiente,
+        pagado,
+        orden_id: facturaDoc.orden_id || factura.orden_id || null,
+        recepcion_id: facturaDoc.recepcion_id || null,
+        fecha_vencimiento: facturaDoc.fecha_vencimiento || null,
+        estado_deuda: facturaDoc.estado_deuda,
+        estado_pago: pendiente > 0 ? 'PENDIENTE' : 'PAGADA'
+      },
       items,
-      movimientos
+      movimientos,
+      pagos,
+      resumen_financiero: {
+        subtotal: subtotalFactura,
+        descuento: descuentoFactura,
+        total: totalFactura,
+        pagado,
+        pendiente
+      }
     }
   };
 }

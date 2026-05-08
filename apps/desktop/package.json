@@ -1,6 +1,6 @@
 {
   "name": "qkarnes-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
@@ -10,13 +10,22 @@
     "electron:dev": "node electron/dev.cjs",
     "electron:prod": "node electron/run-prod.cjs",
     "electron": "npm run electron:prod",
+    "test:modulo2:frontend": "node scripts/modulo2-compras-inventario-frontend-tests.cjs",
     "test:bloque6": "node scripts/bloque6-frontend-tests.cjs",
     "test:ux-regression": "npm run build && npm run test:bloque6",
     "test:bloque9": "node scripts/bloque9-transformaciones-frontend-tests.cjs",
+    "test:ventas": "node scripts/ventas-frontend-tests.cjs",
+    "test:caja": "node scripts/caja-frontend-tests.cjs",
     "test:productos": "node scripts/productos-pos-frontend-tests.cjs",
+    "test:ui-standardization": "node scripts/ui-standardization-tests.cjs",
     "test:sidebar:final": "node scripts/sidebar-final-tests.cjs",
     "test:reportes": "node scripts/reportes-graficos-tests.cjs",
-    "test:ticket": "node scripts/ticket-print-tests.cjs"
+    "test:auditoria": "node scripts/auditoria-frontend-tests.cjs",
+    "test:ticket": "node scripts/ticket-print-tests.cjs",
+    "test:dashboard:v2": "node scripts/dashboard-v2-frontend-tests.cjs",
+    "dist:win64": "npm run build && electron-builder --win nsis --x64",
+    "dist:win32": "npm run build && electron-builder --win nsis --ia32",
+    "dist:win:all": "npm run build && electron-builder --win nsis --x64 --ia32"
   },
   "dependencies": {
     "apexcharts": "^5.4.0",
@@ -27,15 +36,45 @@
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
     "react-router-dom": "^7.1.5",
+    "recharts": "^2.15.4",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.8",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.20",
-    "electron": "^34.0.1",
+    "electron": "34.0.1",
+    "electron-builder": "^26.8.1",
     "postcss": "^8.5.1",
     "tailwindcss": "^4.0.8",
     "vite": "^6.1.0"
+  },
+  "description": "Q Karnes POS desktop app",
+  "author": "Q Karnes",
+  "build": {
+    "appId": "com.qkarnes.pos",
+    "productName": "Q Karnes POS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName} Setup ${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "oneClick": false,
+      "createDesktopShortcut": false
+    },
+    "executableName": "QKarnesPOS"
   }
 }

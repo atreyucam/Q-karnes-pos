@@ -14,6 +14,8 @@ const { CASH_MOVEMENT_TYPES, buildCashMovementPayload } = require('../caja/cashM
 const pagoSchema = z.object({
   factura_id: z.number().int().positive(),
   monto: z.number().positive(),
+  metodo_pago: z.enum(['EFECTIVO', 'TRANSFERENCIA']).optional(),
+  banco: z.string().trim().optional(),
   referencia: z.string().optional(),
   observacion: z.string().optional()
 });
@@ -25,6 +27,59 @@ const revertirPagoSchema = z.object({
     password: z.string().min(1)
   }).optional()
 });
+
+const PAYMENT_CODES = {
+  EFECTIVO: 'EFECTIVO',
+  TRANSFERENCIA: 'TRANSFERENCIA'
+};
+
+function toUpper(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function stripPaymentCodeTag(observacion) {
+  return String(observacion || '')
+    .replace(/^\[MP:[A-Z_]+\]\s*/i, '')
+    .trim();
+}
+
+function extractPaymentCodeTag(observacion) {
+  const match = String(observacion || '').match(/^\[MP:([A-Z_]+)\]/i);
+  return match ? String(match[1] || '').toUpperCase() : null;
+}
+
+function embedPaymentCodeTag(observacion, codigo) {
+  const cleanObservation = stripPaymentCodeTag(observacion);
+  const normalizedCode = toUpper(codigo);
+  if (!normalizedCode) return cleanObservation || null;
+  return `[MP:${normalizedCode}]${cleanObservation ? ` ${cleanObservation}` : ''}`;
+}
+
+function parseBankFromObservation(observacion = '') {
+  const match = String(observacion || '').match(/(?:^|\|)\s*Banco\s*:\s*([^|]+)/i);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function parseReferenceFromObservation(observacion = '') {
+  const match = String(observacion || '').match(/(?:^|\|)\s*Ref(?:erencia)?\s*:\s*([^|]+)/i);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function resolvePagoProveedorMethodCode(movimiento, cashMovement) {
+  const taggedCode = toUpper(extractPaymentCodeTag(movimiento?.observacion));
+  const cashCode = toUpper(cashMovement?.metodo_pago);
+  if (taggedCode) return taggedCode;
+  if (cashCode) return cashCode;
+
+  const inferredBank = parseBankFromObservation(movimiento?.observacion);
+  const inferredRef = parseReferenceFromObservation(movimiento?.observacion);
+  const hasTransferHint = Boolean(
+    inferredBank
+    || inferredRef
+    || String(movimiento?.referencia || '').trim()
+  );
+  return hasTransferHint ? PAYMENT_CODES.TRANSFERENCIA : PAYMENT_CODES.EFECTIVO;
+}
 
 function mapDebtDocument(row) {
   const cargos = moneyRound(row.cargos);
@@ -101,14 +156,26 @@ async function pagarProveedor(proveedorId, body, actorUser) {
     }
 
     const monto = moneyRound(parsed.data.monto);
+    const metodoPago = toUpper(parsed.data.metodo_pago || PAYMENT_CODES.EFECTIVO);
+    const banco = String(parsed.data.banco || '').trim();
     if (monto > deudaDocumento.saldo) {
       throw new AppError(400, 'El pago excede el pendiente de la factura');
     }
+    if (metodoPago === PAYMENT_CODES.TRANSFERENCIA && !banco) {
+      throw new AppError(400, 'Selecciona el banco de la transferencia');
+    }
+
+    await configuracionService.assertPaymentMethodEnabled(metodoPago, trx);
 
     const turno = await cajaRepository.findOpenShift(trx);
-    if (config.exigir_caja_abierta_para_pagos && !turno) {
+    if (config.exigir_caja_abierta_para_pagos && metodoPago === PAYMENT_CODES.EFECTIVO && !turno) {
       throw new AppError(400, 'Se requiere turno abierto para registrar pago a proveedor');
     }
+
+    const observacionPago = [
+      parsed.data.observacion || 'Pago manual CxP',
+      metodoPago === PAYMENT_CODES.TRANSFERENCIA && banco ? `Banco: ${banco}` : null
+    ].filter(Boolean).join(' | ');
 
     const movimiento = await repository.insertMovimiento(
       {
@@ -122,14 +189,13 @@ async function pagarProveedor(proveedorId, body, actorUser) {
         fecha_vencimiento: deudaDocumento.fecha_vencimiento,
         estado: 'APLICADO',
         referencia: parsed.data.referencia || null,
-        observacion: parsed.data.observacion || 'Pago manual CxP'
+        observacion: embedPaymentCodeTag(observacionPago, metodoPago)
       },
       trx
     );
 
     let movimientoCaja = null;
-    if (turno) {
-      await configuracionService.assertPaymentMethodEnabled('EFECTIVO', trx);
+    if (turno && metodoPago === PAYMENT_CODES.EFECTIVO) {
       const existingCash = await cajaRepository.findMovementByOrigin(
         {
           tipo: CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR,
@@ -148,6 +214,7 @@ async function pagarProveedor(proveedorId, body, actorUser) {
           tipo: CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR,
           concepto: `Pago proveedor #${proveedorId}`,
           monto,
+          metodoPago,
           documentoOrigen: `FACTURA:${deudaDocumento.numero_documento}`,
           moduloOrigen: 'CXP',
           origenId: movimiento.id,
@@ -170,6 +237,8 @@ async function pagarProveedor(proveedorId, body, actorUser) {
           factura_id: parsed.data.factura_id,
           turno_id: turno?.id || null,
           monto,
+          metodo_pago: metodoPago,
+          banco: banco || null,
           referencia: parsed.data.referencia || null,
           movimiento_caja_id: movimientoCaja?.id || null
         }
@@ -182,7 +251,7 @@ async function pagarProveedor(proveedorId, body, actorUser) {
       data: {
         movimiento_cxp: movimiento,
         movimiento_caja: movimientoCaja,
-        turno_id: turno?.id || null
+        turno_id: metodoPago === PAYMENT_CODES.EFECTIVO ? turno?.id || null : null
       }
     };
   });
@@ -325,9 +394,24 @@ async function historialPagosProveedor(proveedorId) {
   if (!proveedor) throw new AppError(404, 'Proveedor no encontrado');
 
   const rows = await repository.listPagosByProveedor(proveedorId);
+  const cashRows = await repository.listCashMovementsByCxpOrigins(rows.map((row) => row.id));
+  const cashByOrigin = new Map(cashRows.map((row) => [Number(row.origen_id), row]));
+  const data = rows.map((row) => {
+    const cashMovement = cashByOrigin.get(Number(row.id));
+    const metodoPago = resolvePagoProveedorMethodCode(row, cashMovement);
+    const banco = parseBankFromObservation(row.observacion);
+    const referenciaFromObs = parseReferenceFromObservation(row.observacion);
+    return {
+      ...row,
+      metodo_pago: metodoPago,
+      banco: banco || null,
+      referencia: String(row.referencia || '').trim() || referenciaFromObs || null
+    };
+  });
+
   return {
     ok: true,
-    data: rows
+    data
   };
 }
 

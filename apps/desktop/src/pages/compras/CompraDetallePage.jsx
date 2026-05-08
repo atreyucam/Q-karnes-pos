@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import apiClient, { normalizeResponse, parseApiError } from '../../lib/apiClient';
 import {
   Alert,
+  BackButton,
   Button,
   Card,
   Modal,
@@ -103,9 +104,11 @@ export default function CompraDetallePage() {
 
   return (
     <div className="space-y-5">
+      <BackButton to="/compras">Volver</BackButton>
+
       <PageHeader
         title={`Detalle compra #${ordenId}`}
-        description="Emisión, pendientes por recibir y recepciones confirmadas de la compra."
+        description="La orden registra intención de compra. La recepción define costo real e impacto en inventario."
         actions={(
           <div className="flex flex-wrap gap-2">
             {!isReadOnly && ordenActual?.orden?.estado === 'ABIERTA' && (
@@ -114,25 +117,25 @@ export default function CompraDetallePage() {
               </Button>
             )}
             {!isReadOnly && ordenActual?.orden?.estado === 'PARCIAL' && (
-              <Button variant="secondary" onClick={() => setActionModal({ open: true, mode: 'cerrar' })}>
+              <Button onClick={() => setActionModal({ open: true, mode: 'cerrar' })}>
                 Cerrar pendiente
               </Button>
             )}
-            <Button variant="ghost" onClick={() => navigate('/compras')}>
-              Volver
-            </Button>
           </div>
         )}
       />
 
       {error && <Alert tone="error">{error}</Alert>}
+      <Alert tone="info">
+        Esta orden no ingresó stock al emitirse. Cada recepción sí actualiza stock, costo visible y valorización.
+      </Alert>
 
       {ordenActual?.orden && (
         <Card className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Proveedor</p>
-                <p className="font-semibold text-[var(--color-text)]">{ordenActual.orden.proveedor_nombre || '-'}</p>
+                <p className="text-[1.12rem] font-bold text-[var(--color-text)]">{ordenActual.orden.proveedor_nombre || '-'}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Telefono</p>
@@ -142,15 +145,13 @@ export default function CompraDetallePage() {
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Credito / dias</p>
                 <p className="font-semibold text-[var(--color-text)]">{proveedorInfo?.tiene_credito ? 'SI' : 'NO'} / {Number(proveedorInfo?.dias_pago || 0)}</p>
               </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Usuario creador</p>
+                <p className="font-semibold text-[var(--color-text)]">{ordenActual.orden.usuario_creador_nombre || '-'}</p>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Estado orden</p>
-                <StatusBadge status={estadoMeta.badgeStatus}>
-                  {ordenActual.orden.estado_label || estadoMeta.label}
-                </StatusBadge>
-              </div>
+            <div className="space-y-3">
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Fecha emision</p>
                 <p className="font-semibold text-[var(--color-text)]">{formatDateQuito(ordenActual.orden.fecha_emision || ordenActual.orden.fecha)}</p>
@@ -164,8 +165,14 @@ export default function CompraDetallePage() {
                 <p className="font-semibold text-[var(--color-text)]">{pendingLines} línea(s) pendientes</p>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Usuario creador</p>
-                <p className="font-semibold text-[var(--color-text)]">{ordenActual.orden.usuario_creador_nombre || '-'}</p>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Líneas</p>
+                <p className="font-semibold text-[var(--color-text)]">{ordenActual?.detalle?.length || 0}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Estado orden</p>
+                <StatusBadge status={estadoMeta.badgeStatus}>
+                  {ordenActual.orden.estado_label || estadoMeta.label}
+                </StatusBadge>
               </div>
             </div>
         </Card>
@@ -176,28 +183,32 @@ export default function CompraDetallePage() {
           <p className="font-semibold text-[var(--color-text)]">Recepciones</p>
             <div className="space-y-4">
               {recepcionesCards.map((r) => (
-                <div key={r.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-bold text-slate-800">Documento {r.documento_respaldo || '-'}</p>
-                  <div className="mt-2 grid grid-cols-2 gap-3 xl:grid-cols-5">
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Fecha recepcion</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">{formatDateQuito(r.fecha_recepcion || r.fecha)}</p>
+                <div key={r.id} className="rounded-xl border border-border bg-background p-3">
+                  <p className="text-sm font-bold text-text">Documento {r.documento_respaldo || '-'}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-3 xl:grid-cols-6">
+                    <div className="rounded-xl border border-border bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">Fecha recepcion</p>
+                      <p className="mt-1 text-sm font-semibold text-text">{formatDateQuito(r.fecha_recepcion || r.fecha)}</p>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Metodo</p>
+                    <div className="rounded-xl border border-border bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">Factura</p>
+                      <p className="mt-1 text-sm font-semibold text-text">{r.numero_factura || '-'}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">Metodo</p>
                       <div className="mt-1"><StatusBadge status={r.metodo_pago || '-'} /></div>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Usuario receptor</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">{r.usuario_receptor_nombre || '-'}</p>
+                    <div className="rounded-xl border border-border bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">Usuario receptor</p>
+                      <p className="mt-1 text-sm font-semibold text-text">{r.usuario_receptor_nombre || '-'}</p>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Monto</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">{formatMoney(r.total)}</p>
+                    <div className="rounded-xl border border-border bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">Monto</p>
+                      <p className="mt-1 text-sm font-semibold text-text">{formatMoney(r.total)}</p>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Observacion</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">{r.observacion || '-'}</p>
+                    <div className="rounded-xl border border-border bg-white p-3">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">Observacion</p>
+                      <p className="mt-1 text-sm font-semibold text-text">{r.observacion || '-'}</p>
                     </div>
                   </div>
                 </div>
@@ -275,7 +286,7 @@ export default function CompraDetallePage() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={closeActionModal}>Volver</Button>
+            <Button variant="neutral" onClick={closeActionModal}>Volver</Button>
             <Button variant={actionModal.mode === 'cancelar' ? 'danger' : 'primary'} onClick={onConfirmAction} disabled={actionLoading}>
               {actionLoading ? 'Procesando...' : actionModal.mode === 'cancelar' ? 'Confirmar cancelación' : 'Cerrar orden'}
             </Button>

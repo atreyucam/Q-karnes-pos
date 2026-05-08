@@ -55,8 +55,28 @@ async function update(id, body) {
   return repository.update(id, parsed.data);
 }
 
+async function remove(id) {
+  const categoria = await repository.getById(id);
+  if (!categoria) throw new AppError(404, 'Categoría no encontrada');
+
+  const totalProductos = await repository.countProducts(id);
+  if (totalProductos > 0) {
+    throw new AppError(400, 'No se puede eliminar la categoría porque tiene productos asociados');
+  }
+
+  await repository.remove(id);
+  return {
+    ok: true,
+    data: {
+      id,
+      deleted: true
+    }
+  };
+}
+
 module.exports = {
   list,
   create,
-  update
+  update,
+  remove
 };

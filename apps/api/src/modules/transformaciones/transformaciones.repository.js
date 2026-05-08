@@ -34,11 +34,15 @@ async function getTransformacionById(id, trx = db) {
       'i.id as insumo_id',
       'i.producto_id as insumo_producto_id',
       'i.cantidad as insumo_cantidad',
+      'i.cantidad_base as insumo_cantidad_base',
       'i.unidad_medida as insumo_unidad_medida',
       'i.costo_unitario_snapshot as insumo_costo_unitario_snapshot',
       'i.subtotal_costo as insumo_subtotal_costo',
+      'i.subtotal_costo_centavos as subtotal_costo_centavos',
       'i.stock_disponible_snapshot as insumo_stock_disponible_snapshot',
+      'i.stock_disponible_base_snapshot as stock_disponible_base_snapshot',
       'i.stock_restante_snapshot as insumo_stock_restante_snapshot',
+      'i.stock_restante_base_snapshot as stock_restante_base_snapshot',
       'p.codigo as insumo_producto_codigo',
       'p.nombre as insumo_producto_nombre',
       'p.stock_actual as insumo_producto_stock_actual',
@@ -68,6 +72,7 @@ async function listTransformaciones(filters = {}, trx = db) {
       't.estado',
       't.fecha',
       't.tipo_proceso',
+      't.modo_distribucion_costo',
       't.observacion',
       't.referencia_lote',
       't.actor_usuario_id',
@@ -220,11 +225,18 @@ async function getProductoById(id, trx = db) {
 }
 
 async function updateProductoStock(id, stockActual, trx = db) {
-  await trx('productos').where({ id }).update({ stock_actual: stockActual });
+  const payload = typeof stockActual === 'object' && stockActual !== null ? stockActual : { stock_actual: stockActual };
+  await trx('productos').where({ id }).update(payload);
 }
 
 async function updateProductoStockAndCost(id, stockActual, costoPromedio, trx = db) {
-  await trx('productos').where({ id }).update({ stock_actual: stockActual, costo_promedio: costoPromedio });
+  const tx = typeof stockActual === 'object' && stockActual !== null && costoPromedio && typeof costoPromedio === 'function'
+    ? costoPromedio
+    : trx;
+  const payload = typeof stockActual === 'object' && stockActual !== null
+    ? stockActual
+    : { stock_actual: stockActual, costo_promedio: costoPromedio };
+  await tx('productos').where({ id }).update(payload);
 }
 
 async function updateInsumoSnapshot(transformacionId, payload, trx = db) {
@@ -233,8 +245,11 @@ async function updateInsumoSnapshot(transformacionId, payload, trx = db) {
     .update({
       costo_unitario_snapshot: payload.costo_unitario_snapshot,
       subtotal_costo: payload.subtotal_costo,
+      subtotal_costo_centavos: payload.subtotal_costo_centavos,
       stock_disponible_snapshot: payload.stock_disponible_snapshot,
+      stock_disponible_base_snapshot: payload.stock_disponible_base_snapshot,
       stock_restante_snapshot: payload.stock_restante_snapshot,
+      stock_restante_base_snapshot: payload.stock_restante_base_snapshot,
       updated_at: trx.fn.now()
     });
 }
@@ -244,7 +259,17 @@ async function updateResultadoCost(resultadoId, payload, trx = db) {
     .where({ id: resultadoId })
     .update({
       costo_asignado: payload.costo_asignado,
+      costo_asignado_centavos: payload.costo_asignado_centavos,
       costo_unitario_resultante: payload.costo_unitario_resultante,
+      updated_at: trx.fn.now()
+    });
+}
+
+async function updateMermaCost(mermaId, payload, trx = db) {
+  await trx('transformacion_mermas')
+    .where({ id: mermaId })
+    .update({
+      costo_total_centavos: payload.costo_total_centavos,
       updated_at: trx.fn.now()
     });
 }
@@ -279,13 +304,42 @@ async function createInventarioMovimientos(rows, trx = db) {
   await trx('inventario_movimientos').insert(rows);
 }
 
+async function createInventarioValorizacion(rows, trx = db) {
+  if (!rows.length) return;
+  await trx('inventario_valorizacion').insert(rows);
+}
+
 async function listMovimientosByReferencias(referencias = [], trx = db) {
   if (!referencias.length) return [];
   return trx('inventario_movimientos as m')
     .join('productos as p', 'p.id', 'm.producto_id')
-    .select('m.*', 'p.codigo as producto_codigo', 'p.nombre as producto_nombre')
+    .select(
+      'm.*',
+      'p.codigo as producto_codigo',
+      'p.nombre as producto_nombre',
+      'p.unidad_medida as producto_unidad_medida'
+    )
     .whereIn('m.referencia', referencias)
     .orderBy('m.id', 'asc');
+}
+
+async function hasLaterInventoryMovements({ productIds = [], afterDate, afterMovementId = null, excludedReferences = [] }, trx = db) {
+  if (!productIds.length || (!afterDate && !afterMovementId)) return false;
+
+  const query = trx('inventario_movimientos').whereIn('producto_id', productIds);
+
+  if (afterMovementId) {
+    query.andWhere('id', '>', afterMovementId);
+  } else {
+    query.andWhere('fecha', '>=', afterDate);
+  }
+
+  if (excludedReferences.length) {
+    query.whereNotIn('referencia', excludedReferences);
+  }
+
+  const row = await query.first('id');
+  return Boolean(row);
 }
 
 module.exports = {
@@ -309,8 +363,11 @@ module.exports = {
   updateProductoStockAndCost,
   updateInsumoSnapshot,
   updateResultadoCost,
+  updateMermaCost,
   setTransformacionAplicada,
   setTransformacionAnulada,
   createInventarioMovimientos,
-  listMovimientosByReferencias
+  createInventarioValorizacion,
+  listMovimientosByReferencias,
+  hasLaterInventoryMovements
 };

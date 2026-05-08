@@ -1,64 +1,85 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiCurrencyDollar, PiEye } from 'react-icons/pi';
+import { PiCurrencyDollar, PiEye, PiPencilSimple } from 'react-icons/pi';
 import { useNavigate, useParams } from 'react-router-dom';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
 import {
   Alert,
+  BackButton,
   Button,
   Card,
-  IconButton,
+  Field,
   Input,
+  LoadingState,
   Modal,
   PageHeader,
   Paginador,
+  DeactivateEntityDialogs,
+  Select,
   StatusBadge,
+  Switch,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
   TablaFila,
   TablaCelda,
-  Textarea
+  Textarea,
+  Toast
 } from '../../ui';
 import { useClientesStore } from '../../stores/clientesStore';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatDateQuito } from '../../lib/formatDateQuito';
-import { getUnidad, formatQtyByUnit } from '../../lib/formatQty';
+import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
+const emptyClienteForm = {
+  id: null,
+  nombre: '',
+  cedula: '',
+  telefono: '',
+  direccion: '',
+  observacion: '',
+  activo: true
+};
 
-function metodoVenta(detalle) {
-  const pagos = detalle?.pagos || [];
-  const contado = pagos
-    .filter((p) => String(p.tipo || '').toUpperCase() === 'CONTADO')
-    .reduce((acc, p) => acc + Number(p.monto || 0), 0);
-  const credito = pagos
-    .filter((p) => String(p.tipo || '').toUpperCase() === 'CREDITO')
-    .reduce((acc, p) => acc + Number(p.monto || 0), 0);
+const PAYMENT_METHOD_LABELS = {
+  EFECTIVO: 'Efectivo',
+  TRANSFERENCIA: 'Transferencia'
+};
 
-  if (contado > 0 && credito > 0) return 'MIXTO';
-  if (credito > 0) return 'CREDITO';
-  return 'CONTADO';
-}
-
-function formatDetalleCantidad(value, unidad) {
-  const unit = getUnidad(unidad);
-  return `${formatQtyByUnit(value, unit)} ${unit}`;
+function sanitizeCedulaInput(value) {
+  return String(value || '').replace(/[^0-9]/g, '').slice(0, 10);
 }
 
 export default function ClienteDetallePage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { clienteDetalle, facturas, resumen, error, detalle, cargarFacturas, creditoResumen, abonar } = useClientesStore();
+  const { clienteDetalle, facturas, resumen, error, loading, detalle, cargarFacturas, creditoResumen, abonar, actualizar } = useClientesStore();
   const configuracion = useConfiguracionStore((state) => state.configuracion);
 
   const clienteId = Number(id);
   const [pagina, setPagina] = useState(1);
   const [modalAbono, setModalAbono] = useState(null);
-  const [abonoForm, setAbonoForm] = useState({ monto: '', referencia: '', observacion: '' });
+  const [abonoForm, setAbonoForm] = useState({
+    monto: '',
+    metodo_pago: 'EFECTIVO',
+    banco: '',
+    referencia: '',
+    observacion: ''
+  });
   const [abonoError, setAbonoError] = useState('');
-  const [modalFactura, setModalFactura] = useState(false);
-  const [ventaDetalle, setVentaDetalle] = useState(null);
+  const [clienteModal, setClienteModal] = useState({ open: false, mode: 'edit' });
+  const [clienteForm, setClienteForm] = useState(emptyClienteForm);
+  const [confirmDeactivateOpen, setConfirmDeactivateOpen] = useState(false);
+  const [deactivateLoading, setDeactivateLoading] = useState(false);
+  const [blockedDeactivateOpen, setBlockedDeactivateOpen] = useState(false);
+  const [statusToast, setStatusToast] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const clienteFormErrors = useFormErrors();
+  const abonoFormErrors = useFormErrors();
+  const saldoCliente = Number(resumen?.saldo || 0);
 
   const loadData = async () => {
     await Promise.all([detalle(clienteId), cargarFacturas(clienteId), creditoResumen(clienteId)]);
@@ -72,6 +93,17 @@ export default function ClienteDetallePage() {
   useEffect(() => {
     setPagina(1);
   }, [facturas.length]);
+
+  useEffect(() => {
+    if (!statusToast) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 2400);
+    const clearTimer = window.setTimeout(() => setStatusToast(''), 2580);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToast]);
 
   const facturasDecoradas = useMemo(() => {
     const rows = facturas.map((row) => ({
@@ -99,8 +131,9 @@ export default function ClienteDetallePage() {
 
   const abrirModalAbono = (factura) => {
     setModalAbono(factura);
-    setAbonoForm({ monto: '', referencia: '', observacion: '' });
+    setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', banco: '', referencia: '', observacion: '' });
     setAbonoError('');
+    abonoFormErrors.resetErrors();
   };
 
   const registrarAbono = async () => {
@@ -108,52 +141,171 @@ export default function ClienteDetallePage() {
 
     const saldoFactura = Math.min(Number(modalAbono.credito_pendiente || 0), Number(resumen?.saldo || 0));
     const monto = Number(abonoForm.monto || 0);
+    const nextErrors = {};
 
     if (!(monto > 0)) {
-      setAbonoError('El monto debe ser mayor a 0');
+      nextErrors.monto = String(abonoForm.monto || '').trim() ? 'Ingresa un valor válido.' : 'Este campo es obligatorio.';
+      abonoFormErrors.setErrors(nextErrors);
+      setAbonoError('El monto debe ser mayor a 0.');
       return;
     }
 
     if (monto > saldoFactura) {
+      abonoFormErrors.resetErrors();
       setAbonoError('El monto no puede exceder el saldo pendiente');
       return;
     }
 
+    const metodo = String(abonoForm.metodo_pago || '').toUpperCase();
+    if (metodo === 'TRANSFERENCIA' && !String(abonoForm.banco || '').trim()) {
+      nextErrors.banco = 'Selecciona el banco de la transferencia.';
+    }
+    if (!abonoFormErrors.setErrors(nextErrors)) return;
+
+    abonoFormErrors.resetErrors();
+
     await abonar(clienteId, {
       monto,
       venta_id: modalAbono.id,
-      referencia: abonoForm.referencia || undefined,
+      metodo_pago: metodo,
+      banco: metodo === 'TRANSFERENCIA' ? abonoForm.banco || undefined : undefined,
+      referencia: metodo === 'TRANSFERENCIA' ? abonoForm.referencia || undefined : undefined,
       observacion: abonoForm.observacion || undefined
     });
 
     setModalAbono(null);
-    setAbonoForm({ monto: '', referencia: '', observacion: '' });
+    setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', banco: '', referencia: '', observacion: '' });
     setAbonoError('');
     await loadData();
+  };
 
-    if (ventaDetalle?.venta?.id === modalAbono.id) {
-      const response = await apiClient.get(`/api/ventas/${modalAbono.id}`);
-      setVentaDetalle(normalizeResponse(response.data));
+  const saldoActualAbono = useMemo(
+    () => Math.min(Number(modalAbono?.credito_pendiente || 0), Number(resumen?.saldo || 0)),
+    [modalAbono?.credito_pendiente, resumen?.saldo]
+  );
+
+  const saldoPosterior = useMemo(() => {
+    const monto = Number(abonoForm.monto || 0);
+    return Math.max(0, saldoActualAbono - (Number.isFinite(monto) ? monto : 0));
+  }, [abonoForm.monto, saldoActualAbono]);
+
+  const openEditModal = () => {
+    if (!clienteDetalle) return;
+    setClienteModal({ open: true, mode: 'edit' });
+    clienteFormErrors.resetErrors();
+    setClienteForm({
+      id: clienteDetalle.id,
+      nombre: clienteDetalle.nombre || '',
+      cedula: clienteDetalle.cedula || '',
+      telefono: clienteDetalle.telefono || '',
+      direccion: clienteDetalle.direccion || '',
+      observacion: clienteDetalle.observacion || '',
+      activo: Boolean(clienteDetalle.activo)
+    });
+  };
+
+  const closeClienteModal = () => {
+    setClienteModal({ open: false, mode: 'edit' });
+    setClienteForm(emptyClienteForm);
+    clienteFormErrors.resetErrors();
+  };
+
+  const onSaveCliente = async () => {
+    const nextErrors = {};
+    if (!clienteForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (!clienteForm.cedula.trim()) nextErrors.cedula = 'Este campo es obligatorio.';
+    else if (!/^\d{10}$/.test(clienteForm.cedula)) nextErrors.cedula = 'La cédula debe tener 10 dígitos numéricos.';
+    if (!clienteFormErrors.setErrors(nextErrors)) return;
+
+    const saldoPendiente = saldoCliente;
+    const estabaActivo = Boolean(clienteDetalle?.activo);
+    const quiereDesactivar = estabaActivo && !clienteForm.activo;
+
+    if (quiereDesactivar && saldoPendiente > 0) {
+      setBlockedDeactivateOpen(true);
+      return;
+    }
+
+    const payload = {
+      nombre: clienteForm.nombre.trim(),
+      cedula: clienteForm.cedula.trim(),
+      telefono: clienteForm.telefono.trim() || null,
+      direccion: clienteForm.direccion.trim() || null,
+      observacion: clienteForm.observacion.trim() || null,
+      activo: clienteForm.activo
+    };
+
+    await actualizar(clienteId, payload);
+    closeClienteModal();
+    await loadData();
+    setStatusToast('Cliente actualizado.');
+  };
+
+  const onToggleCliente = async () => {
+    if (!clienteDetalle) return;
+
+    if (clienteDetalle.activo) {
+      if (saldoCliente > 0) {
+        setBlockedDeactivateOpen(true);
+        return;
+      }
+      setConfirmDeactivateOpen(true);
+      return;
+    }
+
+    try {
+      await actualizar(clienteId, { activo: true });
+      await loadData();
+      setStatusToast('Cliente ha sido activado.');
+    } catch (_) {
+      // store error already exposed in page alert
     }
   };
 
-  const abrirDetalleFactura = async (ventaId) => {
-    const response = await apiClient.get(`/api/ventas/${ventaId}`);
-    setVentaDetalle(normalizeResponse(response.data));
-    setModalFactura(true);
+  const onConfirmDeactivate = async () => {
+    setDeactivateLoading(true);
+    try {
+      await actualizar(clienteId, { activo: false });
+      setConfirmDeactivateOpen(false);
+      await loadData();
+      setStatusToast('Cliente ha sido desactivado.');
+    } catch (_) {
+      setConfirmDeactivateOpen(false);
+    } finally {
+      setDeactivateLoading(false);
+    }
   };
-
-  const metodoActual = metodoVenta(ventaDetalle);
 
   return (
     <div className="space-y-5">
+      {statusToast ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast>
+        </div>
+      ) : null}
+
+      <BackButton to="/clientes">Volver</BackButton>
+
       <PageHeader
-        title="Detalle cliente"
-        description="Facturas y gestion de abonos de credito."
+        title="Detalle del cliente"
+        description="Facturas y gestión de abonos de crédito."
         actions={(
-          <Button variant="secondary" onClick={() => navigate('/clientes')}>
-            Volver
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {clienteDetalle && (
+              <>
+                <Button variant="secondary" onClick={openEditModal}>
+                  <PiPencilSimple className="text-base" />
+                  Editar
+                </Button>
+                <Button
+                  variant={clienteDetalle.activo ? 'danger' : 'primary'}
+                  onClick={onToggleCliente}
+                >
+                  {clienteDetalle.activo ? 'Desactivar cliente' : 'Activar cliente'}
+                </Button>
+              </>
+            )}
+          </div>
         )}
       />
 
@@ -161,33 +313,45 @@ export default function ClienteDetallePage() {
 
       {clienteDetalle && (
         <Card className="p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-3 text-sm">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_280px]">
+            <div className="space-y-3 p-1 text-sm">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Cliente</span>
                 <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.nombre}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Telefono</span>
-                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.telefono || '-'}</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Cédula</span>
+                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.cedula || '-'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Dirección</span>
+                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.direccion || '-'}</span>
               </div>
             </div>
 
-            <div className="space-y-3 text-sm">
+            <div className="space-y-3 p-1 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Teléfono</span>
+                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle.telefono || '-'}</span>
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</span>
                 <StatusBadge status={clienteDetalle.activo ? 'ACTIVO' : 'INACTIVO'} />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Direccion</span>
-                <span className="text-[var(--color-text)]">{clienteDetalle.direccion || '-'}</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Observación</span>
+                <span className="text-[var(--color-text)]">{clienteDetalle.observacion || '-'}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Saldo credito</span>
-                <span className={`text-lg font-bold ${Number(resumen?.saldo || 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
-                  {formatMoney(resumen?.saldo)}
-                </span>
-              </div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Saldo crédito</p>
+              <p className={`mt-3 text-3xl font-extrabold ${Number(resumen?.saldo || 0) > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
+                {formatMoney(resumen?.saldo)}
+              </p>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Balance actual del crédito pendiente del cliente.
+              </p>
             </div>
           </div>
         </Card>
@@ -204,10 +368,10 @@ export default function ClienteDetallePage() {
             <tr>
               <TablaCelda as="th">Venta / factura</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
-              <TablaCelda as="th">Metodo</TablaCelda>
+              <TablaCelda as="th">Método</TablaCelda>
               <TablaCelda as="th">Estado</TablaCelda>
               <TablaCelda as="th" className="text-right">Total</TablaCelda>
-              <TablaCelda as="th" className="text-right">Credito pendiente</TablaCelda>
+              <TablaCelda as="th" className="text-right">Crédito pendiente</TablaCelda>
               <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -231,27 +395,28 @@ export default function ClienteDetallePage() {
                     {formatMoney(pendiente)}
                   </TablaCelda>
                   <TablaCelda>
-                    <div className="flex justify-end gap-1">
-                      <IconButton
-                        variant="iconView"
-                        size="sm"
+                    <TableActions>
+                      <TableActionButton
+                        variant="neutral"
+                        icon={<PiEye />}
                         aria-label="Ver factura"
                         title="Ver factura"
-                        onClick={() => abrirDetalleFactura(f.id)}
+                        onClick={() => navigate(`/ventas/${f.id}`)}
                       >
-                        <PiEye className="text-lg" />
-                      </IconButton>
-                      <IconButton
-                        variant="iconSecondary"
-                        size="sm"
+                        Ver
+                      </TableActionButton>
+                      <TableActionButton
+                        variant="success"
+                        className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
+                        icon={<PiCurrencyDollar />}
                         aria-label="Registrar abono"
                         title={sinPendiente ? 'Sin saldo pendiente' : 'Registrar abono'}
                         disabled={sinPendiente}
                         onClick={() => abrirModalAbono(f)}
                       >
-                        <PiCurrencyDollar className="text-lg" />
-                      </IconButton>
-                    </div>
+                        Abonar
+                      </TableActionButton>
+                    </TableActions>
                   </TablaCelda>
                 </TablaFila>
               );
@@ -264,147 +429,236 @@ export default function ClienteDetallePage() {
         </div>
       </Card>
 
-      <Modal open={Boolean(modalAbono)} onClose={() => setModalAbono(null)} maxWidthClass="max-w-3xl" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Registrar abono</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Factura {modalAbono?.referencia || `#${modalAbono?.id || ''}`}</p>
+      {loading && <LoadingState label="Cargando cliente..." />}
+
+      <Modal open={clienteModal.open} onClose={closeClienteModal} maxWidthClass="max-w-4xl" panelClassName="p-5">
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Editar cliente</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Actualiza datos comerciales y estado del cliente.</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setModalAbono(null)}>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeClienteModal}>
             X
           </Button>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-          <p className="text-[var(--color-text-muted)]">Saldo actual: <span className="font-semibold text-[var(--color-text)]">{formatMoney(Math.min(Number(modalAbono?.credito_pendiente || 0), Number(resumen?.saldo || 0)))}</span></p>
-          <p className="text-[var(--color-text-muted)]">
-            Cliente: <span className="font-semibold text-[var(--color-text)]">{clienteDetalle?.nombre || '-'}</span>
-          </p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="space-y-4">
+            <Field label="Nombre" required error={clienteFormErrors.errors.nombre}>
+              <Input
+                value={clienteForm.nombre}
+                onChange={(e) => {
+                  clienteFormErrors.clearFieldError('nombre');
+                  setClienteForm((state) => ({ ...state, nombre: e.target.value }));
+                }}
+                placeholder="Ej: Restaurante El Buen Sabor"
+              />
+            </Field>
+
+            <Field label="Cédula" required error={clienteFormErrors.errors.cedula}>
+              <Input
+                inputMode="numeric"
+                value={clienteForm.cedula}
+                onChange={(e) => {
+                  clienteFormErrors.clearFieldError('cedula');
+                  setClienteForm((state) => ({ ...state, cedula: sanitizeCedulaInput(e.target.value) }));
+                }}
+                placeholder="0123456789"
+              />
+            </Field>
+
+            <Field label="Teléfono">
+              <Input
+                value={clienteForm.telefono}
+                onChange={(e) => setClienteForm((state) => ({ ...state, telefono: e.target.value }))}
+                placeholder="0990000000"
+              />
+            </Field>
+          </div>
+
+          <div className="space-y-4">
+            <Field label="Dirección">
+              <Input
+                value={clienteForm.direccion}
+                onChange={(e) => setClienteForm((state) => ({ ...state, direccion: e.target.value }))}
+                placeholder="Sector / calle"
+              />
+            </Field>
+
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+              <Switch
+                checked={clienteForm.activo}
+                onChange={(checked) => setClienteForm((state) => ({ ...state, activo: checked }))}
+                label="Cliente activo"
+                description="Si está inactivo no aparece como opción para nuevas ventas."
+              />
+            </div>
+          </div>
+
+          <div className="lg:col-span-2">
+            <Field label="Observación">
+              <Textarea
+                value={clienteForm.observacion}
+                onChange={(e) => setClienteForm((state) => ({ ...state, observacion: e.target.value }))}
+                placeholder="Notas del cliente"
+              />
+            </Field>
+          </div>
         </div>
-        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={closeClienteModal}>
+            Cancelar
+          </Button>
+          <Button onClick={onSaveCliente}>
+            Guardar cambios
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal open={Boolean(modalAbono)} onClose={() => setModalAbono(null)} maxWidthClass="max-w-3xl" panelClassName="p-5">
+        <div className="ui-modal-header">
+          <div className="ui-modal-header-copy">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Abonar crédito</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Registra un pago parcial o total del saldo pendiente.</p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setModalAbono(null)}>
+            X
+          </Button>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Cliente</p>
+            <p className="text-lg font-semibold text-[var(--color-text)]">{clienteDetalle?.nombre || '-'}</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Teléfono: {clienteDetalle?.telefono || '-'}</p>
+            <p className="text-sm font-semibold text-[var(--color-text)]">Crédito pendiente: {formatMoney(saldoActualAbono)}</p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Documento con deuda</p>
+            <div className="inline-flex rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+              {`Venta #${modalAbono?.id || ''} • Pendiente ${formatMoney(saldoActualAbono)}`}
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">{modalAbono?.referencia || 'Factura sin referencia'}</p>
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-[var(--color-text-muted)]">
           {configuracion?.exigir_caja_abierta_para_cobros
-            ? 'Este cobro impacta caja y requiere turno abierto.'
-            : 'Este cobro puede registrarse sin turno abierto; si existe turno abierto tambien queda en caja.'}
+            ? 'El método efectivo requiere turno abierto. Transferencia no impacta caja.'
+            : 'Efectivo impacta caja si existe turno abierto. Transferencia no impacta caja.'}
         </p>
 
         {abonoError && <Alert tone="error" className="mt-3">{abonoError}</Alert>}
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-[180px_1fr_1.3fr]">
-          <div>
-            <label className="text-sm font-medium text-[var(--color-text)]">Valor</label>
-            <Input className="mt-2" placeholder="10.00" value={abonoForm.monto} onChange={(e) => setAbonoForm((s) => ({ ...s, monto: e.target.value }))} />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-[var(--color-text)]">Referencia</label>
-            <Input className="mt-2" placeholder="Transferencia / efectivo" value={abonoForm.referencia} onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))} />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-[var(--color-text)]">Observacion</label>
-            <Textarea className="mt-2" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
-          </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <Field label="Monto a abonar" required error={abonoFormErrors.errors.monto}>
+            <Input
+              className="h-11 text-base font-semibold"
+              placeholder="0.00"
+              value={abonoForm.monto}
+              onChange={(e) => {
+                abonoFormErrors.clearFieldError('monto');
+                setAbonoForm((s) => ({ ...s, monto: e.target.value }));
+              }}
+            />
+          </Field>
+          <Field label="Saldo después del abono">
+            {(() => {
+              const saldoPagadoCompleto = saldoPosterior <= 0;
+              return (
+                <div
+                  className={`min-h-[52px] rounded-lg border px-3 py-2 ${saldoPagadoCompleto
+                    ? 'border-green-200 bg-green-50 text-green-700'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface-alt)] text-[var(--color-text)]'}`}
+                >
+                  {saldoPagadoCompleto ? (
+                    <div className="flex h-full min-h-[36px] flex-col justify-center">
+                      <p className="text-sm font-semibold">Pagado completamente</p>
+                      <p className="mt-0.5 text-sm font-bold">{formatMoney(0)}</p>
+                    </div>
+                  ) : (
+                    <div className="flex h-full min-h-[36px] items-center">
+                      <p className="text-base font-semibold">{formatMoney(saldoPosterior)}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </Field>
+          <Field label="Método de pago" required error={abonoFormErrors.errors.metodo_pago}>
+            <Select
+              value={abonoForm.metodo_pago}
+              onChange={(e) => {
+                abonoFormErrors.clearFieldError('metodo_pago');
+                setAbonoForm((s) => ({ ...s, metodo_pago: e.target.value }));
+              }}
+            >
+              {['EFECTIVO', 'TRANSFERENCIA'].map((codigo) => (
+                <option key={codigo} value={codigo}>{PAYMENT_METHOD_LABELS[codigo] || codigo}</option>
+              ))}
+            </Select>
+          </Field>
+          {String(abonoForm.metodo_pago).toUpperCase() === 'TRANSFERENCIA' ? (
+            <>
+              <Field label="Banco" required error={abonoFormErrors.errors.banco}>
+                <Input
+                  value={abonoForm.banco}
+                  onChange={(e) => {
+                    abonoFormErrors.clearFieldError('banco');
+                    setAbonoForm((s) => ({ ...s, banco: e.target.value }));
+                  }}
+                  placeholder="Banco Pichincha"
+                />
+              </Field>
+              <Field label="Referencia">
+                <Input
+                  value={abonoForm.referencia}
+                  onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))}
+                  placeholder="847291"
+                />
+              </Field>
+            </>
+          ) : null}
+        </div>
+        <div className="mt-3">
+          <Field label="Observación">
+            <Textarea
+              rows={3}
+              className="min-h-[84px]"
+              placeholder="Observación opcional"
+              value={abonoForm.observacion}
+              onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))}
+            />
+          </Field>
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setModalAbono(null)}>
             Cancelar
           </Button>
-          <Button onClick={registrarAbono}>
-            Guardar abono
+          <Button
+            className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
+            onClick={registrarAbono}
+            disabled={saldoActualAbono <= 0}
+          >
+            Registrar abono
           </Button>
         </div>
       </Modal>
 
-      <Modal open={modalFactura && Boolean(ventaDetalle?.venta)} onClose={() => setModalFactura(false)} maxWidthClass="max-w-5xl" panelClassName="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="text-lg font-semibold text-[var(--color-text)]">Detalle factura</h3>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setModalFactura(false)}>
-            X
-          </Button>
-        </div>
-
-        <Card className="mt-4 p-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">N factura / venta</span>
-                <span className="font-semibold text-[var(--color-text)]">{ventaDetalle?.venta?.referencia || `#${ventaDetalle?.venta?.id || ''}`}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Cliente</span>
-                <span className="font-semibold text-[var(--color-text)]">{clienteDetalle?.nombre || ventaDetalle?.venta?.cliente_nombre || 'Consumidor final'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Fecha</span>
-                <span className="font-semibold text-[var(--color-text)]">{formatDateQuito(ventaDetalle?.venta?.fecha)}</span>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Tipo de pago</span>
-                <StatusBadge status={metodoActual} />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Estado</span>
-                <StatusBadge status={ventaDetalle?.venta?.estado} />
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <div className="grid grid-cols-[minmax(0,1.6fr)_140px_140px_140px] gap-0 border-b border-[var(--color-border)] px-6 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            <div>Producto</div>
-            <div>Cantidad</div>
-            <div className="text-right">P.unit</div>
-            <div className="text-right">Subtotal</div>
-          </div>
-
-          {(ventaDetalle?.detalle || []).map((d, index) => (
-            <div
-              key={d.id}
-              className={`grid grid-cols-[minmax(0,1.6fr)_140px_140px_140px] gap-0 px-6 py-4 text-sm ${index > 0 ? 'border-t border-[var(--color-border)]' : ''}`}
-            >
-              <div className="pr-4 font-medium text-[var(--color-text)]">{d.producto_codigo} - {d.producto_nombre}</div>
-              <div className="font-medium text-[var(--color-text)]">{formatDetalleCantidad(d.cantidad, d.unidad_medida || d.unidad)}</div>
-              <div className="text-right font-medium text-[var(--color-text)]">{formatMoney(d.precio_unit)}</div>
-              <div className="text-right font-semibold text-[var(--color-text)]">{formatMoney(d.total_linea)}</div>
-            </div>
-          ))}
-        </div>
-
-        {(ventaDetalle?.abonos || []).length > 0 && (
-          <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="grid grid-cols-[220px_minmax(0,1fr)_140px] gap-0 border-b border-[var(--color-border)] px-6 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              <div>Fecha</div>
-              <div>Observacion</div>
-              <div className="text-right">Monto</div>
-            </div>
-
-            {(ventaDetalle.abonos || []).map((abono, index) => (
-              <div
-                key={abono.id}
-                className={`grid grid-cols-[220px_minmax(0,1fr)_140px] gap-0 px-6 py-4 text-sm ${index > 0 ? 'border-t border-[var(--color-border)]' : ''}`}
-              >
-                <div className="pr-4 text-[var(--color-text)]">{formatDateQuito(abono.fecha)}</div>
-                <div className="text-[var(--color-text)]">{abono.observacion || '-'}</div>
-                <div className="text-right font-semibold text-[var(--color-text)]">{formatMoney(abono.monto)}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-4 flex justify-end">
-          <div className="grid w-[140px] gap-2 text-right">
-            <p className="text-sm text-[var(--color-text-muted)]">
-              <span className="font-semibold">Subtotal:</span> {formatMoney(ventaDetalle?.venta?.subtotal)}
-            </p>
-            <p className="text-lg font-bold text-[var(--color-text)]">
-              <span>Total:</span> {formatMoney(ventaDetalle?.venta?.total)}
-            </p>
-          </div>
-        </div>
-      </Modal>
+      <DeactivateEntityDialogs
+        confirmOpen={confirmDeactivateOpen}
+        blockedOpen={blockedDeactivateOpen}
+        entityType="cliente"
+        entityName={clienteDetalle?.nombre || '-'}
+        pendingAmountLabel={formatMoney(saldoCliente)}
+        blockedMessage="El cliente mantiene saldo pendiente de crédito."
+        confirmLoading={deactivateLoading}
+        onCloseConfirm={() => setConfirmDeactivateOpen(false)}
+        onConfirm={onConfirmDeactivate}
+        onCloseBlocked={() => setBlockedDeactivateOpen(false)}
+      />
     </div>
   );
 }

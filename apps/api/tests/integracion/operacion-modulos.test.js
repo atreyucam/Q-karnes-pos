@@ -10,6 +10,7 @@ const comprasService = require('../../src/modules/compras/compras.service');
 const inventarioService = require('../../src/modules/inventario/inventario.service');
 const transformacionesService = require('../../src/modules/transformaciones/transformaciones.service');
 const ventasService = require('../../src/modules/ventas/ventas.service');
+const auditoriaService = require('../../src/modules/auditoria/auditoria.service');
 const { prepareDatabase } = require('../support/database');
 const { seedOperationalFixtures } = require('../support/operationalFixtures');
 const { assert, expectThrows, printSuiteReport } = require('../support/testHarness');
@@ -254,8 +255,8 @@ async function runSuite(options = {}) {
         parentProductId: fixture.productos.base.res.id,
         parentQty: 106,
         referencia: 'DESP-RES-ERR',
-        resultados: [{ producto_id: fixture.productos.hijos.lomoFino.id, cantidad: 106 }],
-        mermas: []
+        resultados: [{ producto_id: fixture.productos.hijos.lomoFino.id, cantidad: 100 }],
+        mermas: [{ tipo_merma: 'RECORTE', cantidad: 6, motivo: 'Prueba exceso stock' }]
       }),
       'Stock insuficiente'
     );
@@ -287,7 +288,9 @@ async function runSuite(options = {}) {
           {
             producto_id: fixture.productos.simples.platos.id,
             cantidad: 20,
-            referencia: 'AJUSTE_ENTRADA'
+            referencia: 'AJUSTE_ENTRADA',
+            costo_origen_tipo: 'MANUAL',
+            costo_unitario_manual: 0.12
           },
           {
             producto_id: fixture.productos.simples.condimento.id,
@@ -380,7 +383,7 @@ async function runSuite(options = {}) {
           { producto_id: fixture.productos.simples.chorizoArgentino.id, cantidad: 2 },
           { producto_id: fixture.productos.simples.milanesaPollo.id, cantidad: 1.5 }
         ],
-        pagos: { metodo: 'CONTADO', codigo: 'TRANSFERENCIA', contado: 13.8, credito: 0 },
+        pagos: { metodo: 'TRANSFERENCIA', transferencia: 13.8, credito: 0 },
         descuento_total: 0
       },
       cajero
@@ -416,6 +419,16 @@ async function runSuite(options = {}) {
     add(4, 'Ventas de productos hijos y simples descuentan stock y dejan movimientos/CxC correctos', true);
   } catch (error) {
     add(4, 'Ventas de productos hijos y simples descuentan stock y dejan movimientos/CxC correctos', false, error.message);
+  }
+
+  try {
+    const resumen = await auditoriaService.resumen(admin);
+    assert(resumen.data.estado_general === 'OK', `La auditoría integrada reportó ${resumen.data.estado_general}`);
+    assert(resumen.data.errores_criticos.length === 0, 'La auditoría integrada reportó errores críticos');
+    assert(resumen.data.advertencias.length === 0, 'La auditoría integrada reportó advertencias');
+    add(5, 'La operación integrada completa queda financieramente consistente para auditoría global', true);
+  } catch (error) {
+    add(5, 'La operación integrada completa queda financieramente consistente para auditoría global', false, error.message);
   }
 
   await closeTurno(cajero);

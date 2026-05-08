@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import logoEmpresa from '../../public/logoFrigo.png';
 import { SidebarItem, SidebarSection } from '../../shared/ui';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { isGroupActive, navigationItems } from './posNavigation';
 
 function getActiveKey(items, location) {
-  const activeGroup = items.find(
-    (item) => item.type === 'group' && isGroupActive(item, location)
-  );
-  if (activeGroup) return activeGroup.key;
-
   const activeLink = items.find(
     (item) => item.type === 'link' && item.to === location.pathname
   );
   if (activeLink) return activeLink.to;
+
+  const activeGroup = items.find(
+    (item) => item.type === 'group' && isGroupActive(item, location)
+  );
+  if (activeGroup) return activeGroup.key;
 
   return null;
 }
@@ -38,8 +39,11 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
   );
 
   useEffect(() => {
+    const hasDirectLinkMatch = visibleItems.some(
+      (item) => item.type === 'link' && item.to === location.pathname
+    );
     const activeGroup = visibleItems.find(
-      (item) => item.type === 'group' && isGroupActive(item, location)
+      (item) => item.type === 'group' && !hasDirectLinkMatch && isGroupActive(item, location)
     );
 
     setOpenGroupKey(activeGroup?.key ?? null);
@@ -67,34 +71,26 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
       >
-        <div className="flex h-[var(--topbar-height)] items-center border-b border-[var(--color-border)] px-4">
-          <button
-            type="button"
+        <div className="border-b border-[var(--color-border)]">
+          <Link
+            to="/"
             onClick={() => {
-              setSelectedKey('/dashboard');
-              navigate('/dashboard');
               onCloseMobile?.();
             }}
-            className={clsx(
-              'flex w-full items-center gap-3 rounded-2xl px-2 py-2 transition-colors hover:bg-[var(--color-surface-muted)]',
-              collapsed && 'justify-center'
-            )}
+            className={clsx('sidebar-brand', collapsed && 'sidebar-brand-collapsed')}
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-brand-soft)] text-[var(--color-brand)] shadow-sm ring-1 ring-[var(--color-border)]">
-              <span className="text-[0.95rem] font-black">QK</span>
-            </div>
+            <img src={logoEmpresa} alt={negocioNombre} className="sidebar-brand-logo" />
 
             {!collapsed && (
-              <div className="min-w-0 overflow-hidden text-left">
-                <p className="truncate text-[1.15rem] font-extrabold text-[var(--color-text)]">
-                  {negocioNombre}
-                </p>
+              <div className="sidebar-brand-text min-w-0 overflow-hidden text-left">
+                <p className="sidebar-brand-name truncate">{negocioNombre}</p>
+                <p className="sidebar-brand-subtitle">POS</p>
               </div>
             )}
-          </button>
+          </Link>
         </div>
 
-        <nav className="flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-4 py-5">
+        <nav className="sidebar-scroll flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-2 py-5">
           {visibleItems.map((item) => {
             if (item.type === 'link') {
               return (
@@ -141,7 +137,7 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
           })}
         </nav>
 
-        <div className="mt-auto border-t border-[var(--color-border)] p-4">
+        <div className="sidebar-footer mt-auto border-t border-[var(--color-border)] px-4">
           {!collapsed ? (
             <p className="truncate px-2 text-center text-xs font-medium text-[var(--color-text-muted)]">{negocioNombre}</p>
           ) : (

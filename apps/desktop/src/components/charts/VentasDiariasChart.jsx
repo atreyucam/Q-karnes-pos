@@ -16,16 +16,16 @@ export default function VentasDiariasChart({ data = [] }) {
       width: 3
     },
     grid: {
-      borderColor: '#e2e8f0'
+      borderColor: chartPalette.grid
     },
     xaxis: {
       categories,
-      labels: { style: { colors: '#64748b' } }
+      labels: { style: { colors: chartPalette.axis } }
     },
     yaxis: {
       labels: {
         formatter: (v) => `$${Number(v).toFixed(0)}`,
-        style: { colors: '#64748b' }
+        style: { colors: chartPalette.axis }
       }
     },
     tooltip: {
@@ -37,7 +37,7 @@ export default function VentasDiariasChart({ data = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
       <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Ventas por dia</p>
       <Chart type="line" height={280} options={options} series={[{ name: 'Ventas', data: seriesData }]} />
     </div>

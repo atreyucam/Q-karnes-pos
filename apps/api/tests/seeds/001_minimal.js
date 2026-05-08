@@ -29,6 +29,7 @@ const CLEAN_TABLES = [
   'caja_movimientos',
   'caja_turnos',
   'mermas',
+  'inventario_valorizacion',
   'inventario_movimientos',
   'productos',
   'categorias',
@@ -130,7 +131,11 @@ exports.seed = async function seed(knex) {
       precio_referencia: 4.5,
       stock_actual: 25,
       stock_minimo: 5,
-      activo: 1
+      activo: 1,
+      es_vendible: 1,
+      es_transformable: 1,
+      es_insumo: 0,
+      es_merma: 0
     },
     {
       id: 2,
@@ -144,7 +149,11 @@ exports.seed = async function seed(knex) {
       precio_referencia: 6,
       stock_actual: 12,
       stock_minimo: 3,
-      activo: 1
+      activo: 1,
+      es_vendible: 1,
+      es_transformable: 0,
+      es_insumo: 0,
+      es_merma: 0
     },
     {
       id: 3,
@@ -158,7 +167,11 @@ exports.seed = async function seed(knex) {
       precio_referencia: 1,
       stock_actual: 40,
       stock_minimo: 10,
-      activo: 1
+      activo: 1,
+      es_vendible: 0,
+      es_transformable: 0,
+      es_insumo: 1,
+      es_merma: 0
     }
   ]);
 
@@ -170,19 +183,69 @@ exports.seed = async function seed(knex) {
   const movementMap = new Map(movementRows.map((row) => [Number(row.producto_id), Number(row.stock_movimientos || 0)]));
   const ajustesIniciales = stockRows
     .map((row) => {
+      const producto = [
+        { id: 1, costo_promedio: 3, costo_total: 75, costo_total_centavos: 7500, cantidad_base: 1133980925000 },
+        { id: 2, costo_promedio: 4, costo_total: 48, costo_total_centavos: 4800, cantidad_base: 544310844000 },
+        { id: 3, costo_promedio: 0.5, costo_total: 20, costo_total_centavos: 2000, cantidad_base: 40 }
+      ].find((item) => item.id === Number(row.id));
       const diferencia = Number(row.stock_actual || 0) - Number(movementMap.get(Number(row.id)) || 0);
-      if (Math.abs(diferencia) < 0.0001) return null;
+      if (Math.abs(diferencia) < 0.0001 || !producto) return null;
       return {
         tipo: 'AJUSTE_SEED_INICIAL',
         producto_id: row.id,
         cantidad: Math.abs(diferencia),
         referencia: 'SEED:STOCK_INICIAL',
-        signo: diferencia >= 0 ? 1 : -1
+        signo: diferencia >= 0 ? 1 : -1,
+        saldo_resultante: Number(row.stock_actual || 0),
+        cantidad_base: producto.cantidad_base,
+        saldo_resultante_base: producto.cantidad_base,
+        origen_tipo: 'SEED_INICIAL',
+        origen_id: null,
+        costo_unitario: producto.costo_promedio,
+        costo_total: producto.costo_total,
+        costo_total_centavos: producto.costo_total_centavos,
+        costo_origen_tipo: 'SEED_INICIAL'
       };
     })
     .filter(Boolean);
 
   if (ajustesIniciales.length > 0) {
     await knex('inventario_movimientos').insert(ajustesIniciales);
+  }
+
+  const valorizacionInicial = stockRows
+    .map((row) => {
+      const producto = [
+        { id: 1, costo_promedio: 3, costo_total: 75 },
+        { id: 2, costo_promedio: 4, costo_total: 48 },
+        { id: 3, costo_promedio: 0.5, costo_total: 20 }
+      ].find((item) => item.id === Number(row.id));
+      const cantidad = Number(row.stock_actual || 0);
+      if (!producto || cantidad <= 0) return null;
+      return {
+        producto_id: row.id,
+        origen_tipo: 'SEED_INICIAL',
+        origen_id: null,
+        cantidad,
+        cantidad_base: [
+          { id: 1, cantidad_base: 1133980925000, costo_total_centavos: 7500 },
+          { id: 2, cantidad_base: 544310844000, costo_total_centavos: 4800 },
+          { id: 3, cantidad_base: 40, costo_total_centavos: 2000 }
+        ].find((item) => item.id === Number(row.id))?.cantidad_base || null,
+        costo_unitario: Number(producto.costo_promedio || 0),
+        costo_total: Number(producto.costo_total || 0),
+        costo_total_centavos: [
+          { id: 1, cantidad_base: 1133980925000, costo_total_centavos: 7500 },
+          { id: 2, cantidad_base: 544310844000, costo_total_centavos: 4800 },
+          { id: 3, cantidad_base: 40, costo_total_centavos: 2000 }
+        ].find((item) => item.id === Number(row.id))?.costo_total_centavos || null,
+        costo_origen_tipo: 'SEED_INICIAL',
+        referencia: 'SEED:STOCK_INICIAL'
+      };
+    })
+    .filter(Boolean);
+
+  if (valorizacionInicial.length > 0) {
+    await knex('inventario_valorizacion').insert(valorizacionInicial);
   }
 };

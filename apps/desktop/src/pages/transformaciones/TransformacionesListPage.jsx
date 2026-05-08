@@ -3,12 +3,16 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Alert,
   Button,
+  Field,
+  FiltersBar,
   Input,
   Modal,
   PageHeader,
   Paginador,
   Select,
   StatusBadge,
+  TableActions,
+  TableActionButton,
   Tabla,
   TablaCabecera,
   TablaCuerpo,
@@ -20,12 +24,13 @@ import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatQtyByUnit } from '../../lib/formatQty';
 import { useAuthStore } from '../../stores/authStore';
 import { useTransformacionesStore } from '../../stores/transformacionesStore';
+import { getTransformacionStatusLabel } from './transformacionesUi';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 function AuthActionModal({
   open,
-  mode,
   requiresAuth,
   item,
   auth,
@@ -37,52 +42,43 @@ function AuthActionModal({
   loading
 }) {
   if (!open || !item) return null;
-  const isApply = mode === 'aplicar';
 
   return (
     <Modal open={open} onClose={onClose} maxWidthClass="max-w-lg" panelClassName="p-5">
       <div className="space-y-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-800">
-            {isApply ? 'Aplicar transformación' : 'Anular transformación'}
-          </h3>
-          <p className="text-sm text-slate-500">
-            {isApply
-              ? requiresAuth
-                ? `Confirma aplicar ${item.numero}. Esta acción requiere autorización ADMIN.`
-                : `Confirma aplicar ${item.numero}.`
-              : requiresAuth
-                ? `Confirma anular ${item.numero}. Esta acción requiere autorización ADMIN.`
-                : `Confirma anular ${item.numero}.`}
+          <h3 className="text-lg font-semibold text-text">Anular transformación</h3>
+          <p className="text-sm text-text-muted">
+            {requiresAuth
+              ? `Confirma anular ${item.numero}. Esta acción requiere autorización ADMIN.`
+              : `Confirma anular ${item.numero}.`}
           </p>
         </div>
 
-        {!isApply && (
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Novedad de anulación</label>
-            <Textarea
-              className="mt-1"
-              rows={3}
-              value={novedad}
-              onChange={(e) => setNovedad(e.target.value)}
-              placeholder="Describe por qué se anula"
-            />
-          </div>
-        )}
+        <div>
+          <label className="text-xs font-medium uppercase tracking-wide text-text-muted">Novedad de anulación</label>
+          <Textarea
+            className="mt-1"
+            rows={3}
+            value={novedad}
+            onChange={(e) => setNovedad(e.target.value)}
+            placeholder="Describe por qué se anula"
+          />
+        </div>
 
         {requiresAuth && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm font-semibold text-amber-800">Autorización ADMIN</p>
+          <div className="rounded-xl border border-warning bg-warning-soft p-3">
+            <p className="text-sm font-semibold text-warning">Autorización ADMIN</p>
             <div className="mt-2 grid gap-2 md:grid-cols-2">
               <Input
-                className="border-amber-300"
+                className="border-warning"
                 placeholder="Usuario admin"
                 value={auth.usuario}
                 onChange={(e) => setAuth((s) => ({ ...s, usuario: e.target.value }))}
               />
               <Input
                 type="password"
-                className="border-amber-300"
+                className="border-warning"
                 placeholder="Clave admin"
                 value={auth.password}
                 onChange={(e) => setAuth((s) => ({ ...s, password: e.target.value }))}
@@ -96,7 +92,7 @@ function AuthActionModal({
             Cancelar
           </Button>
           <Button onClick={onConfirm} disabled={loading}>
-            {loading ? 'Procesando...' : (isApply ? 'Aplicar' : 'Anular')}
+            {loading ? 'Procesando...' : 'Anular'}
           </Button>
         </div>
       </div>
@@ -107,7 +103,7 @@ function AuthActionModal({
 export default function TransformacionesListPage() {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
-  const { items, loading, saving, error, listar, aplicar, anular } = useTransformacionesStore();
+  const { items, loading, saving, error, listar, anular } = useTransformacionesStore();
   const [localError, setLocalError] = useState('');
   const [filters, setFilters] = useState({
     desde: '',
@@ -144,10 +140,10 @@ export default function TransformacionesListPage() {
   }, [items, pagina]);
   const totalPaginas = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
 
-  const openModal = (mode, item) => {
+  const openModal = (item) => {
     setAuth({ usuario: '', password: '' });
     setNovedad('');
-    setActionModal({ open: true, mode, item });
+    setActionModal({ open: true, mode: 'anular', item });
   };
 
   const onConfirmAction = async () => {
@@ -163,17 +159,10 @@ export default function TransformacionesListPage() {
 
     setLocalError('');
     try {
-      if (actionModal.mode === 'aplicar') {
-        await aplicar(
-          actionModal.item.id,
-          isAdminUser ? {} : { autorizacion: { usuario: auth.usuario.trim(), password: auth.password } }
-        );
-      } else {
-        await anular(actionModal.item.id, {
-          novedad: novedad.trim(),
-          ...(isAdminUser ? {} : { autorizacion: { usuario: auth.usuario.trim(), password: auth.password } })
-        });
-      }
+      await anular(actionModal.item.id, {
+        novedad: novedad.trim(),
+        ...(isAdminUser ? {} : { autorizacion: { usuario: auth.usuario.trim(), password: auth.password } })
+      });
       setActionModal({ open: false, mode: null, item: null });
       await fetchData();
       navigate(`/transformaciones/${actionModal.item.id}`);
@@ -185,11 +174,11 @@ export default function TransformacionesListPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Despiece"
-        description="Listado de despieces, aplicación y anulación con trazabilidad operativa."
+        title="Transformaciones"
+        description="Listado de transformaciones listas para aplicar, aplicadas y anuladas con trazabilidad operativa."
         actions={(
           <Link to="/transformaciones/nueva">
-            <Button>Nuevo despiece</Button>
+            <Button>Nueva transformación</Button>
           </Link>
         )}
       />
@@ -200,17 +189,52 @@ export default function TransformacionesListPage() {
         </Alert>
       )}
 
-      <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-5">
+      <FiltersBar
+        search={(
+          <Field label="Buscar">
+            <Input
+              placeholder="Número o producto padre"
+              value={filters.search}
+              onChange={(e) => setFilters((s) => ({ ...s, search: e.target.value }))}
+            />
+          </Field>
+        )}
+        actions={(
+          <>
+            <Button
+              variant="neutral"
+              className="w-full sm:w-auto"
+              onClick={() => {
+                const reset = { desde: '', hasta: '', estado: '', tipo_proceso: '', search: '' };
+                setFilters(reset);
+              }}
+              disabled={loading}
+            >
+              Limpiar filtros
+            </Button>
+            <Button variant="ghost" onClick={fetchData} disabled={loading}>
+              {loading ? 'Filtrando...' : 'Aplicar filtros'}
+            </Button>
+          </>
+        )}
+      >
+        <Field label="Desde">
           <Input
-            placeholder="Desde (YYYY-MM-DD)"
+            type="date"
             value={filters.desde}
             onChange={(e) => setFilters((s) => ({ ...s, desde: e.target.value }))}
           />
+        </Field>
+
+        <Field label="Hasta">
           <Input
-            placeholder="Hasta (YYYY-MM-DD)"
+            type="date"
             value={filters.hasta}
             onChange={(e) => setFilters((s) => ({ ...s, hasta: e.target.value }))}
           />
+        </Field>
+
+        <Field label="Estado">
           <Select
             value={filters.estado}
             onChange={(e) => setFilters((s) => ({ ...s, estado: e.target.value }))}
@@ -220,34 +244,26 @@ export default function TransformacionesListPage() {
             <option value="APLICADA">APLICADA</option>
             <option value="ANULADA">ANULADA</option>
           </Select>
+        </Field>
+
+        <Field label="Tipo de proceso">
           <Input
-            placeholder="Tipo proceso"
+            placeholder="Tipo de proceso"
             value={filters.tipo_proceso}
             onChange={(e) => setFilters((s) => ({ ...s, tipo_proceso: e.target.value }))}
           />
-          <Input
-            placeholder="Buscar por número o producto padre"
-            value={filters.search}
-            onChange={(e) => setFilters((s) => ({ ...s, search: e.target.value }))}
-          />
-          <div className="md:col-span-5 flex justify-end">
-            <Button variant="ghost" onClick={fetchData} disabled={loading}>
-              {loading ? 'Filtrando...' : 'Aplicar filtros'}
-            </Button>
-          </div>
-        </div>
+        </Field>
+      </FiltersBar>
 
         <Tabla>
           <TablaCabecera>
             <tr>
-              <TablaCelda as="th">Número</TablaCelda>
+              <TablaCelda as="th">Código</TablaCelda>
               <TablaCelda as="th">Fecha</TablaCelda>
-              <TablaCelda as="th">Estado</TablaCelda>
-              <TablaCelda as="th">Tipo</TablaCelda>
               <TablaCelda as="th">Padre</TablaCelda>
-              <TablaCelda as="th">Entrada</TablaCelda>
-              <TablaCelda as="th">Salida útil</TablaCelda>
-              <TablaCelda as="th">Merma</TablaCelda>
+              <TablaCelda as="th">Total consumido</TablaCelda>
+              <TablaCelda as="th">Estado</TablaCelda>
+              <TablaCelda as="th">Usuario</TablaCelda>
               <TablaCelda as="th">Acciones</TablaCelda>
             </tr>
           </TablaCabecera>
@@ -257,34 +273,36 @@ export default function TransformacionesListPage() {
                 <TablaCelda>{row.numero}</TablaCelda>
                 <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
                 <TablaCelda>
-                  <StatusBadge status={row.estado} />
+                  <div className="space-y-1">
+                    <p className="font-semibold text-text">{row.insumo?.producto_nombre || '-'}</p>
+                    <p className="text-xs text-text-muted">{row.insumo?.producto_codigo || '-'}</p>
+                  </div>
                 </TablaCelda>
-                <TablaCelda>{row.tipo_proceso}</TablaCelda>
-                <TablaCelda>{row.insumo?.producto_codigo} {row.insumo?.producto_nombre}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.resumen?.entrada_total, row.insumo?.unidad_medida, { fixedLB: true })}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.resumen?.salida_util_total, row.insumo?.unidad_medida, { fixedLB: true })}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.resumen?.merma_total, row.insumo?.unidad_medida, { fixedLB: true })}</TablaCelda>
                 <TablaCelda>
-                  <div className="flex flex-wrap gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => navigate(`/transformaciones/${row.id}`)}>
+                  {`${formatQtyByUnit(row.metricas?.total_consumido ?? row.resumen?.entrada_total, row.insumo?.unidad_medida, { fixedWeight: true })} ${row.insumo?.unidad_medida || ''}`.trim()}
+                </TablaCelda>
+                <TablaCelda>
+                  <StatusBadge status={row.estado}>
+                    {getTransformacionStatusLabel(row.estado)}
+                  </StatusBadge>
+                </TablaCelda>
+                <TablaCelda>{row.actor?.nombre || row.actor?.usuario || '-'}</TablaCelda>
+                <TablaCelda>
+                  <TableActions>
+                    <TableActionButton variant="neutral" onClick={() => navigate(`/transformaciones/${row.id}`)}>
                       Ver
-                    </Button>
+                    </TableActionButton>
                     {row.acciones?.puede_editar && (
-                      <Button variant="ghost" size="sm" onClick={() => navigate(`/transformaciones/${row.id}/editar`)}>
+                      <TableActionButton variant="secondary" onClick={() => navigate(`/transformaciones/${row.id}/editar`)}>
                         Editar
-                      </Button>
-                    )}
-                    {row.acciones?.puede_aplicar && (
-                      <Button variant="secondary" size="sm" onClick={() => openModal('aplicar', row)} disabled={saving}>
-                        Aplicar
-                      </Button>
+                      </TableActionButton>
                     )}
                     {row.acciones?.puede_anular && (
-                      <Button variant="danger" size="sm" onClick={() => openModal('anular', row)} disabled={saving}>
+                      <TableActionButton variant="danger" onClick={() => openModal(row)} disabled={saving}>
                         Anular
-                      </Button>
+                      </TableActionButton>
                     )}
-                  </div>
+                  </TableActions>
                 </TablaCelda>
               </TablaFila>
             ))}
@@ -301,7 +319,6 @@ export default function TransformacionesListPage() {
 
       <AuthActionModal
         open={actionModal.open}
-        mode={actionModal.mode}
         requiresAuth={!isAdminUser}
         item={actionModal.item}
         auth={auth}

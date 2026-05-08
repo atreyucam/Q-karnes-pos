@@ -1,3 +1,5 @@
+const { quantityToBase, moneyToCents, normalizeUnit } = require('../../src/helpers/unitPolicy');
+
 let sequence = 0;
 
 function nextId(prefix) {
@@ -42,18 +44,38 @@ async function createCliente(db, overrides = {}) {
 
 async function createProducto(db, overrides = {}) {
   const categoriaId = overrides.categoria_id || 1;
+  const unidadMedida = normalizeUnit(overrides.unidad_medida || overrides.unidad || 'UND');
+  const isMerma = overrides.es_merma === true;
+  const stockActual = overrides.stock_actual ?? 0;
+  const stockMinimo = overrides.stock_minimo ?? 0;
+  const costoPromedio = overrides.costo_promedio ?? 1;
   return insertAndFetch(db, 'productos', {
     codigo: overrides.codigo || nextId('P'),
     nombre: overrides.nombre || nextId('Producto'),
     categoria_id: categoriaId,
-    unidad: overrides.unidad_medida || overrides.unidad || 'UND',
-    unidad_medida: overrides.unidad_medida || overrides.unidad || 'UND',
-    costo_promedio: overrides.costo_promedio ?? 1,
+    unidad: unidadMedida,
+    unidad_medida: unidadMedida,
+    costo_promedio: costoPromedio,
     precio_venta: overrides.precio_referencia ?? 1.5,
     precio_referencia: overrides.precio_referencia ?? 1.5,
-    stock_actual: overrides.stock_actual ?? 0,
-    stock_minimo: overrides.stock_minimo ?? 0,
-    activo: overrides.activo ?? true
+    stock_actual: stockActual,
+    stock_minimo: stockMinimo,
+    stock_actual_base: overrides.stock_actual_base ?? quantityToBase(stockActual, unidadMedida, {
+      field: 'stock_actual',
+      requirePositive: false,
+      allowZero: true
+    }),
+    stock_minimo_base: overrides.stock_minimo_base ?? quantityToBase(stockMinimo, unidadMedida, {
+      field: 'stock_minimo',
+      requirePositive: false,
+      allowZero: true
+    }),
+    valor_inventario_centavos: overrides.valor_inventario_centavos ?? moneyToCents(stockActual * costoPromedio, 'valor_inventario'),
+    activo: overrides.activo ?? true,
+    es_vendible: overrides.es_vendible ?? (isMerma ? false : true),
+    es_transformable: overrides.es_transformable ?? (isMerma ? false : ['LB', 'KG'].includes(String(unidadMedida).toUpperCase())),
+    es_insumo: overrides.es_insumo ?? false,
+    es_merma: overrides.es_merma ?? false
   });
 }
 

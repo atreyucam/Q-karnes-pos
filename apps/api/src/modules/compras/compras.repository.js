@@ -25,6 +25,7 @@ async function ensureLegacySchema() {
       if (hasComprasRecepciones) {
         await ensureColumn(db, 'compras_recepciones', 'usuario_receptor_id', 'ALTER TABLE compras_recepciones ADD COLUMN usuario_receptor_id INTEGER');
         await ensureColumn(db, 'compras_recepciones', 'observacion', 'ALTER TABLE compras_recepciones ADD COLUMN observacion TEXT');
+        await ensureColumn(db, 'compras_recepciones', 'documento_respaldo', 'ALTER TABLE compras_recepciones ADD COLUMN documento_respaldo TEXT');
         await db.raw('CREATE INDEX IF NOT EXISTS idx_compras_recepciones_usuario_receptor ON compras_recepciones(usuario_receptor_id)');
       }
 
@@ -51,7 +52,8 @@ async function readSchemaSupport(schemaApi) {
   return {
     hasUsuarioCreadorId: ordenColumnNames.has('usuario_creador_id'),
     hasUsuarioReceptorId: recepcionColumnNames.has('usuario_receptor_id'),
-    hasRecepcionObservacion: recepcionColumnNames.has('observacion')
+    hasRecepcionObservacion: recepcionColumnNames.has('observacion'),
+    hasDocumentoRespaldo: recepcionColumnNames.has('documento_respaldo')
   };
 }
 
@@ -107,6 +109,12 @@ async function listOrders(filters = {}, trx = db) {
     WHERE rr.orden_id = o.id
   ), 0)`;
 
+  const totalLineasExpr = `COALESCE((
+    SELECT COUNT(1)
+    FROM compras_orden_detalle d
+    WHERE d.orden_id = o.id
+  ), 0)`;
+
   const creditoTotalExpr = `COALESCE((
     SELECT SUM(
       COALESCE((SELECT SUM(cm.monto) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'), 0)
@@ -130,6 +138,7 @@ async function listOrders(filters = {}, trx = db) {
   const selectColumns = [
     'o.*',
     'p.nombre as proveedor_nombre',
+    trx.raw(`${totalLineasExpr} as total_lineas`),
     trx.raw(`${cantidadTotalExpr} as cantidad_total`),
     trx.raw(`${cantidadRecibidaExpr} as cantidad_recibida_total`),
     trx.raw(`${cantidadPendienteExpr} as cantidad_pendiente_total`),
@@ -252,13 +261,18 @@ async function getProductById(id, trx = db) {
   return trx('productos').where({ id }).first();
 }
 
-async function setProductStockAndCost(id, stockActual, costoPromedio, trx = db) {
-  await trx('productos').where({ id }).update({ stock_actual: stockActual, costo_promedio: costoPromedio });
+async function setProductStockAndCost(id, payload, trx = db) {
+  await trx('productos').where({ id }).update(payload);
 }
 
 async function createInventoryMovements(rows, trx = db) {
   if (!rows.length) return;
   await trx('inventario_movimientos').insert(rows);
+}
+
+async function createInventoryValuation(rows, trx = db) {
+  if (!rows.length) return;
+  await trx('inventario_valorizacion').insert(rows);
 }
 
 async function createSupplierCostHistory(rows, trx = db) {
@@ -351,6 +365,7 @@ module.exports = {
   getProductById,
   setProductStockAndCost,
   createInventoryMovements,
+  createInventoryValuation,
   createSupplierCostHistory,
   createFactura,
   getFacturaByProveedorAndNumero,

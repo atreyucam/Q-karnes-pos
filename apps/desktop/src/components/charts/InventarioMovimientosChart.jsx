@@ -32,13 +32,13 @@ export default function InventarioMovimientosChart({ data = [] }) {
     colors: [chartPalette.warning],
     xaxis: {
       categories,
-      labels: { style: { colors: '#64748b' } }
+      labels: { style: { colors: chartPalette.axis } }
     },
     yaxis: {
-      labels: { style: { colors: '#64748b' } }
+      labels: { style: { colors: chartPalette.axis } }
     },
     grid: {
-      borderColor: '#e2e8f0'
+      borderColor: chartPalette.grid
     },
     tooltip: {
       y: {
@@ -48,10 +48,9 @@ export default function InventarioMovimientosChart({ data = [] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
       <p className="mb-2 text-sm font-semibold text-[var(--color-text)]">Inventario: movimientos por tipo</p>
       <Chart type="bar" height={260} options={options} series={[{ name: 'Cantidad', data: values }]} />
     </div>
   );
 }
-

@@ -1,1 +1,1 @@
-export { default } from '../../components/ui/PageHeader';
+export { default } from '../../shared/ui/layout/PageHeader';
