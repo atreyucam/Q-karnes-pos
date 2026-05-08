@@ -30,8 +30,9 @@ import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 const emptyClienteForm = {
   id: null,
   nombre: '',
@@ -374,7 +375,7 @@ export default function ClienteDetallePage() {
                         Ver
                       </TableActionButton>
                       <TableActionButton
-                        variant="secondary"
+                        variant="primary"
                         icon={<PiCurrencyDollar />}
                         aria-label="Registrar abono"
                         title={sinPendiente ? 'Sin saldo pendiente' : 'Registrar abono'}

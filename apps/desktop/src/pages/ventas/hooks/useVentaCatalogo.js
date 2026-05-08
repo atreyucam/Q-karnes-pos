@@ -65,17 +65,37 @@ export function useVentaCatalogo({ enabled = true } = {}) {
   const productosMostrados = useMemo(() => {
     if (!enabled) return [];
 
+    const ordenarConSinStockAlFinal = (items) => (
+      [...items].sort((a, b) => {
+        const aOut = Number(a?.stock_actual || 0) <= 0 ? 1 : 0;
+        const bOut = Number(b?.stock_actual || 0) <= 0 ? 1 : 0;
+        if (aOut !== bOut) return aOut - bOut;
+        return 0;
+      })
+    );
+
     if (debouncedSearch) {
-      return productosAll.filter((producto) => {
+      const filtrados = productosAll.filter((producto) => {
         const codigo = String(producto.codigo || '').toLowerCase();
         const nombre = String(producto.nombre || '').toLowerCase();
-        return codigo.includes(debouncedSearch) || nombre.includes(debouncedSearch);
+        const sku = String(producto.sku || '').toLowerCase();
+        const barcode = String(producto.barcode || producto.codigo_barras || '').toLowerCase();
+        return (
+          codigo.includes(debouncedSearch)
+          || nombre.includes(debouncedSearch)
+          || sku.includes(debouncedSearch)
+          || barcode.includes(debouncedSearch)
+        );
       });
+      return ordenarConSinStockAlFinal(filtrados);
     }
 
-    if (categoriaActiva == null) return productosAll;
+    if (categoriaActiva == null) return ordenarConSinStockAlFinal(productosAll);
 
-    return productosAll.filter((producto) => Number(producto.categoria_id) === Number(categoriaActiva));
+    const filtradosCategoria = productosAll.filter(
+      (producto) => Number(producto.categoria_id) === Number(categoriaActiva)
+    );
+    return ordenarConSinStockAlFinal(filtradosCategoria);
   }, [enabled, productosAll, categoriaActiva, debouncedSearch]);
 
   return {

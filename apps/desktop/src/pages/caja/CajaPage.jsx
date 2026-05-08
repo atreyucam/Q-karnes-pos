@@ -37,6 +37,7 @@ import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { sanitizeDecimalInput } from '../../lib/formatQty';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
 const MAX_CASH_OPERATION_AMOUNT = 5000;
 
@@ -565,7 +566,7 @@ export default function CajaPage() {
   const aperturaErrors = useFormErrors();
   const manualFormErrors = useFormErrors();
   const cierreFormErrors = useFormErrors();
-  const pageSize = 10;
+  const pageSize = GLOBAL_PAGE_SIZE;
 
   const resolveVentaId = (movimiento) => {
     const tipo = String(movimiento?.tipo || '').toUpperCase();

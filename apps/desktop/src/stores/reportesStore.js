@@ -3,13 +3,24 @@ import { parseApiError } from '../lib/apiClient';
 import { fetchReporte, sanitizeQueryParams } from '../services/reportesService';
 
 export const REPORT_VIEW_KEYS = [
+  'dashboard',
   'ventasDia',
   'ventasPeriodo',
   'ventasPorProducto',
+  'ventasDiarias',
+  'topProductos',
+  'cajaDiaria',
+  'caja',
   'inventarioActual',
+  'inventario',
+  'inventarioMovimientos',
   'kardex',
+  'compras',
+  'comprasProductos',
   'transformaciones',
-  'cajaDiaria'
+  'transformacionesResumen',
+  'cxc',
+  'cxp'
 ];
 
 function createAsyncView() {
@@ -31,12 +42,17 @@ function createViewsState() {
 
 export const useReportesStore = create((set, get) => ({
   views: createViewsState(),
-  async cargarReporte(reportKey, params = {}) {
+  async cargarReporte(reportKey, params = {}, force = false) {
     if (!REPORT_VIEW_KEYS.includes(reportKey)) {
       throw new Error(`Reporte no soportado: ${reportKey}`);
     }
 
     const normalizedParams = sanitizeQueryParams(params);
+    const current = get().views[reportKey];
+    const sameParams = JSON.stringify(current.lastParams || {}) === JSON.stringify(normalizedParams);
+    if (!force && current.loaded && sameParams && current.data) {
+      return current.data;
+    }
 
     set((state) => ({
       views: {
@@ -52,7 +68,6 @@ export const useReportesStore = create((set, get) => ({
 
     try {
       const data = await fetchReporte(reportKey, normalizedParams);
-
       set((state) => ({
         views: {
           ...state.views,
@@ -65,11 +80,9 @@ export const useReportesStore = create((set, get) => ({
           }
         }
       }));
-
       return data;
     } catch (error) {
       const message = parseApiError(error);
-
       set((state) => ({
         views: {
           ...state.views,
@@ -82,8 +95,10 @@ export const useReportesStore = create((set, get) => ({
           }
         }
       }));
-
       return get().views[reportKey]?.data || null;
     }
+  },
+  resetReportesStore() {
+    set({ views: createViewsState() });
   }
 }));

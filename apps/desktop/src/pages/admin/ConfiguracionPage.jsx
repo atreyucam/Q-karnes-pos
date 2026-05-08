@@ -10,7 +10,8 @@ import {
   LoadingState,
   PageHeader,
   Switch,
-  Textarea
+  Textarea,
+  Toast
 } from '../../shared/ui';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 
@@ -50,6 +51,7 @@ export default function ConfiguracionPage() {
   const [form, setForm] = useState(configuracion);
   const [methodsDraft, setMethodsDraft] = useState([]);
   const [success, setSuccess] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
   const [methodLoadingId, setMethodLoadingId] = useState(null);
   const [methodConfirm, setMethodConfirm] = useState(null);
   const [configHydrated, setConfigHydrated] = useState(false);
@@ -127,28 +129,61 @@ export default function ConfiguracionPage() {
     await cargarTodo();
   };
 
+  useEffect(() => {
+    if (!success) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setSuccess(''), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [success]);
+
   if (loading && !initialized) {
     return <LoadingState title="Cargando configuración" description="Leyendo parámetros base y métodos de pago." />;
   }
 
   return (
     <div className="space-y-5">
+      {success ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone="success"
+            title="Operacion completada"
+            description={success}
+            onClose={() => {
+              setToastVisible(false);
+              setSuccess('');
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
+
       <PageHeader
         title="Configuracion del sistema"
         description="Datos del negocio, operación, crédito, ticket, impuestos y métodos de pago"
       />
 
-      {(error || success) && (
-        <Alert tone={error ? 'error' : 'success'}>
-          {error || success}
-        </Alert>
-      )}
+      {error && <Alert tone="error">{error}</Alert>}
 
-      <Alert tone={configDirty ? 'warning' : 'info'}>
-        {configDirty
-          ? 'Hay cambios pendientes en la configuración general. Debes usar "Guardar configuración" para persistirlos.'
-          : 'Los switches de configuración general funcionan en modo batch. Los métodos de pago sí se actualizan inmediatamente.'}
-      </Alert>
+      <Card className="p-4">
+        <div className="grid gap-3">
+          <div className={`rounded-2xl border px-4 py-3 ${
+            configDirty
+              ? 'border-[color-mix(in_oklab,var(--color-warning)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-warning)_14%,white_86%)]'
+              : 'border-[var(--color-border)] bg-[var(--color-surface-muted)]'
+          }`}>
+            <p className="text-sm font-semibold text-[var(--color-text)]">Cambios pendientes</p>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {configDirty
+                ? 'Hay ajustes sin guardar en configuración general.'
+                : 'No existen cambios pendientes en configuración general.'}
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card className="space-y-4 p-5">
@@ -192,12 +227,17 @@ export default function ConfiguracionPage() {
                 key={item.key}
                 className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3"
               >
-                <Switch
-                  checked={Boolean(form[item.key])}
-                  onChange={(checked) => updateField(item.key, checked)}
-                  label={item.label}
-                  description={item.hint}
-                />
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--color-text)]">{item.label}</p>
+                    <p className="text-xs text-[var(--color-text-muted)]">{item.hint}</p>
+                  </div>
+                  <Switch
+                    checked={Boolean(form[item.key])}
+                    onChange={(checked) => updateField(item.key, checked)}
+                    aria-label={item.label}
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -239,13 +279,20 @@ export default function ConfiguracionPage() {
               />
             </Field>
 
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-              <Switch
-                checked={Boolean(form.precio_incluye_impuesto)}
-                onChange={(checked) => updateField('precio_incluye_impuesto', checked)}
-                label="Precios incluyen impuesto"
-                description="Activa cálculo inverso para precios finales cargados desde pantalla."
-              />
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3 md:col-span-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Precios incluyen impuesto</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Activa cálculo inverso para precios finales cargados desde pantalla.
+                  </p>
+                </div>
+                <Switch
+                  checked={Boolean(form.precio_incluye_impuesto)}
+                  onChange={(checked) => updateField('precio_incluye_impuesto', checked)}
+                  aria-label="Precios incluyen impuesto"
+                />
+              </div>
             </div>
           </div>
         </Card>
@@ -287,14 +334,19 @@ export default function ConfiguracionPage() {
                 key={method.id}
                 className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3"
               >
-                <Switch
-                  checked={Boolean(method.habilitado)}
-                  onChange={(checked) => onMethodSwitch(method, checked)}
-                  label={method.nombre}
-                  description={method.codigo}
-                  busy={methodLoadingId === method.id}
-                  disabled={methodLoadingId === method.id}
-                />
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--color-text)]">{method.nombre}</p>
+                    <p className="text-xs text-[var(--color-text-muted)]">{method.codigo}</p>
+                  </div>
+                  <Switch
+                    checked={Boolean(method.habilitado)}
+                    onChange={(checked) => onMethodSwitch(method, checked)}
+                    busy={methodLoadingId === method.id}
+                    disabled={methodLoadingId === method.id}
+                    aria-label={`Estado de ${method.nombre}`}
+                  />
+                </div>
               </div>
             ))}
           </div>

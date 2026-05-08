@@ -1,55 +1,52 @@
-import { useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { PageHeader, Tabs } from '../../shared/ui';
-import CajaDiariaReport from './CajaDiariaReport';
-import InventarioActualReport from './InventarioActualReport';
-import KardexReport from './KardexReport';
-import TransformacionesReport from './TransformacionesReport';
-import VentasDiaReport from './VentasDiaReport';
-import VentasPeriodoReport from './VentasPeriodoReport';
-import VentasPorProductoReport from './VentasPorProductoReport';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { PageHeader, Panel, Tabs } from '../../shared/ui';
+import ReportesCajaSection from './ReportesCajaSection';
+import ReportesComprasSection from './ReportesComprasSection';
+import ReportesDespieceSection from './ReportesDespieceSection';
+import ReportesInventarioSection from './ReportesInventarioSection';
+import ReportesResumenSection from './ReportesResumenSection';
+import { REPORT_SECTIONS, resolveReportSection } from './reportesSections';
+import ReportesVentasSection from './ReportesVentasSection';
 
-const REPORT_TABS = [
-  { key: 'ventas-dia', label: 'Ventas del dia', component: VentasDiaReport },
-  { key: 'ventas-periodo', label: 'Ventas por periodo', component: VentasPeriodoReport },
-  { key: 'ventas-producto', label: 'Ventas por producto', component: VentasPorProductoReport },
-  { key: 'inventario-actual', label: 'Inventario valorizado', component: InventarioActualReport },
-  { key: 'kardex', label: 'Kardex', component: KardexReport },
-  { key: 'transformaciones', label: 'Transformaciones', component: TransformacionesReport },
-  { key: 'caja-diaria', label: 'Caja diaria', component: CajaDiariaReport }
-];
+const SECTION_COMPONENTS = {
+  resumen: ReportesResumenSection,
+  ventas: ReportesVentasSection,
+  caja: ReportesCajaSection,
+  inventario: ReportesInventarioSection,
+  compras: ReportesComprasSection,
+  despiece: ReportesDespieceSection
+};
 
 export default function ReportesPage() {
-  const [params, setParams] = useSearchParams();
+  const params = useParams();
+  const navigate = useNavigate();
+  const section = resolveReportSection(params.section);
 
-  const currentTab = useMemo(() => {
-    const currentValue = params.get('tab');
-    return REPORT_TABS.find((tab) => tab.key === currentValue)?.key || REPORT_TABS[0].key;
-  }, [params]);
+  if (params.section !== section) {
+    return <Navigate to={`/reportes/${section}`} replace />;
+  }
 
-  useEffect(() => {
-    if (!params.get('tab')) {
-      setParams({ tab: REPORT_TABS[0].key }, { replace: true });
-    }
-  }, [params, setParams]);
-
-  const ActiveReport = REPORT_TABS.find((tab) => tab.key === currentTab)?.component || VentasDiaReport;
+  const ActiveSection = SECTION_COMPONENTS[section] || ReportesResumenSection;
+  const currentMeta = REPORT_SECTIONS.find((item) => item.key === section) || REPORT_SECTIONS[0];
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Reportes"
-        description="Analisis financiero y operativo del negocio usando el backend como fuente unica de verdad"
+        description="Hub operativo para control comercial, financiero e inventario del negocio."
       />
 
-      <Tabs
-        ariaLabel="Pestanas de reportes"
-        items={REPORT_TABS}
-        value={currentTab}
-        onChange={(tabKey) => setParams({ tab: tabKey })}
-      />
+      <Panel className="space-y-4 p-4">
+        <Tabs
+          ariaLabel="Navegación interna de reportes"
+          items={REPORT_SECTIONS}
+          value={section}
+          onChange={(nextSection) => navigate(`/reportes/${nextSection}`)}
+        />
+        <p className="text-sm text-[var(--color-text-muted)]">{currentMeta.description}</p>
+      </Panel>
 
-      <ActiveReport />
+      <ActiveSection />
     </div>
   );
 }

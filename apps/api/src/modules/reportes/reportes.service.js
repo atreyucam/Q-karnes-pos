@@ -85,12 +85,39 @@ function parseTransformacionesFilters(query = {}) {
   };
 }
 
-function buildMetodoPago(contado, credito) {
+function parseComprasFilters(query = {}) {
+  const bounds = parseDateRange(query);
+  return {
+    ...bounds,
+    proveedor_id: parsePositiveInteger(query.proveedor_id, 'proveedor_id'),
+    metodo_pago: parseOptionalUppercase(query.metodo_pago)
+  };
+}
+
+function parseInventarioMovimientosFilters(query = {}) {
+  const bounds = parseDateRange(query);
+  return {
+    ...bounds,
+    producto_id: parsePositiveInteger(query.producto_id, 'producto_id'),
+    categoria_id: parsePositiveInteger(query.categoria_id, 'categoria_id'),
+    tipo: parseOptionalUppercase(query.tipo)
+  };
+}
+
+function buildMetodoPago(contado, transferencia, credito) {
   const contadoValue = Number(contado || 0);
+  const transferenciaValue = Number(transferencia || 0);
   const creditoValue = Number(credito || 0);
-  if (contadoValue > 0 && creditoValue > 0) return 'MIXTO';
-  if (creditoValue > 0) return 'CREDITO';
-  return 'CONTADO';
+  const active = [
+    contadoValue > 0 ? 'EFECTIVO' : null,
+    transferenciaValue > 0 ? 'TRANSFERENCIA' : null,
+    creditoValue > 0 ? 'CREDITO' : null
+  ].filter(Boolean);
+
+  if (active.length > 1) return 'Mixto';
+  if (active[0] === 'TRANSFERENCIA') return 'Transferencia';
+  if (active[0] === 'CREDITO') return 'Crédito';
+  return 'Efectivo';
 }
 
 function roundQty(value) {
@@ -355,7 +382,7 @@ function buildAlerts({ stockItems = [], receivables, openTurno, stagnantProducts
       title: `${receivables.clientes_con_deuda} cliente(s) con deuda activa`,
       description: `Saldo pendiente ${receivables.total.toFixed(2)}. Mayor exposición: ${primaryClient?.cliente || 'cliente'}.`,
       meta: primaryClient?.proximo_vencimiento ? `Vence ${primaryClient.proximo_vencimiento}` : null,
-      href: '/reportes?tab=cxc'
+      href: '/reportes/resumen'
     });
   }
 
@@ -400,6 +427,7 @@ function buildLatestSales(rows = []) {
   return rows.map((row) => {
     const total = moneyRound(row.total);
     const montoContado = moneyRound(row.monto_contado);
+    const montoTransferencia = moneyRound(row.monto_transferencia);
     const montoCredito = moneyRound(row.monto_credito);
 
     return {
@@ -408,7 +436,7 @@ function buildLatestSales(rows = []) {
       estado: row.estado,
       hora: String(row.fecha || '').slice(11, 16),
       cliente: row.cliente_nombre || 'Consumidor final',
-      metodo: buildMetodoPago(montoContado, montoCredito),
+      metodo: buildMetodoPago(montoContado, montoTransferencia, montoCredito),
       total,
       usuario: row.usuario_nombre || '-'
     };
@@ -428,7 +456,7 @@ async function dashboard() {
   const stockBajoAyer = Number(snapshot?.stock_bajo_ayer?.total || 0);
 
   data.generated_at = new Date().toISOString();
-  data.business_date = new Date().toISOString().slice(0, 10);
+  data.business_date = currentBusinessDate();
   data.kpis = {
     ventas_hoy: moneyRound(ventasHoy),
     transacciones_hoy: transaccionesHoy,
@@ -465,6 +493,7 @@ async function ventas(query = {}) {
     const totalDevuelto = moneyRound(row.total_devuelto);
     const total = moneyRound(Math.max(totalDocumento - totalDevuelto, 0));
     const montoContado = moneyRound(row.monto_contado);
+    const montoTransferencia = moneyRound(row.monto_transferencia);
     const montoCredito = moneyRound(row.monto_credito);
 
     return {
@@ -475,7 +504,7 @@ async function ventas(query = {}) {
       total,
       total_documento: totalDocumento,
       total_devuelto: totalDevuelto,
-      metodo_pago: buildMetodoPago(montoContado, montoCredito),
+      metodo_pago: buildMetodoPago(montoContado, montoTransferencia, montoCredito),
       usuario: row.usuario_nombre || '-',
       estado: row.estado
     };
@@ -561,6 +590,7 @@ async function inventario() {
     id: row.id,
     codigo: row.codigo,
     producto: row.nombre,
+    categoria_id: row.categoria_id ? Number(row.categoria_id) : null,
     categoria: row.categoria_nombre || '-',
     unidad_medida: row.unidad_medida || row.unidad || 'UND',
     stock_actual: roundQty(row.stock_actual),
@@ -587,9 +617,22 @@ async function inventario() {
   };
 }
 
-async function inventarioMovimientos() {
-  const data = await repository.inventarioMovimientos();
-  return { ok: true, data };
+async function inventarioMovimientos(query = {}) {
+  const filters = parseInventarioMovimientosFilters(query);
+  const rows = await repository.inventarioMovimientos(filters);
+  return {
+    ok: true,
+    data: {
+      filtros: {
+        fecha_inicio: filters.fecha_inicio,
+        fecha_fin: filters.fecha_fin,
+        producto_id: filters.producto_id,
+        categoria_id: filters.categoria_id,
+        tipo: filters.tipo || null
+      },
+      items: rows
+    }
+  };
 }
 
 async function caja(query = {}) {
@@ -732,37 +775,91 @@ async function cxp() {
 }
 
 async function compras(query = {}) {
-  const bounds = parseDateRange(query);
-  const rows = await repository.comprasReporte(bounds);
+  const filters = parseComprasFilters(query);
+  const rows = await repository.comprasReporte(filters);
 
   const items = rows.map((row) => ({
     id: row.id,
+    proveedor_id: row.proveedor_id ? Number(row.proveedor_id) : null,
     proveedor: row.proveedor_nombre || '-',
     numero_factura: row.numero_factura,
     fecha: row.fecha,
     total_compra: moneyRound(row.total),
-    metodo_pago: row.metodo_pago,
+    metodo_pago: String(row.metodo_pago || '').toUpperCase() || 'CONTADO',
     orden_id: row.orden_id || null
   }));
+
+  const topProveedor = items.reduce((acc, item) => {
+    const current = Number(item.total_compra || 0);
+    if (!acc || current > Number(acc.total_compra || 0)) return item;
+    return acc;
+  }, null);
 
   return {
     ok: true,
     data: {
       filtros: {
-        fecha_inicio: bounds.fecha_inicio,
-        fecha_fin: bounds.fecha_fin
+        fecha_inicio: filters.fecha_inicio,
+        fecha_fin: filters.fecha_fin,
+        proveedor_id: filters.proveedor_id,
+        metodo_pago: filters.metodo_pago || null
       },
       resumen: {
         total_compras: summarizeMoney(items, 'total_compra'),
-        cantidad_compras: items.length
+        cantidad_compras: items.length,
+        ticket_promedio_compra: items.length > 0 ? moneyRound(summarizeMoney(items, 'total_compra') / items.length) : 0,
+        proveedor_top: topProveedor ? topProveedor.proveedor : null
       },
       items
     }
   };
 }
 
-async function transformacionesResumen() {
-  const data = await repository.transformacionesResumen();
+async function comprasProductos(query = {}) {
+  const filters = parseComprasFilters(query);
+  const rows = await repository.comprasProductosReporte(filters);
+  const items = rows.map((row) => ({
+    producto_id: Number(row.producto_id),
+    codigo: row.codigo,
+    nombre: row.nombre,
+    categoria_id: row.categoria_id ? Number(row.categoria_id) : null,
+    categoria: row.categoria_nombre || null,
+    proveedor_id: row.proveedor_id ? Number(row.proveedor_id) : null,
+    proveedor: row.proveedor_nombre || null,
+    unidad_medida: row.unidad_medida || row.unidad || 'UND',
+    cantidad_comprada: Number(row.cantidad_comprada || 0),
+    total_comprado: moneyRound(row.total_comprado),
+    facturas: Number(row.facturas || 0)
+  }));
+
+  return {
+    ok: true,
+    data: {
+      filtros: {
+        fecha_inicio: filters.fecha_inicio,
+        fecha_fin: filters.fecha_fin,
+        proveedor_id: filters.proveedor_id,
+        metodo_pago: filters.metodo_pago || null
+      },
+      resumen: {
+        productos: items.length,
+        cantidad_total_comprada: roundQty(items.reduce((acc, item) => acc + Number(item.cantidad_comprada || 0), 0)),
+        total_comprado: summarizeMoney(items, 'total_comprado')
+      },
+      items
+    }
+  };
+}
+
+async function transformacionesResumen(query = {}) {
+  const bounds = parseDateRange(query);
+  const rows = await repository.transformacionesResumen();
+  const data = rows.filter((row) => {
+    const date = String(row.fecha || '').slice(0, 10);
+    if (bounds.fecha_inicio && date < bounds.fecha_inicio) return false;
+    if (bounds.fecha_fin && date > bounds.fecha_fin) return false;
+    return true;
+  });
   return { ok: true, data };
 }
 
@@ -872,6 +969,7 @@ async function ventasPeriodo(query = {}) {
         referencia: row.referencia || `VENTA:${row.venta_id}`,
         usuario_id: row.usuario_id ? Number(row.usuario_id) : null,
         usuario: row.usuario_nombre || 'Sin usuario',
+        metodo_pago_codigo: normalizeMetodoPagoLabel(row.metodo_pago_codigo),
         total_ventas_centavos: Number(row.total_ventas_centavos || 0),
         total_costo_centavos: Number(row.total_costo_centavos || 0),
         utilidad_centavos: Number(row.utilidad_centavos || 0),
@@ -883,12 +981,20 @@ async function ventasPeriodo(query = {}) {
 
 async function ventasPorProducto(query = {}) {
   const bounds = parseDateRange(query);
-  const rows = await repository.listSalesProductBreakdown(bounds);
+  const productoId = parsePositiveInteger(query.producto_id, 'producto_id');
+  const categoriaId = parsePositiveInteger(query.categoria_id, 'categoria_id');
+  const rows = await repository.listSalesProductBreakdown({
+    ...bounds,
+    producto_id: productoId,
+    categoria_id: categoriaId
+  });
 
   const items = rows.map((row) => ({
     producto_id: Number(row.producto_id),
     codigo: row.producto_codigo,
     nombre: row.producto_nombre,
+    categoria_id: row.categoria_id ? Number(row.categoria_id) : null,
+    categoria: row.categoria_nombre || null,
     unidad_medida: row.unidad_medida || row.unidad || 'UND',
     cantidad_vendida: Number(row.cantidad_vendida || 0),
     cantidad_vendida_base: Number(row.cantidad_vendida_base || 0),
@@ -903,7 +1009,9 @@ async function ventasPorProducto(query = {}) {
     data: {
       filtros: {
         fecha_inicio: bounds.fecha_inicio,
-        fecha_fin: bounds.fecha_fin
+        fecha_fin: bounds.fecha_fin,
+        producto_id: productoId,
+        categoria_id: categoriaId
       },
       resumen: {
         productos: items.length,
@@ -925,6 +1033,7 @@ async function inventarioActual() {
       producto_id: Number(row.producto_id),
       codigo: row.codigo,
       nombre: row.nombre,
+      categoria_id: row.categoria_id ? Number(row.categoria_id) : null,
       categoria: row.categoria_nombre || null,
       unidad_medida: normalized.unidad_operativa,
       stock_actual_base: Number(normalized.stock_actual_base || 0),
@@ -1124,6 +1233,7 @@ module.exports = {
   cxc,
   cxp,
   compras,
+  comprasProductos,
   transformacionesResumen,
   ventasDelDia,
   ventasPeriodo,

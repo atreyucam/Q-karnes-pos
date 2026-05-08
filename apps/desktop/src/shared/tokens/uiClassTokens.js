@@ -1,67 +1,67 @@
 export const uiClassTokens = {
   page: {
-    section: '-mx-4 -mb-4 min-h-screen bg-background px-4 pb-4 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6 lg:-mx-8 lg:-mb-8 lg:px-8 lg:pb-8',
-    container: 'mx-auto max-w-[1400px] rounded-[22px] border border-border bg-surface p-4 shadow-posSm sm:p-6 lg:p-8',
+    section: '-mx-4 -mb-4 min-h-screen bg-background px-4 pb-4 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4 lg:-mx-6 lg:-mb-6 lg:px-6 lg:pb-6',
+    container: 'mx-auto max-w-[1400px] rounded-[16px] border border-border bg-surface p-4 shadow-posSm sm:p-5 lg:p-6',
     title: 'text-2xl font-bold text-text',
-    subtitle: 'text-text-muted',
+    subtitle: 'text-sm font-normal text-text-muted',
     header: {
-      layout: 'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'
+      layout: 'flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'
     }
   },
   card: {
-    base: 'rounded-xl border border-border bg-surface',
-    header: 'rounded-t-xl border-b border-border bg-background px-4 py-4',
-    headerTitle: 'text-lg font-bold text-text',
+    base: 'rounded-[16px] border border-border bg-surface shadow-posSm',
+    header: 'rounded-t-[16px] border-b border-border bg-surface-muted px-5 py-4',
+    headerTitle: 'text-base font-semibold text-text',
     headerSubtitle: 'text-sm text-text-muted',
-    body: 'p-4'
+    body: 'p-5'
   },
   table: {
-    wrapper: 'overflow-hidden rounded-xl border border-border bg-surface shadow-posSm',
-    base: 'w-full text-left text-sm text-text-muted',
-    headRow: 'border-b border-border bg-background text-xs font-bold uppercase tracking-wider text-text-muted',
-    headCell: 'px-6 py-3',
+    wrapper: 'overflow-hidden rounded-[14px] border border-border bg-surface shadow-posSm',
+    base: 'w-full border-separate border-spacing-0 text-left text-[13px] text-text',
+    headRow: 'bg-background text-[12px] font-semibold uppercase tracking-[0.03em] text-text-muted',
+    headCell: 'h-11 px-4 py-0',
     body: 'divide-y divide-border bg-surface',
-    row: 'transition-colors hover:bg-background',
-    cell: 'px-6 py-4',
+    row: 'transition-colors even:bg-[#FCFCFD] hover:bg-surface-alt',
+    cell: 'h-14 px-4 py-0 align-middle text-[13px] font-medium text-text-secondary',
     empty: 'py-16 text-center'
   },
   button: {
-    base: 'inline-flex cursor-pointer items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
-    primary: 'bg-primary text-text-inverse hover:bg-primary-hover active:bg-primary-hover',
-    secondary: 'border border-border bg-surface text-text hover:bg-background active:bg-surface-alt',
-    danger: 'bg-danger text-text-inverse hover:bg-danger-hover active:bg-danger-hover',
-    warning: 'bg-warning text-text-inverse hover:bg-warning-hover active:bg-warning-hover',
-    neutral: 'border border-border bg-surface-alt text-text-muted hover:bg-background',
-    ghost: 'border border-border bg-surface text-text-muted hover:bg-background shadow-none',
-    icon: 'border border-border bg-surface text-text-muted hover:bg-background hover:text-text shadow-none',
-    iconView: 'border border-info bg-info text-text-inverse hover:opacity-95 shadow-none',
-    iconEdit: 'border border-warning bg-warning text-text-inverse hover:opacity-95 shadow-none',
-    iconSecondary: 'border border-primary bg-primary text-text-inverse hover:bg-primary-hover shadow-none',
-    iconSuccess: 'border border-success bg-success text-text-inverse hover:opacity-95 shadow-none',
+    base: 'inline-flex items-center justify-center whitespace-nowrap transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 disabled:cursor-not-allowed disabled:shadow-none',
+    primary: 'bg-[#EF4444] text-white border border-[#EF4444] shadow-sm hover:bg-[#DC2626] hover:border-[#DC2626] disabled:bg-[#FEE2E2] disabled:text-[#991B1B] disabled:border-[#FEE2E2]',
+    secondary: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    danger: 'bg-white text-[#EF4444] border border-[#FECACA] hover:bg-[#FEE2E2] hover:border-[#FCA5A5] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    warning: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    neutral: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    ghost: 'bg-transparent text-[#374151] border border-transparent hover:bg-[#F3F4F6] disabled:text-[#9CA3AF]',
+    icon: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconView: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconEdit: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconSecondary: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconSuccess: 'bg-[#EF4444] text-white border border-[#EF4444] shadow-sm hover:bg-[#DC2626] hover:border-[#DC2626] disabled:bg-[#FEE2E2] disabled:text-[#991B1B] disabled:border-[#FEE2E2]',
     successOutline: 'border border-success bg-surface text-success hover:bg-success-soft shadow-none',
     warningOutline: 'border border-warning bg-surface text-warning hover:bg-warning-soft shadow-none',
     dangerOutline: 'border border-danger bg-surface text-danger hover:bg-danger-soft shadow-none',
-    iconDanger: 'border border-danger bg-danger text-text-inverse hover:opacity-95 shadow-none',
-    tableActionBase: '!h-8 !rounded-md !px-3 !py-1.5 text-xs font-semibold shadow-none',
-    tableActionNeutral: 'border border-border bg-surface text-text hover:bg-background',
-    tableActionWarning: 'border border-warning/40 bg-warning-soft text-warning hover:border-warning/60 hover:bg-warning-soft',
-    tableActionSuccess: 'border border-success/40 bg-success-soft text-success hover:border-success/60 hover:bg-success-soft',
-    tableActionDanger: 'border border-danger/40 bg-danger-soft text-danger hover:border-danger/60 hover:bg-danger-soft',
-    tableActionSecondary: 'border border-info/30 bg-info-soft text-info hover:border-info/50 hover:bg-info-soft',
-    iconAction: '!px-2.5 !py-2'
+    iconDanger: 'bg-white text-[#EF4444] border border-[#FECACA] hover:bg-[#FEE2E2] hover:border-[#FCA5A5] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionBase: '',
+    tableActionNeutral: 'bg-white text-[#374151] border border-[#E5E7EB] hover:bg-[#F3F4F6] hover:border-[#D1D5DB] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionWarning: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionSuccess: 'bg-[#EF4444] text-white border border-[#EF4444] shadow-sm hover:bg-[#DC2626] hover:border-[#DC2626] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionDanger: 'bg-white text-[#EF4444] border border-[#FECACA] hover:bg-[#FEE2E2] hover:border-[#FCA5A5] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    tableActionSecondary: 'bg-[#EEF2FF] text-[#4F46E5] border border-[#C7D2FE] hover:bg-[#E0E7FF] hover:border-[#A5B4FC] disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF] disabled:border-[#E5E7EB]',
+    iconAction: ''
   },
   input: {
-    label: 'mb-1.5 block text-xs font-bold uppercase tracking-wide text-text-muted',
-    base: 'w-full rounded-lg border bg-surface py-2.5 text-sm text-text placeholder:text-text-subtle disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none focus:ring-2 transition-all',
-    normal: 'border-border-strong focus:border-primary focus:ring-primary-soft',
-    error: 'border-danger focus:border-danger focus:ring-danger-soft',
+    label: 'mb-1.5 block text-xs font-bold uppercase tracking-[0.04em] text-text-muted',
+    base: 'h-10 w-full rounded-[10px] border bg-surface px-3 text-sm font-normal text-text placeholder:text-text-subtle disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none transition-all',
+    normal: 'border-border focus:border-[var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.16)]',
+    error: 'border-danger focus:border-danger focus:shadow-[0_0_0_3px_rgba(239,68,68,0.14)]',
     withIcon: 'pl-10 pr-3',
     withoutIcon: 'px-3'
   },
   select: {
-    base: 'w-full appearance-none rounded-lg border bg-surface py-2.5 pl-3 pr-10 text-sm text-text disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none focus:ring-2 transition-all',
-    normal: 'border-border-strong focus:border-primary focus:ring-primary-soft',
-    error: 'border-danger focus:border-danger focus:ring-danger-soft'
+    base: 'h-10 w-full appearance-none rounded-[10px] border bg-surface py-0 pl-3 pr-10 text-sm font-normal text-text disabled:bg-surface-muted disabled:text-text-subtle focus:outline-none transition-all',
+    normal: 'border-border focus:border-[var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.16)]',
+    error: 'border-danger focus:border-danger focus:shadow-[0_0_0_3px_rgba(239,68,68,0.14)]'
   },
   modal: {
     overlay: 'fixed inset-0 z-[1000] bg-black/50 backdrop-blur-[1px] p-0 sm:p-4 flex sm:items-center sm:justify-center',

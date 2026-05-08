@@ -55,16 +55,15 @@ export const navigationItems = [
     label: 'Reportes',
     icon: PiChartBar,
     roles: ['ADMIN', 'CAJERO'],
-    defaultTo: '/reportes?tab=ventas-dia',
+    defaultTo: '/reportes/resumen',
     basePath: '/reportes',
     items: [
-      { to: '/reportes', search: 'tab=ventas-dia', label: 'Ventas del dia' },
-      { to: '/reportes', search: 'tab=ventas-periodo', label: 'Ventas por periodo' },
-      { to: '/reportes', search: 'tab=ventas-producto', label: 'Ventas por producto' },
-      { to: '/reportes', search: 'tab=inventario-actual', label: 'Inventario valorizado' },
-      { to: '/reportes', search: 'tab=kardex', label: 'Kardex' },
-      { to: '/reportes', search: 'tab=transformaciones', label: 'Transformaciones' },
-      { to: '/reportes', search: 'tab=caja-diaria', label: 'Caja diaria' }
+      { to: '/reportes/resumen', label: 'Resumen' },
+      { to: '/reportes/ventas', label: 'Ventas' },
+      { to: '/reportes/caja', label: 'Caja' },
+      { to: '/reportes/inventario', label: 'Inventario' },
+      { to: '/reportes/compras', label: 'Compras' },
+      { to: '/reportes/despiece', label: 'Despiece' }
     ]
   },
   { type: 'link', to: '/admin/auditoria', label: 'Auditoria', icon: PiWarningCircle, roles: ['ADMIN'] },

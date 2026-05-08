@@ -179,6 +179,7 @@ async function dashboard(trx = db) {
         'u.nombre as usuario_nombre',
         trx.raw("COALESCE(NULLIF(TRIM(v.referencia), ''), 'VENTA:' || v.id) as numero_venta"),
         trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as monto_contado"),
+        trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'TRANSFERENCIA'), 0) as monto_transferencia"),
         trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as monto_credito"),
         trx.raw('ROUND(CAST(v.total AS REAL) - COALESCE(CAST(dv.total_devuelto AS REAL), 0), 2) as total')
       )
@@ -223,6 +224,7 @@ async function ventasReporte(bounds = {}, trx = db) {
       'u.nombre as usuario_nombre',
       trx.raw("COALESCE(NULLIF(TRIM(v.referencia), ''), 'VENTA:' || v.id) as numero_venta"),
       trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as monto_contado"),
+      trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'TRANSFERENCIA'), 0) as monto_transferencia"),
       trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as monto_credito"),
       trx.raw('CAST(v.total AS REAL) as total_documento'),
       trx.raw('COALESCE(CAST(dv.total_devuelto AS REAL), 0) as total_devuelto')
@@ -296,6 +298,7 @@ async function inventarioActualReporte(trx = db) {
       'p.costo_promedio',
       'p.stock_minimo',
       'p.stock_actual as stock_registrado',
+      'c.id as categoria_id',
       'c.nombre as categoria_nombre',
       trx.raw('ROUND(COALESCE(CAST(movs.stock_movimientos AS REAL), 0), 3) as stock_actual'),
       trx.raw('ROUND(COALESCE(CAST(p.stock_actual AS REAL), 0) - COALESCE(CAST(movs.stock_movimientos AS REAL), 0), 3) as diferencia_stock'),
@@ -309,10 +312,25 @@ async function inventarioActualReporte(trx = db) {
     .orderBy('p.nombre', 'asc');
 }
 
-async function inventarioMovimientos(trx = db) {
+async function inventarioMovimientos(filters = {}, trx = db) {
   return trx('inventario_movimientos as m')
     .join('productos as p', 'm.producto_id', 'p.id')
-    .select('m.*', 'p.codigo as producto_codigo', 'p.nombre as producto_nombre')
+    .leftJoin('categorias as c', 'p.categoria_id', 'c.id')
+    .modify((qb) => {
+      applyDateRange(qb, 'm.fecha', filters);
+      if (filters.producto_id) qb.where('m.producto_id', Number(filters.producto_id));
+      if (filters.categoria_id) qb.where('p.categoria_id', Number(filters.categoria_id));
+      if (filters.tipo) qb.whereRaw('UPPER(m.tipo) = ?', [String(filters.tipo).trim().toUpperCase()]);
+    })
+    .select(
+      'm.*',
+      'p.codigo as producto_codigo',
+      'p.nombre as producto_nombre',
+      'p.unidad_medida',
+      'p.unidad',
+      'c.id as categoria_id',
+      'c.nombre as categoria_nombre'
+    )
     .orderBy('m.id', 'desc');
 }
 
@@ -339,10 +357,14 @@ async function cajaReporte(bounds = {}, trx = db) {
     .orderBy('cm.id', 'desc');
 }
 
-async function comprasReporte(bounds = {}, trx = db) {
+async function comprasReporte(filters = {}, trx = db) {
   return trx('compras_facturas as f')
     .leftJoin('proveedores as p', 'f.proveedor_id', 'p.id')
-    .modify((qb) => applyDateRange(qb, 'f.fecha', bounds))
+    .modify((qb) => {
+      applyDateRange(qb, 'f.fecha', filters);
+      if (filters.proveedor_id) qb.where('f.proveedor_id', Number(filters.proveedor_id));
+      if (filters.metodo_pago) qb.whereRaw('UPPER(f.metodo_pago) = ?', [String(filters.metodo_pago).trim().toUpperCase()]);
+    })
     .select(
       'f.id',
       'f.numero_factura',
@@ -361,6 +383,54 @@ async function comprasReporte(bounds = {}, trx = db) {
     )
     .orderBy('f.fecha', 'desc')
     .orderBy('f.id', 'desc');
+}
+
+async function comprasProductosReporte(filters = {}, trx = db) {
+  return trx('compras_recepcion_detalle as rd')
+    .join('compras_recepciones as r', 'r.id', 'rd.recepcion_id')
+    .join('compras_orden_detalle as od', 'od.id', 'rd.orden_detalle_id')
+    .join('productos as p', 'p.id', 'od.producto_id')
+    .leftJoin('categorias as c', 'c.id', 'p.categoria_id')
+    .leftJoin('compras_facturas as f', 'f.id', 'r.factura_compra_id')
+    .leftJoin('compras_ordenes as o', 'o.id', 'r.orden_id')
+    .leftJoin('proveedores as pr', function joinProveedor() {
+      this.on('pr.id', '=', db.raw('COALESCE(f.proveedor_id, o.proveedor_id)'));
+    })
+    .modify((qb) => {
+      const startAt = filters.startAt;
+      const endAt = filters.endAt;
+      if (startAt) qb.whereRaw("datetime(COALESCE(f.fecha, r.fecha)) >= datetime(?)", [startAt]);
+      if (endAt) qb.whereRaw("datetime(COALESCE(f.fecha, r.fecha)) <= datetime(?)", [endAt]);
+      if (filters.proveedor_id) qb.whereRaw('COALESCE(f.proveedor_id, o.proveedor_id) = ?', [Number(filters.proveedor_id)]);
+      if (filters.metodo_pago) qb.whereRaw('UPPER(COALESCE(f.metodo_pago, \'CONTADO\')) = ?', [String(filters.metodo_pago).trim().toUpperCase()]);
+    })
+    .groupBy(
+      'p.id',
+      'p.codigo',
+      'p.nombre',
+      'p.unidad_medida',
+      'p.unidad',
+      'c.id',
+      'c.nombre',
+      'pr.id',
+      'pr.nombre'
+    )
+    .select(
+      'p.id as producto_id',
+      'p.codigo',
+      'p.nombre',
+      'p.unidad_medida',
+      'p.unidad',
+      'c.id as categoria_id',
+      'c.nombre as categoria_nombre',
+      'pr.id as proveedor_id',
+      'pr.nombre as proveedor_nombre'
+    )
+    .select(trx.raw('ROUND(COALESCE(SUM(CAST(rd.cantidad AS REAL)), 0), 3) as cantidad_comprada'))
+    .select(trx.raw('ROUND(COALESCE(SUM(CAST(rd.subtotal AS REAL)), 0), 2) as total_comprado'))
+    .select(trx.raw('COUNT(DISTINCT COALESCE(f.id, r.id)) as facturas'))
+    .orderBy('total_comprado', 'desc')
+    .orderBy('p.nombre', 'asc');
 }
 
 async function cxcDocumentosPendientes(trx = db) {
@@ -599,19 +669,29 @@ async function listSalesProductBreakdown(bounds = {}, trx = db) {
   const netLines = saleNetLinesSubquery(bounds, trx);
 
   return trx.from(netLines)
+    .leftJoin('productos as p', 'p.id', 'sale_net_lines.producto_id')
+    .leftJoin('categorias as c', 'c.id', 'p.categoria_id')
+    .modify((qb) => {
+      if (bounds.producto_id) qb.where('sale_net_lines.producto_id', Number(bounds.producto_id));
+      if (bounds.categoria_id) qb.where('p.categoria_id', Number(bounds.categoria_id));
+    })
     .groupBy(
       'sale_net_lines.producto_id',
       'sale_net_lines.producto_codigo',
       'sale_net_lines.producto_nombre',
       'sale_net_lines.unidad_medida',
-      'sale_net_lines.unidad'
+      'sale_net_lines.unidad',
+      'c.id',
+      'c.nombre'
     )
     .select(
       'sale_net_lines.producto_id',
       'sale_net_lines.producto_codigo',
       'sale_net_lines.producto_nombre',
       'sale_net_lines.unidad_medida',
-      'sale_net_lines.unidad'
+      'sale_net_lines.unidad',
+      'c.id as categoria_id',
+      'c.nombre as categoria_nombre'
     )
     .select(trx.raw('COALESCE(SUM(sale_net_lines.cantidad_neta_base), 0) as cantidad_vendida_base'))
     .select(trx.raw('ROUND(COALESCE(SUM(CAST(sale_net_lines.cantidad_neta AS REAL)), 0), 3) as cantidad_vendida'))
@@ -685,6 +765,7 @@ async function getInventoryCurrentValuation(trx = db) {
       'p.stock_minimo_base',
       'p.costo_promedio',
       'p.valor_inventario_centavos as valor_total_inventario_centavos',
+      'c.id as categoria_id',
       'c.nombre as categoria_nombre'
     )
     .orderBy('p.nombre', 'asc');
@@ -909,6 +990,7 @@ module.exports = {
   inventarioMovimientos,
   cajaReporte,
   comprasReporte,
+  comprasProductosReporte,
   cxcDocumentosPendientes,
   cxpDocumentosPendientes,
   transformacionesResumen,

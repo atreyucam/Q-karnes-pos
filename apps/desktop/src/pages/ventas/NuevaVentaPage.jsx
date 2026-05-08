@@ -60,7 +60,7 @@ function formatQtyWithUnit(value, unidad) {
   const unit = getUnidad(unidad);
   const qty = Number(value || 0);
   if (unit === 'UND') return `${Math.trunc(qty)} ${unit}`;
-  return `${qty.toFixed(2)} ${unit}`;
+  return `${qty.toFixed(3)} ${unit}`;
 }
 
 export default function NuevaVentaPage() {
@@ -95,8 +95,20 @@ export default function NuevaVentaPage() {
   const [selectedProductoIndex, setSelectedProductoIndex] = useState(-1);
   const [cajaRequiredModalOpen, setCajaRequiredModalOpen] = useState(false);
   const [stockIssue, setStockIssue] = useState(null);
+  const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
+  const [checkoutMethodCode, setCheckoutMethodCode] = useState(PAYMENT_CODES.EFECTIVO);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [cashReceivedInput, setCashReceivedInput] = useState('');
+  const [transferBank, setTransferBank] = useState('');
+  const [transferReference, setTransferReference] = useState('');
+  const [transferObservation, setTransferObservation] = useState('');
+  const [creditType, setCreditType] = useState('PENDIENTE_TOTAL');
+  const [creditAbonoInput, setCreditAbonoInput] = useState('');
+  const [checkoutSubmitPhase, setCheckoutSubmitPhase] = useState('confirm');
+  const [checkoutConfirmPromptVisible, setCheckoutConfirmPromptVisible] = useState(false);
 
   const productRefs = useRef([]);
+  const cashReceivedInputRef = useRef(null);
 
   const enabledPaymentMethods = useMemo(() => {
     const methods = normalizePaymentMethods(metodosPago);
@@ -170,7 +182,7 @@ export default function NuevaVentaPage() {
     if (!successToast.open) return undefined;
     const timer = window.setTimeout(() => {
       setSuccessToast((current) => (current.open ? { ...current, open: false } : current));
-    }, 2600);
+    }, 5600);
     return () => window.clearTimeout(timer);
   }, [successToast.open]);
 
@@ -219,6 +231,77 @@ export default function NuevaVentaPage() {
     () => Math.max(0, round2(subtotal - descuentoValue)),
     [descuentoValue, subtotal]
   );
+  const creditAbonoValue = useMemo(() => {
+    const value = parseDecimal(creditAbonoInput);
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    return round2(value);
+  }, [creditAbonoInput]);
+  const creditSaldoPendiente = useMemo(
+    () => Math.max(0, round2(total - creditAbonoValue)),
+    [creditAbonoValue, total]
+  );
+  const cashReceivedValue = useMemo(() => {
+    const value = parseDecimal(cashReceivedInput);
+    if (!Number.isFinite(value) || value < 0) return 0;
+    return round2(value);
+  }, [cashReceivedInput]);
+  const cashChangeValue = useMemo(
+    () => Math.max(0, round2(cashReceivedValue - total)),
+    [cashReceivedValue, total]
+  );
+  const checkoutMethodIsEfectivo = checkoutMethodCode === PAYMENT_CODES.EFECTIVO;
+  const checkoutMethodIsTransfer = checkoutMethodCode === PAYMENT_CODES.TRANSFERENCIA;
+  const checkoutMethodIsCredito = checkoutMethodCode === PAYMENT_CODES.CREDITO_CLIENTE;
+  const checkoutClienteEsConsumidorFinal = !clienteSeleccionado?.id;
+  const checkoutCanConfirm = useMemo(() => {
+    if (submitting || !checkoutModalOpen || !carritoConEstado.length || hasInvalidItems || total <= 0) return false;
+    if (!paymentOptions.some((option) => option.codigo === checkoutMethodCode)) return false;
+
+    if (checkoutMethodIsEfectivo) {
+      return cashReceivedValue >= total;
+    }
+    if (checkoutMethodIsTransfer) return Boolean(transferBank.trim());
+    if (checkoutMethodIsCredito) {
+      if (checkoutClienteEsConsumidorFinal) return false;
+      if (creditType === 'ABONO_PARCIAL') return creditAbonoValue > 0 && creditAbonoValue < total;
+      return true;
+    }
+    return false;
+  }, [
+    submitting,
+    checkoutModalOpen,
+    carritoConEstado.length,
+    hasInvalidItems,
+    total,
+    paymentOptions,
+    checkoutMethodCode,
+    checkoutMethodIsEfectivo,
+    checkoutMethodIsTransfer,
+    checkoutMethodIsCredito,
+    cashReceivedValue,
+    transferBank,
+    checkoutClienteEsConsumidorFinal,
+    creditType,
+    creditAbonoValue
+  ]);
+  const checkoutPrimaryLabel = useMemo(() => {
+    if (checkoutMethodIsTransfer) return `Confirmar transferencia ${formatMoney(total)}`;
+    if (checkoutMethodIsCredito) return `Confirmar crédito ${formatMoney(total)}`;
+    return `Cobrar ${formatMoney(total)}`;
+  }, [checkoutMethodIsCredito, checkoutMethodIsTransfer, total]);
+  const checkoutPrimaryLoadingLabel = checkoutSubmitPhase === 'register'
+    ? 'Registrando venta...'
+    : 'Confirmando pago...';
+  const cashQuickAmounts = useMemo(() => [10, 15, 20, 50], []);
+
+  useEffect(() => {
+    if (!checkoutModalOpen || !checkoutMethodIsEfectivo) return;
+    const timer = window.setTimeout(() => {
+      cashReceivedInputRef.current?.focus();
+      cashReceivedInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [checkoutMethodIsEfectivo, checkoutModalOpen]);
 
   const ventaActionDisabled = submitting
     || !carritoConEstado.length
@@ -263,7 +346,7 @@ export default function NuevaVentaPage() {
 
         if (newQty > stockActual) {
           setStockIssue({
-            producto: `${producto.codigo} - ${producto.nombre}`,
+            producto: producto.nombre,
             disponible: formatStock(stockActual, unidad),
             unidad
           });
@@ -279,7 +362,7 @@ export default function NuevaVentaPage() {
 
       if (qtyToAdd > stockActual) {
         setStockIssue({
-          producto: `${producto.codigo} - ${producto.nombre}`,
+          producto: producto.nombre,
           disponible: formatStock(stockActual, unidad),
           unidad
         });
@@ -320,6 +403,15 @@ export default function NuevaVentaPage() {
     setDescuento('0');
     setSelectedPaymentCode(defaultCashPaymentCode);
     setLocalError('');
+    setCheckoutModalOpen(false);
+    setCheckoutConfirmPromptVisible(false);
+    setCheckoutError('');
+    setCashReceivedInput('');
+    setTransferBank('');
+    setTransferReference('');
+    setTransferObservation('');
+    setCreditType('PENDIENTE_TOTAL');
+    setCreditAbonoInput('');
   };
 
   const closeSuccessToast = () => {
@@ -333,8 +425,9 @@ export default function NuevaVentaPage() {
     }
   };
 
-  const submitVenta = async () => {
+  const openCheckoutModal = () => {
     setLocalError('');
+    setCheckoutError('');
 
     if (!carritoConEstado.length) {
       setLocalError('Agrega al menos un producto al carrito');
@@ -345,7 +438,7 @@ export default function NuevaVentaPage() {
       const stockItem = carritoConEstado.find((item) => item.cantidadError === 'Stock insuficiente');
       if (stockItem) {
         setStockIssue({
-          producto: `${stockItem.codigo} - ${stockItem.nombre}`,
+          producto: stockItem.nombre,
           disponible: formatStock(stockItem.stock_actual, stockItem.unidad_medida),
           unidad: stockItem.unidad_medida
         });
@@ -360,14 +453,176 @@ export default function NuevaVentaPage() {
       return;
     }
 
-    if (selectedPaymentOption.requiere_cliente && !clienteSeleccionado) {
-      setLocalError('Selecciona un cliente antes de registrar una venta a credito');
+    setCheckoutMethodCode(selectedPaymentCode);
+    setCheckoutSubmitPhase('confirm');
+    setCreditType('PENDIENTE_TOTAL');
+    setCreditAbonoInput('');
+    setCashReceivedInput('');
+    setTransferBank('');
+    setTransferReference('');
+    setTransferObservation('');
+    setCheckoutModalOpen(true);
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const clearMethodSpecificFields = (methodCode) => {
+    if (methodCode === PAYMENT_CODES.EFECTIVO) {
+      setCashReceivedInput('');
+      return;
+    }
+    if (methodCode === PAYMENT_CODES.TRANSFERENCIA) {
+      setTransferBank('');
+      setTransferReference('');
+      setTransferObservation('');
+      return;
+    }
+    if (methodCode === PAYMENT_CODES.CREDITO_CLIENTE) {
+      setCreditType('PENDIENTE_TOTAL');
+      setCreditAbonoInput('');
+    }
+  };
+
+  const handleCheckoutMethodChange = (nextMethodCode) => {
+    if (nextMethodCode === checkoutMethodCode) return;
+    clearMethodSpecificFields(checkoutMethodCode);
+    setCheckoutMethodCode(nextMethodCode);
+    setCheckoutError('');
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const applyCashQuickAmount = (amount) => {
+    setCashReceivedInput(Number(amount || 0).toFixed(2));
+    setCheckoutError('');
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const closeCheckoutModal = () => {
+    if (submitting) return;
+    setCheckoutModalOpen(false);
+    setCheckoutError('');
+    setCheckoutSubmitPhase('confirm');
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const closeCheckoutConfirmModal = () => {
+    if (submitting) return;
+    setCheckoutConfirmPromptVisible(false);
+  };
+
+  const handleCheckoutPrimaryAction = () => {
+    if (!checkoutCanConfirm) return;
+    setCheckoutConfirmPromptVisible(true);
+  };
+
+  const handleCheckoutKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      return;
+    }
+    if (event.key === 'Enter') {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement
+        && (target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) return;
+      event.preventDefault();
+      if (checkoutCanConfirm) handleCheckoutPrimaryAction();
+    }
+  };
+
+  const submitVenta = async () => {
+    if (!checkoutCanConfirm) return;
+    setCheckoutError('');
+    setCheckoutSubmitPhase('confirm');
+
+    const methodCode = checkoutMethodCode;
+    setSelectedPaymentCode(methodCode);
+    const isCredito = methodCode === PAYMENT_CODES.CREDITO_CLIENTE;
+    const isTransfer = methodCode === PAYMENT_CODES.TRANSFERENCIA;
+    const isEfectivo = methodCode === PAYMENT_CODES.EFECTIVO;
+
+    if (!paymentOptions.some((option) => option.codigo === methodCode)) {
+      setCheckoutError('Selecciona un metodo de pago valido');
       return;
     }
 
-    if (requiresOpenCashShift && !cajaAbierta) {
+    if (isCredito && !clienteSeleccionado) {
+      setCheckoutError('Se requiere un cliente para vender a credito');
+      return;
+    }
+
+    if (isCredito && !clienteSeleccionado?.id) {
+      setCheckoutError('No se puede usar credito con Consumidor final');
+      return;
+    }
+
+    const checkoutRequiresCashShift = isEfectivo || (isCredito && creditType === 'ABONO_PARCIAL');
+    if (configuracion?.exigir_caja_abierta_para_cobros && checkoutRequiresCashShift && !cajaAbierta) {
+      setCheckoutModalOpen(false);
       setCajaRequiredModalOpen(true);
       return;
+    }
+
+    const pagos = { contado: 0, transferencia: 0, credito: 0 };
+    const cobro = {};
+    let referencia = undefined;
+    let observacion = undefined;
+
+    if (isEfectivo) {
+      if (cashReceivedValue <= 0) {
+        setCheckoutError('Ingresa el monto recibido');
+        return;
+      }
+      if (cashReceivedValue < total) {
+        setCheckoutError('El monto recibido debe ser mayor o igual al total');
+        return;
+      }
+      pagos.contado = total;
+      cobro.efectivo = {
+        monto_recibido: round2(cashReceivedValue),
+        cambio: round2(cashChangeValue)
+      };
+    } else if (isTransfer) {
+      if (!transferBank.trim()) {
+        setCheckoutError('Ingresa el banco o metodo de transferencia');
+        return;
+      }
+      pagos.transferencia = total;
+      referencia = transferReference.trim() || undefined;
+      observacion = [
+        `Banco: ${transferBank.trim()}`,
+        transferObservation.trim() ? `Obs: ${transferObservation.trim()}` : ''
+      ].filter(Boolean).join(' | ');
+      cobro.transferencia = {
+        banco: transferBank.trim(),
+        referencia: transferReference.trim() || undefined,
+        observacion: transferObservation.trim() || undefined
+      };
+    } else {
+      if (creditType === 'ABONO_PARCIAL') {
+        if (creditAbonoValue <= 0) {
+          setCheckoutError('Ingresa un monto abonado mayor a 0');
+          return;
+        }
+        if (creditAbonoValue >= total) {
+          setCheckoutError('El abono parcial debe ser menor al total');
+          return;
+        }
+        pagos.contado = creditAbonoValue;
+        pagos.credito = creditSaldoPendiente;
+        cobro.credito = {
+          tipo_credito: 'ABONO_PARCIAL',
+          monto_abonado: round2(creditAbonoValue),
+          saldo_pendiente: round2(creditSaldoPendiente)
+        };
+      } else {
+        pagos.credito = total;
+        cobro.credito = {
+          tipo_credito: 'PENDIENTE_TOTAL',
+          monto_abonado: 0,
+          saldo_pendiente: round2(total)
+        };
+      }
     }
 
     const payload = buildVentaCreatePayload({
@@ -377,12 +632,17 @@ export default function NuevaVentaPage() {
         cantidad: item.cantidad
       })),
       descuentoTotal: descuentoValue,
-      paymentCode: selectedPaymentCode,
-      total
+      paymentCode: methodCode,
+      total,
+      pagosInput: pagos,
+      cobro,
+      referencia,
+      observacion
     });
 
     setSubmitting(true);
     try {
+      setCheckoutSubmitPhase('register');
       const totalVenta = total;
       const result = await crearVenta(payload);
       const ventaId = result?.venta?.id;
@@ -394,9 +654,10 @@ export default function NuevaVentaPage() {
       await fetchTurnoActual({ silent: true }).catch(() => {});
       setSuccessToast({ open: true, total: totalVenta });
     } catch (_) {
-      // handled by store
+      setCheckoutError('No se pudo registrar la venta. Intenta nuevamente.');
     } finally {
       setSubmitting(false);
+      setCheckoutSubmitPhase('confirm');
     }
   };
 
@@ -404,9 +665,10 @@ export default function NuevaVentaPage() {
   const metodoPagoLabel = (codigo, nombre) => (codigo === PAYMENT_CODES.CREDITO_CLIENTE ? 'Crédito' : nombre);
 
   return (
-    <div className="sales-page-layout sales-page-shell flex h-full min-h-0 flex-col gap-1 overflow-hidden">
-      <PageHeader
+    <div className="sales-page-layout sales-page-shell flex h-full min-h-0 flex-col gap-1 overflow-hidden p-1 sm:p-1.5 lg:p-2">
+      <PageHeader className="mb-2"
         title="Nueva venta"
+        description="Busca productos, agrega al carrito y cobra la venta."
       />
 
       {(localError || errorVenta || catalogError) && (
@@ -421,42 +683,41 @@ export default function NuevaVentaPage() {
         </Alert>
       )}
 
-      <div className="flex-1 min-h-0 grid gap-1.5 xl:grid-cols-[1fr_1.35fr]">
+      <div className="flex-1 min-h-0 grid gap-1.5 lg:grid-cols-[1fr_1.35fr]">
         <Card className="min-h-0 border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] p-2 shadow-none">
           <div className="flex h-full min-h-0 flex-col">
             <div className="shrink-0 space-y-2">
               <p className="font-semibold text-[var(--color-text)]">Buscar producto</p>
 
-              <div className="relative">
+              <div className="flex items-center gap-2">
                 <Input
-                  className="pr-11"
-                  placeholder="Buscar codigo o nombre"
+                  className="min-w-0 flex-1"
+                  placeholder="Buscar por nombre, codigo o SKU"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onKeyDown={handleSearchKeyDown}
                 />
-                {searchTerm ? (
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-                    onClick={() => setSearchTerm('')}
-                    aria-label="Limpiar busqueda"
-                  >
-                    <PiX className="text-lg" />
-                  </button>
-                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="shrink-0"
+                  onClick={() => setSearchTerm('')}
+                >
+                  Limpiar
+                </Button>
               </div>
 
               <div className="overflow-x-auto">
-                <div className="inline-flex min-h-9 items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-1">
+                <div className="inline-flex min-h-10 items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-1 mt-2 mb-1">
                   {categorias.map((categoria) => (
                     <button
                       key={categoria.id}
                       type="button"
-                      className={`min-h-7 rounded-lg px-3 text-xs font-semibold transition-colors ${
+                      className={`min-h-8 rounded-full px-3.5 text-xs font-semibold transition-colors ${
                         categoriaActiva === categoria.id
-                          ? 'bg-[var(--color-brand)] text-white shadow-sm'
-                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                          ? 'bg-[var(--color-text)] text-white shadow-sm'
+                          : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
                       }`}
                       onClick={() => setCategoriaActiva(categoria.id)}
                     >
@@ -478,7 +739,12 @@ export default function NuevaVentaPage() {
 
             <div className="flex-1 min-h-0 overflow-auto pt-1.5 pr-1 pb-1">
               {!loadingCatalogo && productosMostrados.length === 0 && (
-                <p className="text-sm text-[var(--color-text-muted)]">No hay productos para este filtro.</p>
+                <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-4 py-6 text-center">
+                  <p className="text-sm font-semibold text-[var(--color-text)]">No se encontraron productos.</p>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                    Prueba con otro nombre, codigo o categoria.
+                  </p>
+                </div>
               )}
 
               <div className="space-y-1.5">
@@ -489,17 +755,19 @@ export default function NuevaVentaPage() {
                   const stockMinimo = Number(producto.stock_minimo || 0);
                   const isOut = stockActual <= 0;
                   const isLow = !isOut && ((stockMinimo > 0 && stockActual <= stockMinimo) || stockActual <= 5);
-                  const stockBadgeLabel = isOut ? 'Agotado' : (isLow ? 'Bajo' : null);
+                  const stockBadgeLabel = isOut ? 'SIN STOCK' : (isLow ? 'BAJO STOCK' : null);
                   const stockBadgeClass = isOut
-                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_70%,white_30%)] text-[var(--color-danger)]'
+                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_74%,white_26%)] text-[var(--color-danger)]'
                     : isLow
-                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_78%,white_22%)] text-[var(--color-warning)]'
+                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_83%,white_17%)] text-[var(--color-warning)]'
                       : '';
                   const stateTintClass = isOut
-                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_30%,white_70%)]'
+                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)]'
                     : isLow
-                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_35%,white_65%)]'
+                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_40%,white_60%)]'
                       : 'bg-[var(--color-surface)]';
+                  const priceText = `${formatMoney(producto.precio_venta || producto.precio_referencia || 0)} / ${unidad}`;
+                  const stockText = `${formatStock(producto.stock_actual, unidad)} ${unidad} disponibles`;
 
                   return (
                     <button
@@ -508,7 +776,7 @@ export default function NuevaVentaPage() {
                       ref={(node) => { productRefs.current[index] = node; }}
                       onMouseEnter={() => setSelectedProductoIndex(index)}
                       onClick={() => addProductoToCarrito(producto)}
-                      className={`w-full rounded-lg border px-2.5 py-[7px] text-left transition-colors ${stateTintClass} ${
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${stateTintClass} ${
                         selected
                           ? 'border-[var(--color-border-strong)]'
                           : 'border-[var(--color-border)] hover:bg-[color-mix(in_oklab,var(--color-surface-muted)_65%,white_35%)]'
@@ -517,35 +785,32 @@ export default function NuevaVentaPage() {
                       <div className="space-y-0.5">
                         <div className="flex items-center justify-between gap-2">
                           <p className="min-w-0 truncate text-sm font-semibold leading-tight text-[var(--color-text)]">
-                            {producto.codigo} {producto.nombre}
+                            {producto.nombre}
                           </p>
-                          <div className="shrink-0 flex items-center gap-2">
+                          <div className="shrink-0 flex items-center gap-4">
                             <p className="text-sm font-bold leading-none text-[var(--color-text)]">
-                              {formatMoney(producto.precio_venta || producto.precio_referencia || 0)}
+                              {isOut ? 'AGOTADO' : priceText}
                             </p>
                             <Button
                               type="button"
-                              variant="primary"
+                              variant={isOut ? 'secondary' : 'primary'}
                               size="sm"
-                              className="-mt-0.5 min-h-6 px-0.5 py-0 text-[8px] leading-none"
+                              className="min-h-7 px-2 py-0 text-[11px] font-semibold leading-none"
                               disabled={isOut}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 addProductoToCarrito(producto);
                               }}
                             >
-                              Agregar
+                              {isOut ? 'No vender' : 'Agregar'}
                             </Button>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
                           <p className="text-sm text-[var(--color-text-muted)]">
-                            Stock {formatStock(producto.stock_actual, unidad)} {unidad}
+                            {stockText}
                           </p>
-                          {isOut ? (
-                            <span className="text-[11px] font-semibold text-[var(--color-danger)]">Sin stock</span>
-                          ) : null}
                           {stockBadgeLabel ? (
                             <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stockBadgeClass}`}>
                               {stockBadgeLabel}
@@ -566,13 +831,13 @@ export default function NuevaVentaPage() {
             <div className="shrink-0 border-b border-[color-mix(in_oklab,var(--color-border)_75%,transparent)] bg-[var(--color-surface-alt)] px-3 py-2">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
+                  <p className="text-lg font-medium text-[var(--color-text)]">Cliente: {clienteLabel}</p>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-semibold text-[var(--color-text)]">Carrito</h3>
-                    <span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-xs font-semibold text-[var(--color-text-muted)]">
+                    <h3 className="text-base font-semibold text-[var(--color-text)]">Carrito:</h3>
+                    <span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-sm font-semibold text-[var(--color-text-muted)]">
                       {carrito.length} items
                     </span>
                   </div>
-                  <p className="text-sm font-medium text-[var(--color-text)]">Cliente: {clienteLabel}</p>
                 </div>
 
                 <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -588,12 +853,14 @@ export default function NuevaVentaPage() {
               </div>
             </div>
 
-            <div className="flex-[0.88] min-h-0 overflow-auto bg-[var(--color-surface)] p-3 pb-1.5">
+            <div className={`flex-[0.88] min-h-0 overflow-auto bg-[var(--color-surface)] px-2 py-2 ${
+              carritoConEstado.length === 0 ? 'pb-2' : 'pb-24'
+            }`}>
               {carritoConEstado.length === 0 ? (
-                <div className="flex h-full min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-6 text-center">
-                  <p className="text-base font-semibold text-[var(--color-text)]">Sin productos en el carrito</p>
+                <div className="flex h-full min-h-full flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-6 text-center">
+                  <p className="text-base font-semibold text-[var(--color-text)]">El carrito esta vacio.</p>
                   <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                    Busca un producto y presiona Agregar para comenzar
+                    Agrega productos para iniciar la venta.
                   </p>
                 </div>
               ) : (
@@ -601,47 +868,54 @@ export default function NuevaVentaPage() {
                   {carritoConEstado.map((item) => (
                     <article
                       key={item.producto_id}
-                      className={`rounded-lg border px-2.5 py-2 ${
+                      className={`rounded-lg border px-3 py-2 ${
                         item.cantidadError
                           ? 'border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-soft)_52%,white_48%)]'
                           : 'border-[var(--color-border)] bg-[var(--color-surface-alt)]'
                       }`}
                     >
-                      <p className="truncate text-[15px] font-semibold text-[var(--color-text)]">{item.nombre}</p>
+                      <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:gap-3">
+                        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">
+                          {item.nombre}
+                        </p>
 
-                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
-                        <div className="flex items-center gap-1.5 whitespace-nowrap">
-                          <Input
+                        <div className="flex shrink-0 items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                          <input
                             type="text"
                             inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
-                            className="h-7 w-[6ch] min-w-[6ch] rounded-md px-1.5 py-0 text-right text-xs font-semibold"
+                            className="h-8 w-[78px] shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0 text-right text-sm font-semibold text-[var(--color-text)] outline-none transition focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--color-brand)_25%,transparent)]"
                             value={item.cantidadInput}
                             onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
                           />
-                          <span className="font-semibold uppercase">{getUnidad(item.unidad_medida)}</span>
-                          <span>x</span>
-                          <span className="font-medium text-[var(--color-text)]">{formatMoney(item.precio)}</span>
+
+                          <span className="shrink-0 font-semibold uppercase">
+                            {getUnidad(item.unidad_medida)}
+                          </span>
+
+                          <span className="shrink-0">x</span>
+
+                          <span className="shrink-0 font-semibold text-[var(--color-text)]">
+                            {formatMoney(item.precio)}
+                          </span>
                         </div>
 
-                        <p className="ml-auto mr-2.5 shrink-0 text-right text-base font-bold text-[var(--color-text)]">
+                        <p className="w-[74px] shrink-0 text-right text-sm font-bold text-[var(--color-text)]">
                           {formatMoney(item.subtotal)}
                         </p>
 
-                        <Button
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="shrink-0 border border-[color-mix(in_oklab,var(--color-danger)_25%,transparent)] bg-[color-mix(in_oklab,var(--color-danger-soft)_42%,white_58%)] text-[color-mix(in_oklab,var(--color-danger)_72%,var(--color-text)_28%)] hover:bg-[color-mix(in_oklab,var(--color-danger-soft)_62%,white_38%)] hover:text-[var(--color-danger)]"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[color-mix(in_oklab,var(--color-danger)_30%,transparent)] bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)] text-[var(--color-danger)] transition hover:bg-[color-mix(in_oklab,var(--color-danger-soft)_58%,white_42%)]"
                           aria-label={`Quitar ${item.nombre}`}
                           title="Quitar"
                           onClick={() => removeItem(item.producto_id)}
                         >
                           <PiTrash className="text-base" />
-                        </Button>
+                        </button>
                       </div>
 
                       {item.cantidadError ? (
-                        <p className="mt-2 text-xs font-semibold text-[var(--color-danger)]">{item.cantidadError}</p>
+                        <p className="mt-1.5 text-xs font-semibold text-[var(--color-danger)]">{item.cantidadError}</p>
                       ) : null}
                     </article>
                   ))}
@@ -652,29 +926,6 @@ export default function NuevaVentaPage() {
             <div className="sticky bottom-0 z-10 flex-[0.12] shrink-0 border-t border-[color-mix(in_oklab,var(--color-border)_75%,transparent)] bg-[var(--color-surface-alt)] p-3">
               <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(220px,290px)]">
                 <div className="space-y-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Metodo de pago</label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {paymentOptions.map((option) => (
-                        <Button
-                          key={option.codigo}
-                          type="button"
-                          size="sm"
-                          className="px-2.5 py-1 text-xs"
-                          variant={selectedPaymentCode === option.codigo ? 'primary' : 'secondary'}
-                          onClick={() => setSelectedPaymentCode(option.codigo)}
-                        >
-                          {metodoPagoLabel(option.codigo, option.nombre)}
-                        </Button>
-                      ))}
-                    </div>
-                    {selectedPaymentCode === PAYMENT_CODES.CREDITO_CLIENTE ? (
-                      <p className="text-[13px] font-medium text-[var(--color-warning)]">
-                        Debe seleccionar un cliente para usar credito.
-                      </p>
-                    ) : null}
-                  </div>
-
                   <div className="space-y-1">
                     <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Descuento</label>
                     <Input
@@ -712,10 +963,10 @@ export default function NuevaVentaPage() {
                 <Button
                   type="button"
                   size="sm"
-                  variant={paymentImpactsCash ? 'cashier' : 'primary'}
+                  variant="primary"
                   className="min-w-[150px] px-4 py-1.5 text-sm font-semibold"
                   disabled={ventaActionDisabled}
-                  onClick={submitVenta}
+                  onClick={openCheckoutModal}
                 >
                   {submitting ? 'Procesando...' : 'Cobrar'}
                 </Button>
@@ -725,6 +976,287 @@ export default function NuevaVentaPage() {
         </Card>
       </div>
       
+      <Modal open={checkoutModalOpen} onClose={() => {}} maxWidthClass="max-w-2xl" panelClassName="p-0">
+        <div className="max-h-[86vh] overflow-y-auto" onKeyDown={handleCheckoutKeyDown}>
+          <div className="space-y-3 p-4 sm:p-5">
+          <div className="ui-modal-header">
+            <div className="relative w-full">
+              <div className="ui-modal-header-copy pr-10">
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">Cobrar venta</h3>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                onClick={closeCheckoutModal}
+                aria-label="Cerrar modal de cobro"
+                icon={<PiX className="text-lg" />}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Cliente: <span className="font-semibold text-[var(--color-text)]">{clienteLabel}</span>
+              </p>
+              <Button type="button" size="sm" variant="secondary" onClick={() => setModalFacturaOpen(true)}>
+                Cambiar
+              </Button>
+            </div>
+            <div className="mt-3 border-t border-[var(--color-border)] pt-3 text-right">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Total a pagar</p>
+              <p className="mt-1 text-4xl font-black leading-none text-[var(--color-text)]">{formatMoney(total)}</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Metodo de pago</p>
+            <div className="flex flex-wrap gap-2">
+              {paymentOptions.map((option) => (
+                <Button
+                  key={option.codigo}
+                  type="button"
+                  size="sm"
+                  variant={checkoutMethodCode === option.codigo ? 'primary' : 'secondary'}
+                  onClick={() => handleCheckoutMethodChange(option.codigo)}
+                >
+                  {metodoPagoLabel(option.codigo, option.nombre)}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {checkoutMethodIsEfectivo ? (
+            <section className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+              <p className="text-sm font-semibold text-[var(--color-text)]">Pago en efectivo</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Monto recibido</label>
+                  <Input
+                    ref={cashReceivedInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    value={cashReceivedInput}
+                    onChange={(e) => setCashReceivedInput(sanitizeDecimalInput(e.target.value, 2))}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Cambio</label>
+                  <div className="mt-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-right">
+                    <p className="text-2xl font-black leading-none text-[var(--color-text)]">{formatMoney(cashChangeValue)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="secondary" onClick={() => applyCashQuickAmount(total)}>
+                  Exacto
+                </Button>
+                {cashQuickAmounts.map((amount) => (
+                  <Button key={amount} type="button" size="sm" variant="secondary" onClick={() => applyCashQuickAmount(amount)}>
+                    {formatMoney(amount)}
+                  </Button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {checkoutMethodIsTransfer ? (
+            <section className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+              <p className="text-sm font-semibold text-[var(--color-text)]">Pago por transferencia</p>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Banco o metodo</label>
+                <select
+                  className="h-10 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none transition focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--color-brand)_25%,transparent)]"
+                  value={transferBank}
+                  onChange={(e) => setTransferBank(e.target.value)}
+                >
+                  <option value="">Selecciona banco</option>
+                  <option value="Banco del Pichincha">Banco del Pichincha</option>
+                  <option value="Banco del Pacifico">Banco del Pacifico</option>
+                  <option value="Banco del Austro">Banco del Austro</option>
+                  <option value="Banco de Guayaquil">Banco de Guayaquil</option>
+                  <option value="Produbanco">Produbanco</option>
+                  <option value="Banco Bolivariano">Banco Bolivariano</option>
+                  <option value="Otros">Otros</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Numero de referencia (opcional)</label>
+                <Input value={transferReference} onChange={(e) => setTransferReference(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Observacion (opcional)</label>
+                <Input value={transferObservation} onChange={(e) => setTransferObservation(e.target.value)} />
+              </div>
+            </section>
+          ) : null}
+
+          {checkoutMethodIsCredito ? (
+            <section className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3">
+              <p className="text-sm font-semibold text-[var(--color-text)]">Venta a credito</p>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Cliente: <span className="font-semibold text-[var(--color-text)]">{clienteLabel}</span>
+              </p>
+              {!clienteSeleccionado?.id ? (
+                <p className="text-sm font-semibold text-[var(--color-danger)]">Se requiere un cliente para vender a credito.</p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={creditType === 'PENDIENTE_TOTAL' ? 'primary' : 'secondary'}
+                  onClick={() => setCreditType('PENDIENTE_TOTAL')}
+                >
+                  Pendiente total
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={creditType === 'ABONO_PARCIAL' ? 'primary' : 'secondary'}
+                  onClick={() => setCreditType('ABONO_PARCIAL')}
+                >
+                  Abono parcial
+                </Button>
+              </div>
+
+              {creditType === 'ABONO_PARCIAL' ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Monto abonado</label>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={creditAbonoInput}
+                      onChange={(e) => setCreditAbonoInput(sanitizeDecimalInput(e.target.value, 2))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Saldo restante</label>
+                    <Input
+                      type="text"
+                      disabled
+                      className="font-semibold text-[var(--color-text)] disabled:text-[var(--color-text)]"
+                      value={formatMoney(creditSaldoPendiente)}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm font-medium text-[var(--color-text)]">Saldo pendiente: {formatMoney(total)}</p>
+              )}
+            </section>
+          ) : null}
+
+          {checkoutError ? <Alert tone="error">{checkoutError}</Alert> : null}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" onClick={closeCheckoutModal} disabled={submitting}>
+              Cancelar
+            </Button>
+            <Button variant="primary" className="min-w-[230px]" disabled={!checkoutCanConfirm} onClick={handleCheckoutPrimaryAction}>
+              {submitting ? checkoutPrimaryLoadingLabel : checkoutPrimaryLabel}
+            </Button>
+          </div>
+        </div>
+        </div>
+      </Modal>
+
+      <Modal open={checkoutConfirmPromptVisible} onClose={() => {}} maxWidthClass="max-w-lg" panelClassName="p-0">
+        <div className="space-y-4 p-4 sm:p-5">
+          <div className="ui-modal-header">
+            <div className="relative w-full">
+              <div className="ui-modal-header-copy pr-10">
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">Confirmar cobro</h3>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                onClick={closeCheckoutConfirmModal}
+                aria-label="Cerrar confirmacion de cobro"
+                icon={<PiX className="text-lg" />}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[color-mix(in_oklab,var(--color-brand)_28%,transparent)] bg-[color-mix(in_oklab,var(--color-brand-soft)_28%,white_72%)] p-3">
+            {!clienteSeleccionado?.id ? (
+              <p className="text-sm text-[var(--color-text)]">
+                Se cobrara como <strong>Consumidor final</strong> por un total de <strong>{formatMoney(total)}</strong>.
+              </p>
+            ) : (
+              <p className="text-sm text-[var(--color-text)]">
+                Se cobrara a <strong>{clienteSeleccionado.nombre}</strong> por un total de <strong>{formatMoney(total)}</strong>.
+              </p>
+            )}
+
+            {checkoutMethodIsEfectivo ? (
+              <div className="mt-2 space-y-1 border-t border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] pt-2 text-sm">
+                <div className="flex items-center justify-between text-[var(--color-text)]">
+                  <span>Recibido</span>
+                  <strong>{formatMoney(cashReceivedValue)}</strong>
+                </div>
+                <div className="flex items-center justify-between text-[var(--color-text)]">
+                  <span>Cambio</span>
+                  <strong>{formatMoney(cashChangeValue)}</strong>
+                </div>
+              </div>
+            ) : null}
+
+            {checkoutMethodIsTransfer ? (
+              <div className="mt-2 space-y-1 border-t border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] pt-2 text-sm text-[var(--color-text)]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Banco</span>
+                  <strong className="text-right">{transferBank || '-'}</strong>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Nro. transferencia</span>
+                  <strong className="text-right">{transferReference || '-'}</strong>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <span>Observacion</span>
+                  <strong className="max-w-[60%] text-right font-semibold">{transferObservation || '-'}</strong>
+                </div>
+              </div>
+            ) : null}
+
+            {checkoutMethodIsCredito ? (
+              <div className="mt-2 space-y-1 border-t border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] pt-2 text-sm text-[var(--color-text)]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Tipo de credito</span>
+                  <strong className="text-right">
+                    {creditType === 'ABONO_PARCIAL' ? 'Abono parcial' : 'Pendiente total'}
+                  </strong>
+                </div>
+                {creditType === 'ABONO_PARCIAL' ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Abono</span>
+                      <strong className="text-right">{formatMoney(creditAbonoValue)}</strong>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Saldo pendiente</span>
+                      <strong className="text-right">{formatMoney(creditSaldoPendiente)}</strong>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeCheckoutConfirmModal} disabled={submitting}>
+              Cancelar
+            </Button>
+            <Button variant="primary" onClick={submitVenta} disabled={!checkoutCanConfirm || submitting}>
+              {submitting ? checkoutPrimaryLoadingLabel : 'Cobrar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       <FacturaModal
         open={modalFacturaOpen}
         onClose={() => setModalFacturaOpen(false)}
@@ -735,7 +1267,7 @@ export default function NuevaVentaPage() {
       />
 
       {successToast.open ? (
-        <div className="fixed bottom-5 right-5 z-[1100] max-w-sm">
+        <div className="fixed right-5 top-5 z-[1200] max-w-sm">
           <button type="button" className="block w-full border-0 bg-transparent p-0 text-left" onClick={closeSuccessToast}>
             <Toast tone="success">
               Venta aprobada correctamente por {formatMoney(successToast.total)}.
@@ -768,16 +1300,32 @@ export default function NuevaVentaPage() {
       <Modal open={Boolean(stockIssue)} onClose={() => setStockIssue(null)} maxWidthClass="max-w-lg" panelClassName="p-5">
         <div className="space-y-4">
           <div className="ui-modal-header">
-            <div className="ui-modal-header-copy">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Stock insuficiente</h3>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              No hay stock suficiente para completar la venta del producto seleccionado.
-            </p>
+            <div className="relative w-full">
+              <div className="ui-modal-header-copy pr-10">
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">Stock insuficiente</h3>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  No hay stock suficiente para completar la venta del producto seleccionado.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                onClick={() => setStockIssue(null)}
+                aria-label="Cerrar modal de stock insuficiente"
+                icon={<PiX className="text-lg" />}
+              />
             </div>
           </div>
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm text-[var(--color-text)]">
+          <div className="rounded-xl border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-warning-soft)_40%,white_60%)] p-3 text-sm text-[var(--color-text)]">
             <p><strong>Producto:</strong> {stockIssue?.producto || '-'}</p>
             <p><strong>Disponible:</strong> {stockIssue?.disponible || '0'} {stockIssue?.unidad || ''}</p>
+            <div className="mt-2">
+              <span className="rounded-md bg-[color-mix(in_oklab,var(--color-warning-soft)_83%,white_17%)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-warning)]">
+                BAJO STOCK
+              </span>
+            </div>
           </div>
           <div className="flex justify-end">
             <Button variant="secondary" onClick={() => setStockIssue(null)}>

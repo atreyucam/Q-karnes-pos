@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { PiArrowsClockwise, PiReceipt, PiWarningCircle } from 'react-icons/pi';
 import { useVentasStore } from '../../stores/ventasStore';
 import { useCajaStore } from '../../stores/cajaStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -10,13 +11,7 @@ import {
   Card,
   Input,
   Modal,
-  PageHeader,
   StatusBadge,
-  Tabla,
-  TablaCabecera,
-  TablaCuerpo,
-  TablaFila,
-  TablaCelda,
   Textarea
 } from '../../ui';
 import { formatDateQuito } from '../../lib/formatDateQuito';
@@ -27,57 +22,52 @@ import DevolucionModal from './DevolucionModal';
 import { SALE_STATUS } from './ventaUtils';
 import useFormErrors from '../../shared/hooks/useFormErrors';
 
-function resolvePaymentTypeLabel(row) {
-  const tipo = String(row?.tipo || '').trim().toUpperCase();
-  if (tipo === 'TRANSFERENCIA') return 'Transferencia';
-  if (tipo === 'CREDITO') return 'Crédito';
-  return 'Efectivo';
-}
-
-function resolveCashImpact(row) {
-  return row?.afecta_caja ? 'Sí' : 'No';
-}
-
 function resolveMetodoLabel(value) {
   return String(value || '-').replace(/_/g, ' ');
 }
 
-function EmptyRow({ colSpan, text }) {
-  return (
-    <TablaFila>
-      <TablaCelda colSpan={colSpan} className="py-8 text-center text-[var(--color-text-muted)]">
-        {text}
-      </TablaCelda>
-    </TablaFila>
-  );
+function isUsefulValue(value) {
+  return String(value || '').trim().length > 0;
 }
 
-function InfoItem({ label, value }) {
-  return (
-    <div className="space-y-1">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-        {label}
-      </p>
-      <p className="text-sm font-medium text-[var(--color-text)]">{value || '-'}</p>
-    </div>
-  );
+function formatMetodoPagoLabel(value) {
+  const text = String(value || '').replace(/_/g, ' ').trim().toLowerCase();
+  if (!text) return 'Metodo de pago';
+  if (text.includes('efectivo')) return 'Efectivo';
+  if (text.includes('transferencia')) return 'Transferencia';
+  if (text.includes('credito') || text.includes('crédito')) return 'Crédito cliente';
+  return text
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
-function TotalsRow({ label, value, strong = false }) {
-  return (
-    <div className="flex items-center justify-between gap-6">
-      <span
-        className={`text-sm ${strong ? 'font-semibold text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`}
-      >
-        {label}
-      </span>
-      <span
-        className={`text-right ${strong ? 'text-xl font-bold text-[var(--color-text)]' : 'text-base font-semibold text-[var(--color-text)]'}`}
-      >
-        {value}
-      </span>
-    </div>
-  );
+function formatFechaCompacta(value) {
+  if (!value) return '—';
+  const formatted = formatDateQuito(value);
+  if (!isUsefulValue(formatted) || formatted === '-') return '—';
+  return String(formatted).replace(/(\d{2}:\d{2}):\d{2}/, '$1');
+}
+
+function buildPagoDetalle(pago) {
+  const raw = `${String(pago?.tipo || '')} ${String(pago?.metodo || '')}`.toLowerCase();
+  const isTransferencia = raw.includes('transferencia');
+  const isCredito = raw.includes('credito') || raw.includes('crédito');
+
+  if (isTransferencia) {
+    const parts = [];
+    if (isUsefulValue(pago?.banco)) parts.push(`Banco ${String(pago.banco)}`);
+    if (isUsefulValue(pago?.referencia)) parts.push(`Ref. ${pago.referencia}`);
+    return parts.join(' • ');
+  }
+
+  if (isCredito) {
+    const saldo = Number(pago?.saldo || 0);
+    if (Number.isFinite(saldo) && saldo > 0) return `Saldo pendiente: ${formatMoney(saldo)}`;
+  }
+
+  return '';
 }
 
 export default function VentaDetallePage() {
@@ -128,6 +118,12 @@ export default function VentaDetallePage() {
     loadContext().catch(() => {});
   }, [ventaId]);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV || !ventaDetalle) return;
+    console.log('DETALLE VENTA:', ventaDetalle);
+    console.log('PAGOS DETALLE:', ventaDetalle?.pagos || ventaDetalle?.cobros || ventaDetalle?.pagosVenta);
+  }, [ventaDetalle]);
+
   const venta = ventaDetalle?.venta || null;
 
   const pagos = useMemo(
@@ -141,6 +137,7 @@ export default function VentaDetallePage() {
   );
 
   const resumenPago = ventaDetalle?.resumen_pago || null;
+  const metodoPagoLabel = resumenPago?.label || '-';
 
   const devolucionesRows = useMemo(
     () => (Array.isArray(devoluciones?.devoluciones) ? devoluciones.devoluciones : []),
@@ -161,22 +158,23 @@ export default function VentaDetallePage() {
     const pagosBase = pagos.map((row) => ({
       id: `pago-${row.id}`,
       fecha: row.fecha || row.fecha_emision || venta?.fecha || null,
-      movimiento: row.tipo ? `Cobro ${resolvePaymentTypeLabel(row).toLowerCase()}` : 'Cobro',
+      tipo: String(row.tipo || '').toUpperCase(),
       metodo: resolveMetodoLabel(row.metodo_codigo || row.tipo || '-'),
-      caja: resolveCashImpact(row),
       monto: Number(row.monto || 0),
-      referencia: row.referencia || row.observacion || `Venta #${venta?.id || ventaId}`
+      referencia: row.referencia || row.observacion || '',
+      banco: row.banco || row.banco_nombre || row.entidad || '',
+      saldo: row.saldo_pendiente ?? row.saldo ?? null
     }));
 
     const abonosCredito = ventaAbonos.map((abono) => ({
       id: `abono-${abono.id}`,
       fecha: abono.fecha || abono.fecha_emision || venta?.fecha || null,
-      movimiento: 'Abono de crédito',
-      metodo: resolveMetodoLabel(abono.metodo_pago || abono.metodo || 'CRÉDITO'),
-      caja:
-        String(abono.metodo_pago || abono.metodo || '').toUpperCase() === 'EFECTIVO' ? 'Sí' : 'No',
+      tipo: 'CREDITO',
+      metodo: resolveMetodoLabel(abono.metodo_pago || abono.metodo || 'CREDITO'),
       monto: Number(abono.monto || 0),
-      referencia: abono.observacion || abono.referencia || '-'
+      referencia: abono.observacion || abono.referencia || '',
+      banco: abono.banco || abono.banco_nombre || '',
+      saldo: abono.saldo_pendiente ?? abono.saldo ?? null
     }));
 
     return [...pagosBase, ...abonosCredito].sort((a, b) => {
@@ -196,6 +194,34 @@ export default function VentaDetallePage() {
     Number(resumenPago?.contado_centavos || 0) > 0 && !turnoActual?.id;
 
   const isAdmin = user?.rol?.nombre === 'ADMIN';
+
+  const subtotalCalculado = useMemo(() => {
+    if (!detalleRows.length) return 0;
+    return detalleRows.reduce((acc, row) => acc + Number(row.total_linea || 0), 0);
+  }, [detalleRows]);
+
+  const subtotalVenta = Number(venta?.subtotal ?? subtotalCalculado ?? 0);
+  const descuentoVenta = Number(venta?.descuento || 0);
+  const totalVenta = Number(venta?.total || 0);
+
+  const pagadoTotal = useMemo(
+    () => movimientosPagoRows.reduce((acc, row) => acc + Number(row.monto || 0), 0),
+    [movimientosPagoRows]
+  );
+
+  const cambioTotal = useMemo(() => {
+    let found = false;
+    const total = pagos.reduce((acc, row) => {
+      const raw = row?.cambio ?? row?.cambio_monto ?? row?.monto_cambio;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return acc;
+      found = true;
+      return acc + value;
+    }, 0);
+    return found ? total : null;
+  }, [pagos]);
+
+  const clienteLabel = String(venta?.cliente_nombre || '').trim() || 'Consumidor final';
 
   useEffect(() => {
     if (!venta) return;
@@ -302,320 +328,226 @@ export default function VentaDetallePage() {
   };
 
   return (
-    <div className="space-y-5">
-      <BackButton onClick={() => navigate('/ventas')}>Volver a ventas</BackButton>
-
-      <PageHeader
-        title={venta ? `Venta #${venta.id}` : `Venta #${ventaId}`}
-        description="Detalle operativo completo de la venta, sus pagos, devoluciones y acciones reversibles."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handlePrint}
-              disabled={printing || !venta}
-            >
-              {printing ? 'Generando ticket...' : 'Ver ticket'}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={() => setDevolucionOpen(true)}
-              disabled={!canReturn}
-            >
-              Devolver
-            </Button>
-            <Button
-              type="button"
-              variant="danger"
-              onClick={() => setAnulacionOpen(true)}
-              disabled={!canAnular}
-            >
-              Anular
-            </Button>
-          </div>
-        }
-      />
-
-      {(localError || error) && <Alert tone="error">{localError || error}</Alert>}
-
-      {loading && !venta && <Alert tone="info">Cargando detalle de la venta...</Alert>}
-
-      {venta && needsCashShiftForAnular ? (
-        <Alert tone="warning">
-          Esta venta incluye efectivo y la anulación requiere un turno de caja abierto para
-          revertir el saldo.
-        </Alert>
-      ) : null}
-
-      {venta && !canReturn ? (
-        <Alert tone="info">
-          {venta.estado === SALE_STATUS.ANULADA
-            ? 'La venta ya fue anulada y no admite devoluciones.'
-            : 'La venta ya fue devuelta totalmente.'}
-        </Alert>
-      ) : null}
-
-      {venta && !canAnular ? (
-        <Alert tone="info">
-          {venta.estado !== SALE_STATUS.EMITIDA
-            ? `La anulación no está disponible para el estado ${venta.estado}.`
-            : 'La anulación ya no está disponible porque la venta tiene devoluciones registradas.'}
-        </Alert>
-      ) : null}
-
-      {venta ? (
-        <Card className="p-0">
-          <div className="border-b border-[var(--color-border)] px-5 py-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <StatusBadge status={venta.estado || 'PENDIENTE'} />
-            </div>
-          </div>
-
-          <div className="px-5 py-5">
-            <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <div className="space-y-4">
-                <InfoItem label="Cliente" value={venta.cliente_nombre || 'Comprobante final'} />
-                <InfoItem label="Fecha" value={venta.fecha ? formatDateQuito(venta.fecha) : '-'} />
-                <InfoItem label="Vendedor" value={venta.usuario_nombre || '-'} />
-                <InfoItem label="Método principal" value={ventaDetalle?.resumen_pago?.label || '-'} />
-                <InfoItem label="Referencia" value={venta.referencia || '-'} />
-              </div>
-
-              <div className="space-y-4">
-                <div className="overflow-hidden rounded-2xl border border-[var(--color-border)]">
-                  <div className="border-b border-[var(--color-border)] px-4 py-3">
-                    <p className="font-semibold text-[var(--color-text)]">Productos vendidos</p>
-                    <p className="text-sm text-[var(--color-text-muted)]">
-                      Incluye costo unitario al momento de la venta y margen por línea.
-                    </p>
-                  </div>
-
-                  <Tabla>
-                    <TablaCabecera>
-                      <tr>
-                        <TablaCelda as="th">Producto</TablaCelda>
-                        <TablaCelda as="th">Cantidad / unidad</TablaCelda>
-                        <TablaCelda as="th" className="text-right">
-                          P. unit
-                        </TablaCelda>
-                        <TablaCelda as="th" className="text-right">
-                          Total
-                        </TablaCelda>
-                        <TablaCelda as="th" className="text-right">
-                          Costo unit.
-                        </TablaCelda>
-                        <TablaCelda as="th" className="text-right">
-                          Subtotal costo
-                        </TablaCelda>
-                        <TablaCelda as="th" className="text-right">
-                          Margen
-                        </TablaCelda>
-                      </tr>
-                    </TablaCabecera>
-
-                    <TablaCuerpo>
-                      {detalleRows.length === 0 ? (
-                        <EmptyRow colSpan={7} text="No hay líneas registradas en esta venta." />
-                      ) : (
-                        detalleRows.map((line) => (
-                          <TablaFila key={line.id}>
-                            <TablaCelda>
-                              <div>
-                                <p className="font-medium text-[var(--color-text)]">
-                                  {line.producto_codigo} - {line.producto_nombre}
-                                </p>
-                                <p className="text-xs text-[var(--color-text-muted)]">
-                                  {getUnidad(line.unidad_medida || line.unidad)}
-                                </p>
-                              </div>
-                            </TablaCelda>
-                            <TablaCelda>
-                              <span className="whitespace-nowrap">
-                                {formatQtyByUnit(line.cantidad, line.unidad_medida || line.unidad)}
-                              </span>
-                            </TablaCelda>
-                            <TablaCelda className="text-right">
-                              {formatMoney(line.precio_unit || 0)}
-                            </TablaCelda>
-                            <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                              {formatMoney(line.total_linea || 0)}
-                            </TablaCelda>
-                            <TablaCelda className="text-right">
-                              {formatMoney(line.costo_unit_snapshot || 0)}
-                            </TablaCelda>
-                            <TablaCelda className="text-right">
-                              {formatMoney(line.subtotal_costo || 0)}
-                            </TablaCelda>
-                            <TablaCelda className="text-right font-semibold">
-                              {formatMoney(line.margen || 0)}
-                            </TablaCelda>
-                          </TablaFila>
-                        ))
-                      )}
-                    </TablaCuerpo>
-                  </Tabla>
-                </div>
-
-                <div className="flex justify-end">
-                  <div className="w-full max-w-[320px] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-4">
-                    <div className="space-y-3">
-                      <TotalsRow
-                        label="Costo total"
-                        value={formatMoney(venta.total_costo || 0)}
-                      />
-                      <TotalsRow
-                        label="Margen total"
-                        value={formatMoney(venta.total_margen || 0)}
-                      />
-                      <div className="border-t border-[var(--color-border)] pt-3">
-                        <TotalsRow
-                          label="Total venta"
-                          value={formatMoney(venta.total || 0)}
-                          strong
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
-      ) : null}
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card className="p-0">
-          <div className="border-b border-[var(--color-border)] px-5 py-4">
-            <p className="font-semibold text-[var(--color-text)]">Devoluciones</p>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Historial completo de reversiones asociadas a esta venta.
-            </p>
-          </div>
-
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">ID</TablaCelda>
-                <TablaCelda as="th">Fecha</TablaCelda>
-                <TablaCelda as="th">Motivo</TablaCelda>
-                <TablaCelda as="th">Método</TablaCelda>
-                <TablaCelda as="th" className="text-right">
-                  Total
-                </TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {devolucionesRows.length === 0 ? (
-                <EmptyRow colSpan={5} text="Sin devoluciones registradas." />
-              ) : (
-                devolucionesRows.map((row) => (
-                  <TablaFila key={row.id}>
-                    <TablaCelda>#{row.id}</TablaCelda>
-                    <TablaCelda>{row.fecha ? formatDateQuito(row.fecha) : '-'}</TablaCelda>
-                    <TablaCelda>{row.motivo}</TablaCelda>
-                    <TablaCelda>{row.metodo_pago_label || '-'}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                      {formatMoney(row.total_devuelto || 0)}
-                    </TablaCelda>
-                  </TablaFila>
-                ))
-              )}
-            </TablaCuerpo>
-          </Tabla>
-        </Card>
-
-        <Card className="p-0">
-          <div className="border-b border-[var(--color-border)] px-5 py-4">
-            <p className="font-semibold text-[var(--color-text)]">Movimientos de pago</p>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Historial operativo de cobros y abonos asociados a esta venta.
-            </p>
-          </div>
-
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">Fecha</TablaCelda>
-                <TablaCelda as="th">Movimiento</TablaCelda>
-                <TablaCelda as="th">Método</TablaCelda>
-                <TablaCelda as="th">Caja</TablaCelda>
-                <TablaCelda as="th" className="text-right">
-                  Monto
-                </TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {movimientosPagoRows.length === 0 ? (
-                <EmptyRow colSpan={5} text="No hay movimientos de pago registrados." />
-              ) : (
-                movimientosPagoRows.map((row) => (
-                  <TablaFila key={row.id}>
-                    <TablaCelda>{row.fecha ? formatDateQuito(row.fecha) : '-'}</TablaCelda>
-                    <TablaCelda>
-                      <div>
-                        <p className="font-medium text-[var(--color-text)]">{row.movimiento}</p>
-                        <p className="text-xs text-[var(--color-text-muted)]">{row.referencia || '-'}</p>
-                      </div>
-                    </TablaCelda>
-                    <TablaCelda>{row.metodo}</TablaCelda>
-                    <TablaCelda>{row.caja}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                      {formatMoney(row.monto || 0)}
-                    </TablaCelda>
-                  </TablaFila>
-                ))
-              )}
-            </TablaCuerpo>
-          </Tabla>
-        </Card>
+    <div className="mx-auto w-full max-w-[1320px] space-y-4 px-4 py-4 sm:px-5 lg:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <BackButton className="h-9 px-3 text-sm" onClick={() => navigate('/ventas')}>
+          Volver a ventas
+        </BackButton>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" variant="neutral" onClick={handlePrint} disabled={printing || !venta}>
+            <PiReceipt className="text-base" />
+            {printing ? 'Generando...' : 'Ver ticket'}
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setDevolucionOpen(true)} disabled={!canReturn}>
+            <PiArrowsClockwise className="text-base" />
+            Devolver
+          </Button>
+          <Button type="button" size="sm" variant="danger" onClick={() => setAnulacionOpen(true)} disabled={!canAnular}>
+            <PiWarningCircle className="text-base" />
+            Anular
+          </Button>
+        </div>
       </div>
 
-      {devolucionDetalleRows.length > 0 ? (
-        <Card className="p-0">
-          <div className="border-b border-[var(--color-border)] px-5 py-4">
-            <p className="font-semibold text-[var(--color-text)]">Detalle de devoluciones</p>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Cantidades revertidas por línea original.
-            </p>
+      {(localError || error) && <Alert tone="error">{localError || error}</Alert>}
+      {loading && !venta && <Alert tone="info">Cargando detalle de la venta...</Alert>}
+
+      {venta ? (
+        <section className="space-y-4">
+          <Card className="rounded-xl p-4 shadow-sm">
+            <div className="space-y-2.5">
+              <p className="text-sm font-semibold text-[var(--color-text)]">
+                {venta ? `Venta #${venta.id}` : `Venta #${ventaId}`}
+              </p>
+              <p className="text-sm font-semibold text-[var(--color-text)]">
+                Cliente: <span className="font-normal">{clienteLabel}</span>
+              </p>
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                {venta.fecha ? formatDateQuito(venta.fecha) : '-'} • {venta.usuario_nombre || '-'}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-medium text-[var(--color-text)]">{metodoPagoLabel}</span>
+                <span className="text-[var(--color-text-subtle)]">•</span>
+                <StatusBadge status={venta.estado || 'PENDIENTE'} />
+              </div>
+              <div className="pt-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+                  Total
+                </p>
+                <p className="text-3xl font-black leading-none text-[var(--color-text)]">
+                  {formatMoney(totalVenta)}
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          <div className="space-y-2">
+            {needsCashShiftForAnular ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="text-sm text-amber-800">
+                  Esta venta incluye efectivo y la anulación requiere un turno de caja abierto.
+                </p>
+              </div>
+            ) : null}
+
+            {!canReturn ? (
+              <Alert tone="info">
+                {venta.estado === SALE_STATUS.ANULADA
+                  ? 'La venta ya fue anulada y no admite devoluciones.'
+                  : 'La venta ya fue devuelta totalmente.'}
+              </Alert>
+            ) : null}
+
+            {!canAnular ? (
+              <Alert tone="info">
+                {venta.estado !== SALE_STATUS.EMITIDA
+                  ? `La anulación no está disponible para el estado ${venta.estado}.`
+                  : 'La anulación ya no está disponible porque la venta tiene devoluciones registradas.'}
+              </Alert>
+            ) : null}
           </div>
 
-          <Tabla>
-            <TablaCabecera>
-              <tr>
-                <TablaCelda as="th">Producto</TablaCelda>
-                <TablaCelda as="th">Cantidad / unidad</TablaCelda>
-                <TablaCelda as="th" className="text-right">
-                  Subtotal
-                </TablaCelda>
-                <TablaCelda as="th" className="text-right">
-                  Costo revertido
-                </TablaCelda>
-              </tr>
-            </TablaCabecera>
-            <TablaCuerpo>
-              {devolucionDetalleRows.map((row) => (
-                <TablaFila key={row.id}>
-                  <TablaCelda>{row.producto_codigo} - {row.producto_nombre}</TablaCelda>
-                  <TablaCelda>
-                    <span className="whitespace-nowrap">
-                      {formatQtyByUnit(
-                        row.cantidad,
-                        ventaDetalle?.detalle?.find((line) => line.id === row.venta_detalle_id)
-                          ?.unidad_medida || 'UND'
-                      )}
-                    </span>
-                  </TablaCelda>
-                  <TablaCelda className="text-right">{formatMoney(row.subtotal || 0)}</TablaCelda>
-                  <TablaCelda className="text-right">
-                    {formatMoney(row.subtotal_costo || 0)}
-                  </TablaCelda>
-                </TablaFila>
-              ))}
-            </TablaCuerpo>
-          </Tabla>
-        </Card>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <Card className="rounded-xl p-4 shadow-sm">
+              <h2 className="text-base font-semibold text-[var(--color-text)]">Productos vendidos</h2>
+              {!detalleRows.length ? (
+                <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                  No hay líneas registradas en esta venta.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {detalleRows.map((line) => (
+                    <article key={line.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--color-text)]">
+                            {line.producto_nombre}
+                          </p>
+                          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                            {formatQtyByUnit(line.cantidad, line.unidad_medida || line.unidad)}{' '}
+                            {getUnidad(line.unidad_medida || line.unidad)} × {formatMoney(line.precio_unit || 0)}
+                          </p>
+                        </div>
+                        <p className="shrink-0 text-sm font-bold text-[var(--color-text)]">
+                          {formatMoney(line.total_linea || 0)}
+                        </p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <aside className="space-y-4">
+              <Card className="rounded-xl p-4 shadow-sm">
+              <h2 className="text-base font-semibold text-[var(--color-text)]">Resumen financiero</h2>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--color-text-secondary)]">Subtotal</span>
+                  <span className="font-semibold text-[var(--color-text)]">{formatMoney(subtotalVenta)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--color-text-secondary)]">Descuento</span>
+                  <span className="font-semibold text-[var(--color-text)]">{formatMoney(descuentoVenta)}</span>
+                </div>
+                <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Total</span>
+                  <span className="text-xl font-black text-[var(--color-text)]">{formatMoney(totalVenta)}</span>
+                </div>
+                {movimientosPagoRows.length > 0 ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[var(--color-text-secondary)]">Pagado</span>
+                    <span className="font-semibold text-[var(--color-text)]">{formatMoney(pagadoTotal)}</span>
+                  </div>
+                ) : null}
+                {cambioTotal !== null ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[var(--color-text-secondary)]">Cambio</span>
+                    <span className="font-semibold text-[var(--color-text)]">{formatMoney(cambioTotal)}</span>
+                  </div>
+                ) : null}
+              </div>
+              </Card>
+
+              <Card className="rounded-xl p-4 shadow-sm">
+              <h2 className="text-base font-semibold text-[var(--color-text)]">Pagos</h2>
+              {!movimientosPagoRows.length ? (
+                <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                  No hay movimientos de pago registrados.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {movimientosPagoRows.map((row) => (
+                    <article key={row.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">
+                          {formatMetodoPagoLabel(row.metodo || row.tipo)}
+                        </p>
+                        <p className="shrink-0 text-right text-sm font-bold text-[var(--color-text)]">
+                          {formatMoney(row.monto || 0)}
+                        </p>
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--color-text-muted)]">{formatFechaCompacta(row.fecha)}</p>
+                      {isUsefulValue(buildPagoDetalle(row)) ? (
+                        <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{buildPagoDetalle(row)}</p>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+              </Card>
+            </aside>
+          </div>
+
+          <Card className="rounded-xl p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-[var(--color-text)]">Devoluciones</h2>
+            {devolucionesRows.length === 0 ? (
+              <div className="mt-2 rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2">
+                <p className="text-sm text-[var(--color-text-muted)]">Sin devoluciones registradas.</p>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-1.5">
+                {devolucionesRows.map((row, index) => (
+                  <article key={row.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold text-[var(--color-text)]">Devolución #{index + 1}</p>
+                      <p className="font-bold text-[var(--color-text)]">{formatMoney(row.total_devuelto || 0)}</p>
+                    </div>
+                    <p className="mt-0.5 text-sm text-[var(--color-text-secondary)]">
+                      {row.fecha ? formatDateQuito(row.fecha) : '—'}
+                      {row.motivo ? ` • Motivo: ${row.motivo}` : ''}
+                    </p>
+                    {row.metodo_pago_label ? (
+                      <p className="text-xs text-[var(--color-text-muted)]">Método: {row.metodo_pago_label}</p>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
+
+            {devolucionDetalleRows.length > 0 ? (
+              <div className="mt-3 space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
+                  Ítems devueltos
+                </p>
+                <div className="space-y-1">
+                  {devolucionDetalleRows.map((row) => (
+                    <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2">
+                      <p className="text-sm text-[var(--color-text)]">{row.producto_nombre}</p>
+                      <p className="text-sm font-semibold text-[var(--color-text)]">
+                        {formatQtyByUnit(
+                          row.cantidad,
+                          ventaDetalle?.detalle?.find((line) => line.id === row.venta_detalle_id)?.unidad_medida || 'UND'
+                        )}{' '}
+                        • {formatMoney(row.subtotal || 0)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </Card>
+        </section>
       ) : null}
 
       <DevolucionModal

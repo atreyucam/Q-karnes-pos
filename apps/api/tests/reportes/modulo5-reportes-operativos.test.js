@@ -340,6 +340,29 @@ async function runSuite(options = {}) {
     add(7, 'Caja diaria resume saldo inicial, ingresos, egresos, saldo final y diferencia', false, error.message);
   }
 
+  try {
+    const { admin, cajero } = await prepareScenario();
+    await ensureOpenShift(cajero, 100);
+    await createTransformacionAplicada(admin, cajero, 'M5-COMPRA');
+
+    const compras = await reportesService.compras({
+      fecha_inicio: '2000-01-01',
+      fecha_fin: '2100-12-31'
+    });
+    const comprasProductos = await reportesService.comprasProductos({
+      fecha_inicio: '2000-01-01',
+      fecha_fin: '2100-12-31'
+    });
+
+    assert(compras.data.items.length >= 1, 'Compras no devolvió facturas');
+    assert(Number(compras.data.resumen.total_compras || 0) > 0, 'Resumen de compras no acumuló total');
+    assert(comprasProductos.data.items.length >= 1, 'Compras por producto no devolvió detalle');
+    assert(Number(comprasProductos.data.resumen.total_comprado || 0) > 0, 'Compras por producto no acumuló total');
+    add(8, 'Compras y compras por producto exponen resumen operativo para reportes', true);
+  } catch (error) {
+    add(8, 'Compras y compras por producto exponen resumen operativo para reportes', false, error.message);
+  }
+
   const report = printSuiteReport('MODULO 5 - REPORTES OPERATIVOS', results);
   const summary = { total: report.total, passed: report.passed, failed: report.failed, results: report.sorted };
   if (destroyDb) await cleanupRuntime({ db });

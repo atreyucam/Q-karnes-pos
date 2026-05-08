@@ -19,8 +19,9 @@ import {
 } from '../../shared/ui';
 import { uiClassTokens } from '../../shared/tokens/uiClassTokens';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 const MIN_SEARCH_LENGTH = 0;
 const emptyClienteForm = {
   nombre: '',
@@ -222,18 +223,17 @@ export default function FacturaModal({ open, onClose, onSelectCliente }) {
                   <TablaCelda className="text-right">
                     <div className="flex justify-end">
                       <Button
-                      type="button"
-                      variant="primary"
-                      size="sm"
-                      className="rounded-2xl px-5"
-                      disabled={!cliente.activo}
-                      onClick={() => {
-                        onSelectCliente(cliente);
-                        onClose();
-                      }}
-                    >
-                      Seleccionar
-                    </Button>
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!cliente.activo}
+                        onClick={() => {
+                          onSelectCliente(cliente);
+                          onClose();
+                        }}
+                      >
+                        Seleccionar
+                      </Button>
                     </div>
                   </TablaCelda>
                 </TablaFila>

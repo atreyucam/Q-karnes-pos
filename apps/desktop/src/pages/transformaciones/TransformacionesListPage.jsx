@@ -25,8 +25,9 @@ import { formatQtyByUnit } from '../../lib/formatQty';
 import { useAuthStore } from '../../stores/authStore';
 import { useTransformacionesStore } from '../../stores/transformacionesStore';
 import { getTransformacionStatusLabel } from './transformacionesUi';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 function AuthActionModal({
   open,
@@ -201,7 +202,7 @@ export default function TransformacionesListPage() {
         actions={(
           <>
             <Button
-              variant="secondary"
+              variant="neutral"
               className="w-full sm:w-auto"
               onClick={() => {
                 const reset = { desde: '', hasta: '', estado: '', tipo_proceso: '', search: '' };
@@ -292,7 +293,7 @@ export default function TransformacionesListPage() {
                       Ver
                     </TableActionButton>
                     {row.acciones?.puede_editar && (
-                      <TableActionButton variant="warning" onClick={() => navigate(`/transformaciones/${row.id}/editar`)}>
+                      <TableActionButton variant="secondary" onClick={() => navigate(`/transformaciones/${row.id}/editar`)}>
                         Editar
                       </TableActionButton>
                     )}

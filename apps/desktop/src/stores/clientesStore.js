@@ -6,6 +6,7 @@ export const useClientesStore = create((set) => ({
   meta: null,
   clienteDetalle: null,
   facturas: [],
+  deudas: [],
   resumen: null,
   loading: false,
   error: null,
@@ -94,6 +95,19 @@ export const useClientesStore = create((set) => ({
       const response = await apiClient.get(`/api/clientes/${id}/facturas`);
       const data = normalizeResponse(response.data) || [];
       set({ facturas: data, loading: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ loading: false, error: message });
+      return [];
+    }
+  },
+  cargarDeudas: async (id, params = {}) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.get(`/api/clientes/${id}/deudas`, { params });
+      const data = normalizeResponse(response.data) || [];
+      set({ deudas: data, loading: false });
       return data;
     } catch (error) {
       const message = parseApiError(error);

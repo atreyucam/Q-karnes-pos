@@ -18,6 +18,30 @@ const toneStyles = {
   }
 };
 
+function resolveOperationalAlertHref(alert) {
+  const id = String(alert?.id || '').toLowerCase();
+  const category = String(alert?.category || '').toLowerCase();
+  const title = String(alert?.title || '').toLowerCase();
+
+  if (id.includes('cxc') || category.includes('deuda') || title.includes('deuda activa')) {
+    return '/clientes?credito=con_deuda';
+  }
+
+  if (id.includes('stock') || category.includes('stock') || title.includes('stock bajo')) {
+    return '/inventario?alerta=bajo_minimo';
+  }
+
+  if (title.includes('sin stock')) {
+    return '/inventario?alerta=sin_stock';
+  }
+
+  if (id.includes('caja') || category.includes('caja') || title.includes('caja')) {
+    return '/caja';
+  }
+
+  return alert?.href || '/dashboard';
+}
+
 export default function DashboardAlertsCard({ alerts = [] }) {
   const navigate = useNavigate();
 
@@ -44,7 +68,7 @@ export default function DashboardAlertsCard({ alerts = [] }) {
               <button
                 key={alert.id}
                 type="button"
-                onClick={() => navigate(alert.href)}
+                onClick={() => navigate(resolveOperationalAlertHref(alert))}
                 className={`group flex w-full items-start gap-3 rounded-[22px] border bg-white/90 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-sm)] ${styles.border}`}
               >
                 <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${styles.icon}`}>

@@ -24,8 +24,9 @@ import { useVentasStore } from '../../stores/ventasStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { printSaleTicketDocument } from './printTicket';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 export default function VentasListPage() {
   const navigate = useNavigate();
@@ -116,7 +117,7 @@ export default function VentasListPage() {
         )}
         actions={(
           <Button
-            variant="secondary"
+            variant="neutral"
             className="w-full xl:w-auto"
             onClick={() => setFilters({ search: '', estado: 'TODOS', metodo: 'TODOS', desde: '', hasta: '' })}
           >
@@ -179,7 +180,7 @@ export default function VentasListPage() {
             <TablaCelda as="th">Estado</TablaCelda>
             <TablaCelda as="th">Vendedor</TablaCelda>
             <TablaCelda as="th" className="text-right">Total</TablaCelda>
-            <TablaCelda as="th">Acciones</TablaCelda>
+            <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
           </tr>
         </TablaCabecera>
         <TablaCuerpo>
@@ -212,7 +213,7 @@ export default function VentasListPage() {
                     Ver
                   </TableActionButton>
                   <TableActionButton
-                    variant="warning"
+                    variant="danger"
                     icon={<PiArrowsClockwise />}
                     aria-label={`Devolver venta ${venta.id}`}
                     title="Devolver"
@@ -221,10 +222,10 @@ export default function VentasListPage() {
                     Devolver
                   </TableActionButton>
                   <TableActionButton
-                    variant="secondary"
+                    variant="neutral"
                     icon={<PiReceipt />}
-                    aria-label={`Ver ticket venta ${venta.id}`}
-                    title="Ver ticket"
+                    aria-label={`Imprimir venta ${venta.id}`}
+                    title="Imprimir"
                     disabled={printingSaleId === venta.id}
                     onClick={() => handlePrintTicket(venta.id)}
                   >

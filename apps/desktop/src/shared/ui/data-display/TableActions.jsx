@@ -21,7 +21,7 @@ export function TableActions({ children, align = 'end', wrap = true, className }
   return (
     <div
       className={clsx(
-        'flex w-full items-center gap-1.5',
+        'flex w-full items-center gap-2',
         alignMap[align] || alignMap.end,
         wrap ? 'flex-wrap' : 'flex-nowrap',
         className
@@ -36,6 +36,7 @@ export function TableActionButton({
   children,
   variant = 'neutral',
   icon,
+  iconOnly = false,
   loading = false,
   disabled = false,
   className,
@@ -43,8 +44,9 @@ export function TableActionButton({
 }) {
   return (
     <Button
-      variant="ghost"
-      size="sm"
+      variant={variant === 'success' ? 'primary' : variant === 'warning' ? 'secondary' : variant}
+      size={iconOnly ? 'icon' : 'table'}
+      icon={icon}
       disabled={disabled || loading}
       className={clsx(
         uiClassTokens.button.tableActionBase,
@@ -53,8 +55,7 @@ export function TableActionButton({
       )}
       {...props}
     >
-      {icon ? <span className="text-sm" aria-hidden="true">{icon}</span> : null}
-      <span>{loading ? 'Procesando...' : children}</span>
+      {iconOnly ? null : <span className="hidden lg:inline">{loading ? 'Procesando...' : children}</span>}
     </Button>
   );
 }

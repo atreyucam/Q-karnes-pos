@@ -117,7 +117,7 @@ export default function CompraDetallePage() {
               </Button>
             )}
             {!isReadOnly && ordenActual?.orden?.estado === 'PARCIAL' && (
-              <Button variant="secondary" onClick={() => setActionModal({ open: true, mode: 'cerrar' })}>
+              <Button onClick={() => setActionModal({ open: true, mode: 'cerrar' })}>
                 Cerrar pendiente
               </Button>
             )}
@@ -286,7 +286,7 @@ export default function CompraDetallePage() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={closeActionModal}>Volver</Button>
+            <Button variant="neutral" onClick={closeActionModal}>Volver</Button>
             <Button variant={actionModal.mode === 'cancelar' ? 'danger' : 'primary'} onClick={onConfirmAction} disabled={actionLoading}>
               {actionLoading ? 'Procesando...' : actionModal.mode === 'cancelar' ? 'Confirmar cancelación' : 'Cerrar orden'}
             </Button>

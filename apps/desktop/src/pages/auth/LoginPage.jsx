@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { PiArrowRight, PiEye, PiEyeClosed, PiLockKey, PiUser } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
-import logoEmpresa from '../../public/LogoEmpresa.png';
-import { Alert, Button, Input } from '../../ui';
+import logoEmpresa from '../../public/logoFrigo.png';
+import { Alert, Button, IconButton, Input } from '../../ui';
 import { useAuthStore } from '../../stores/authStore';
 import useFormErrors from '../../shared/hooks/useFormErrors';
 
 function BrandMark() {
   return (
-    <img src={logoEmpresa} alt="QKarnes POS" className="h-14 w-auto object-contain" />
+    <img src={logoEmpresa} alt="QKarnes POS" className="h-[150px] w-auto object-contain" />
   );
 }
 
@@ -100,14 +100,16 @@ export default function LoginPage() {
                   placeholder="Ingresa tu clave"
                   autoComplete="current-password"
                 />
-                <button
+                <IconButton
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                   onClick={() => setShowPassword((value) => !value)}
-                  className="absolute right-4 top-1/2 inline-flex -translate-y-1/2 items-center justify-center text-text-subtle transition-colors hover:text-text-muted"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 border-0 bg-transparent text-text-subtle hover:bg-transparent hover:text-text-muted"
                 >
                   {showPassword ? <PiEyeClosed className="text-[18px]" /> : <PiEye className="text-[18px]" />}
-                </button>
+                </IconButton>
               </div>
 
               {formErrors.errors.password ? (
@@ -119,7 +121,7 @@ export default function LoginPage() {
 
             <Button
               type="submit"
-              className="h-[52px] w-full rounded-[14px] !bg-primary !text-text-inverse text-[15px] font-semibold shadow-none transition hover:!bg-primary-hover"
+              className="w-full"
               size="lg"
               disabled={loading}
             >
@@ -137,9 +139,9 @@ export default function LoginPage() {
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="neutral"
                       size="md"
-                      className="h-[42px] w-full rounded-[12px] border border-border bg-surface hover:bg-surface-alt"
+                      className="w-full"
                       onClick={() => setForm({ usuario: 'admin', password: 'admin123' })}
                     >
                       Usar Admin
@@ -147,9 +149,9 @@ export default function LoginPage() {
 
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="neutral"
                       size="md"
-                      className="h-[42px] w-full rounded-[12px] border border-border bg-surface hover:bg-surface-alt"
+                      className="w-full"
                       onClick={() => setForm({ usuario: 'cajero', password: 'cajero123' })}
                     >
                       Usar Cajero

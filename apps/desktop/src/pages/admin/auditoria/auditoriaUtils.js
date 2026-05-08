@@ -33,9 +33,10 @@ export function formatAuditDate(value) {
 }
 
 export function buildFindings(report = {}) {
+  const safeReport = report && typeof report === 'object' ? report : {};
   return [
-    ...(report.errores_criticos || []),
-    ...(report.advertencias || []),
-    ...(report.observaciones || [])
+    ...(safeReport.errores_criticos || []),
+    ...(safeReport.advertencias || []),
+    ...(safeReport.observaciones || [])
   ];
 }

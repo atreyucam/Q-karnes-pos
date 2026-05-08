@@ -31,8 +31,9 @@ import { formatMoney } from '../../lib/formatMoney';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatQtyByUnit } from '../../lib/formatQty';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 const emptyProveedorForm = {
   id: null,
   nombre: '',

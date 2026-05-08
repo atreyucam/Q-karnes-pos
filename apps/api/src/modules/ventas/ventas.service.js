@@ -72,7 +72,23 @@ const createVentaSchema = z.object({
   }),
   descuento_total: z.number().nonnegative().optional(),
   observacion: z.string().optional(),
-  referencia: z.string().optional()
+  referencia: z.string().optional(),
+  cobro: z.object({
+    efectivo: z.object({
+      monto_recibido: z.number().nonnegative(),
+      cambio: z.number().nonnegative().optional()
+    }).optional(),
+    transferencia: z.object({
+      banco: z.string().trim().min(1),
+      referencia: z.string().trim().optional(),
+      observacion: z.string().optional()
+    }).optional(),
+    credito: z.object({
+      tipo_credito: z.enum(['PENDIENTE_TOTAL', 'ABONO_PARCIAL']).optional(),
+      monto_abonado: z.number().nonnegative().optional(),
+      saldo_pendiente: z.number().nonnegative().optional()
+    }).optional()
+  }).optional()
 });
 
 const devolucionSchema = z.object({
@@ -140,6 +156,35 @@ function embedPaymentCodeTag(observacion, codigo) {
   const normalizedCode = String(codigo || '').trim().toUpperCase();
   if (!normalizedCode) return cleanObservation || null;
   return `[MP:${normalizedCode}]${cleanObservation ? ` ${cleanObservation}` : ''}`;
+}
+
+function parseTransferMetadataFromVenta(venta = {}) {
+  const referencia = String(venta?.referencia || '').trim();
+  const cleanObservation = stripPaymentCodeTag(venta?.observacion);
+  const chunks = cleanObservation
+    .split('|')
+    .map((part) => String(part || '').trim())
+    .filter(Boolean);
+
+  let banco = '';
+  let observacion = '';
+
+  for (const chunk of chunks) {
+    if (!banco && /^banco\s*:/i.test(chunk)) {
+      banco = chunk.replace(/^banco\s*:/i, '').trim();
+      continue;
+    }
+    if (!observacion && /^obs\s*:/i.test(chunk)) {
+      observacion = chunk.replace(/^obs\s*:/i, '').trim();
+      continue;
+    }
+  }
+
+  return {
+    banco,
+    referencia,
+    observacion
+  };
 }
 
 function buildTicketNumber(prefix, ventaId) {
@@ -669,8 +714,19 @@ async function createVenta(body, authUser) {
     const saleBuild = await buildSaleComputation(payload.items, trx);
     const totals = applyDiscountAndMargin(saleBuild.lines, descuentoTotalCentavos);
     const paymentData = normalizeCreatePaymentRows(payload.pagos || {}, totals.totalCentavos);
+    const transferCentavos = Number(paymentData.summary.transferencia_centavos || 0);
+    const cashCentavos = Number(paymentData.summary.contado_centavos || 0);
+    const creditCentavos = Number(paymentData.summary.credito_centavos || 0);
+    const transferRef = String(payload?.cobro?.transferencia?.referencia || payload?.referencia || '').trim();
 
-    if (paymentData.summary.credito_centavos > 0) {
+    if (cashCentavos > 0 && payload?.cobro?.efectivo?.monto_recibido !== undefined) {
+      const recibidoCentavos = moneyToCents(payload.cobro.efectivo.monto_recibido ?? 0, 'cobro.efectivo.monto_recibido');
+      if (recibidoCentavos < cashCentavos) {
+        throw new AppError(400, 'Monto recibido insuficiente para el pago en efectivo');
+      }
+    }
+
+    if (creditCentavos > 0) {
       if (!config.permitir_ventas_credito) {
         throw new AppError(400, 'Las ventas a crédito están deshabilitadas en la configuración del sistema');
       }
@@ -703,7 +759,7 @@ async function createVenta(body, authUser) {
         totalMargenCentavos: totals.totalMargenCentavos,
         metodoPagoCodigo: paymentData.summary.codigo,
         observacion: payload.observacion,
-        referencia: payload.referencia
+        referencia: transferRef || payload.referencia
       }),
       trx
     );
@@ -754,14 +810,14 @@ async function createVenta(body, authUser) {
       }
     }
 
-    if (paymentData.summary.credito_centavos > 0) {
+    if (creditCentavos > 0) {
       const client = await repository.getClientById(payload.cliente_id, trx);
       await repository.insertCxcMovement(
         {
           cliente_id: payload.cliente_id,
           venta_id: venta.id,
           tipo: 'CARGO',
-          monto: centsToMoney(paymentData.summary.credito_centavos),
+          monto: centsToMoney(creditCentavos),
           numero_documento: venta.referencia || `VENTA:${venta.id}`,
           fecha_emision: toDateOnly(venta.fecha),
           fecha_vencimiento: addDays(
@@ -793,6 +849,8 @@ async function createVenta(body, authUser) {
           total_centavos: totals.totalCentavos,
           total_costo_centavos: totals.totalCostoCentavos,
           total_margen_centavos: totals.totalMargenCentavos,
+          cobro: payload.cobro || null,
+          referencia: transferRef || payload.referencia || null,
           pagos: paymentData.rows.map((row) => ({
             tipo: row.tipo,
             metodo_codigo: row.metodo_codigo,
@@ -870,11 +928,43 @@ async function listVentas(query = {}) {
 async function getVenta(id) {
   const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(id));
   if (!pack) throw new AppError(404, 'Venta no encontrada');
-  const abonos = await repository.listCxcAbonosByVenta(id);
+  const [abonos, cxcMovements] = await Promise.all([
+    repository.listCxcAbonosByVenta(id),
+    repository.listCxcMovementsByVenta(id)
+  ]);
+
+  const saldoCreditoCentavos = (cxcMovements || []).reduce((acc, row) => {
+    const cents = moneyToCents(row.monto ?? 0, 'monto');
+    if (toUpper(row.tipo) === 'CARGO') return acc + cents;
+    if (toUpper(row.tipo) === 'ABONO') return acc - cents;
+    return acc;
+  }, 0);
+
+  const saldoCredito = centsToMoney(Math.max(0, saldoCreditoCentavos));
+  const transferMeta = parseTransferMetadataFromVenta(pack.venta);
+
+  const pagos = (pack.pagos || []).map((row) => {
+    const tipo = toUpper(row?.tipo);
+    const metodoCodigo = toUpper(row?.metodo_codigo);
+    const isTransfer = tipo === PAYMENT_TYPES.TRANSFERENCIA || metodoCodigo === PAYMENT_CODES.TRANSFERENCIA;
+    const isCredito = tipo === PAYMENT_TYPES.CREDITO || metodoCodigo === PAYMENT_CODES.CREDITO_CLIENTE;
+
+    return {
+      ...row,
+      banco: isTransfer ? (transferMeta.banco || null) : null,
+      referencia: isTransfer ? (transferMeta.referencia || null) : null,
+      saldo_pendiente: isCredito ? saldoCredito : 0
+    };
+  });
+
   return {
     ok: true,
     data: {
       ...pack,
+      pagos,
+      credito: {
+        saldo_pendiente: saldoCredito
+      },
       abonos
     }
   };

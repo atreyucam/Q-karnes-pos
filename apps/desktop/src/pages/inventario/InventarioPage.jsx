@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PiArrowsClockwise, PiCheckCircle, PiClipboardText, PiPackage, PiPencilSimple, PiWarningCircle, PiWaves } from 'react-icons/pi';
+import { useSearchParams } from 'react-router-dom';
 import { parseApiError } from '../../lib/apiClient';
 import {
   Alert,
@@ -30,9 +31,10 @@ import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatQtyByUnit, getUnidad, sanitizeQtyInput } from '../../lib/formatQty';
 import { fetchCategorias } from '../../services/catalogoService';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 10;
-const MODAL_PAGE_SIZE = 6;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
+const MODAL_PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 function formatInventoryQty(value, unidad, options = {}) {
   const unit = getUnidad(unidad);
@@ -58,11 +60,32 @@ function hasInventoryAlert(row) {
   return Number(row?.stock_actual || 0) <= Number(row?.stock_minimo || 0);
 }
 
-function resolveInventoryRowClass(row) {
-  if (!hasInventoryAlert(row)) return '';
-  return Number(row?.stock_actual || 0) <= 0
-    ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_84%,white_16%)]'
-    : 'bg-[color-mix(in_oklab,var(--color-warning-soft)_74%,white_26%)]';
+const normalizeText = (value = '') => String(value)
+  .trim()
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '');
+
+function getInventoryRowClass(alerta) {
+  const text = normalizeText(alerta);
+  if (text.includes('sin stock')) return '!bg-red-50';
+  if (text.includes('bajo minimo')) return '!bg-amber-50';
+  return '';
+}
+
+function getStockVisibleClass(alerta) {
+  const text = normalizeText(alerta);
+  if (text.includes('sin stock')) return '!text-red-600 !font-bold';
+  if (text.includes('bajo minimo')) return '!text-amber-700 !font-bold';
+  return '!text-gray-900 font-semibold';
+}
+
+function getInventoryAlertPriority(row) {
+  const stockActual = Number(row?.stock_actual || 0);
+  const stockMinimo = Number(row?.stock_minimo || 0);
+  if (stockActual <= 0) return 0;
+  if (stockActual <= stockMinimo) return 1;
+  return 2;
 }
 
 function resolveAlertLabel(row) {
@@ -206,9 +229,16 @@ export default function InventarioPage() {
     actualizarProducto
   } = useInventarioStore();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const alertaQuery = String(searchParams.get('alerta') || '').toLowerCase();
+  const initialAlertaFiltro = alertaQuery === 'sin_stock' || alertaQuery === 'bajo_minimo'
+    ? alertaQuery
+    : '';
+
   const [categorias, setCategorias] = useState([]);
   const [categoriaFiltro, setCategoriaFiltro] = useState('');
   const [searchFiltro, setSearchFiltro] = useState('');
+  const [alertaFiltro, setAlertaFiltro] = useState(initialAlertaFiltro);
   const [tab, setTab] = useState('stock');
   const [pagina, setPagina] = useState(1);
 
@@ -333,12 +363,20 @@ export default function InventarioPage() {
     if (tab !== 'stock') return rows;
 
     const q = searchFiltro.trim().toLowerCase();
-    return rows.filter((row) => {
+    const filtered = rows.filter((row) => {
       if (categoriaFiltro && String(row.categoria_id) !== String(categoriaFiltro)) return false;
+      if (alertaFiltro === 'sin_stock' && Number(row.stock_actual || 0) > 0) return false;
+      if (alertaFiltro === 'bajo_minimo' && Number(row.stock_actual || 0) > Number(row.stock_minimo || 0)) return false;
       if (!q) return true;
       return [row.codigo, row.nombre].some((value) => String(value || '').toLowerCase().includes(q));
     });
-  }, [rowsByTab, tab, categoriaFiltro, searchFiltro]);
+    return [...filtered].sort((a, b) => {
+      const priorityA = getInventoryAlertPriority(a);
+      const priorityB = getInventoryAlertPriority(b);
+      if (priorityA !== priorityB) return priorityA - priorityB;
+      return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
+    });
+  }, [rowsByTab, tab, categoriaFiltro, searchFiltro, alertaFiltro]);
 
   const totalPaginas = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pagedRows = useMemo(
@@ -605,11 +643,15 @@ export default function InventarioPage() {
             actions={(
               <Button
                 type="button"
-                variant="secondary"
+                variant="neutral"
                 className="w-full xl:w-auto"
                 onClick={() => {
                   setCategoriaFiltro('');
                   setSearchFiltro('');
+                  setAlertaFiltro('');
+                  const nextParams = new URLSearchParams(searchParams);
+                  nextParams.delete('alerta');
+                  setSearchParams(nextParams, { replace: true });
                 }}
               >
                 Limpiar filtros
@@ -624,6 +666,23 @@ export default function InventarioPage() {
                     {categoria.nombre}
                   </option>
                 ))}
+              </Select>
+            </Field>
+            <Field label="Alerta">
+              <Select
+                value={alertaFiltro}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAlertaFiltro(value);
+                  const nextParams = new URLSearchParams(searchParams);
+                  if (value) nextParams.set('alerta', value);
+                  else nextParams.delete('alerta');
+                  setSearchParams(nextParams, { replace: true });
+                }}
+              >
+                <option value="">Todas</option>
+                <option value="bajo_minimo">Bajo mínimo</option>
+                <option value="sin_stock">Sin stock</option>
               </Select>
             </Field>
           </FiltersBar>
@@ -697,14 +756,20 @@ export default function InventarioPage() {
               </TablaFila>
             )}
 
-            {pagedRows.map((row) => (
-              <TablaFila key={`${tab}-${row.id}`} className={tab === 'stock' ? resolveInventoryRowClass(row) : ''}>
+            {pagedRows.map((row) => {
+              const alertaLabel = tab === 'stock' ? resolveAlertLabel(row) : '';
+              return (
+              <TablaFila key={`${tab}-${row.id}`} className={tab === 'stock' ? getInventoryRowClass(alertaLabel) : ''}>
                 {tab === 'stock' && (
                   <>
                     <TablaCelda className="font-semibold text-[var(--color-text)]">
                       <div className="flex items-center gap-2">
                         {hasInventoryAlert(row) ? (
-                          <PiWarningCircle className="shrink-0 text-[1.2rem] text-warning" title="Stock bajo el mínimo" aria-label="Stock bajo el mínimo" />
+                          <PiWarningCircle
+                            className={`shrink-0 text-[1.2rem] ${Number(row.stock_actual || 0) <= 0 ? 'text-[var(--color-danger)]' : 'text-warning'}`}
+                            title={Number(row.stock_actual || 0) <= 0 ? 'Sin stock' : 'Stock bajo el mínimo'}
+                            aria-label={Number(row.stock_actual || 0) <= 0 ? 'Sin stock' : 'Stock bajo el mínimo'}
+                          />
                         ) : null}
                         <div>
                           <p>{row.codigo} - {row.nombre}</p>
@@ -713,17 +778,19 @@ export default function InventarioPage() {
                       </div>
                     </TablaCelda>
                     <TablaCelda>{getUnidad(row.unidad_medida || row.unidad || 'UND')}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                      {formatInventoryQty(row.stock_actual, row.unidad_medida || row.unidad)}
+                    <TablaCelda className="text-right">
+                      <span className={getStockVisibleClass(alertaLabel)}>
+                        {formatInventoryQty(row.stock_actual, row.unidad_medida || row.unidad)}
+                      </span>
                     </TablaCelda>
                     <TablaCelda className="text-right">{formatMoney(row.costo_promedio)}</TablaCelda>
                     <TablaCelda className="text-right">{formatMoney(getInventoryValue(row))}</TablaCelda>
                     <TablaCelda className="text-right">{formatInventoryQty(row.stock_minimo, row.unidad_medida || row.unidad)}</TablaCelda>
-                    <TablaCelda>{resolveAlertLabel(row)}</TablaCelda>
+                    <TablaCelda>{alertaLabel}</TablaCelda>
                     <TablaCelda>
                       <TableActions>
                         <TableActionButton
-                          variant="warning"
+                          variant="secondary"
                           icon={<PiPencilSimple />}
                           aria-label={`Editar ${row.nombre}`}
                           title="Editar producto"
@@ -776,7 +843,7 @@ export default function InventarioPage() {
                       <TableActions>
                         {row.estado === 'BORRADOR' ? (
                           <TableActionButton
-                            variant="success"
+                            variant="primary"
                             icon={<PiCheckCircle />}
                             aria-label={`Aplicar conteo ${row.id}`}
                             title="Aplicar conteo"
@@ -816,7 +883,7 @@ export default function InventarioPage() {
                   </>
                 )}
               </TablaFila>
-            ))}
+            );})}
           </TablaCuerpo>
         </Tabla>
 

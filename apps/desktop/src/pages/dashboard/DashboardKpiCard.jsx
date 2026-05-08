@@ -49,21 +49,21 @@ export default function DashboardKpiCard({ title, value, hint, trend, trendTone 
         '--dashboard-card-icon-bg': styles.iconBg
       }}
     >
-      <div className="flex h-full flex-col gap-4">
-        <span
-          className="ui-kpi-summary-icon"
-          style={{
-            color: 'var(--dashboard-card-accent)',
-            boxShadow: 'inset 0 0 0 1px color-mix(in oklab, var(--dashboard-card-accent) 18%, white 82%)'
-          }}
-        >
-          <Icon className="text-[1.2rem]" />
-        </span>
-
-        <div className="space-y-2">
+      <div className="flex h-full flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <span
+            className="ui-kpi-summary-icon"
+            style={{
+              color: 'var(--dashboard-card-accent)',
+              boxShadow: 'inset 0 0 0 1px color-mix(in oklab, var(--dashboard-card-accent) 18%, white 82%)'
+            }}
+          >
+            <Icon className="text-[0.95rem]" />
+          </span>
           <p className="ui-kpi-summary-label">{title}</p>
-          <p className="ui-kpi-summary-value">{value}</p>
         </div>
+
+        <p className="ui-kpi-summary-value">{value}</p>
 
         <div className="space-y-1">
           {trend ? (

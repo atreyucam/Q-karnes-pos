@@ -26,7 +26,7 @@ export default function ConfirmDialog({
         </div>
         {children ? <div className="space-y-3">{children}</div> : null}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={cancelDisabled || confirmLoading}>
+          <Button type="button" variant="neutral" onClick={onClose} disabled={cancelDisabled || confirmLoading}>
             {cancelLabel}
           </Button>
           <Button

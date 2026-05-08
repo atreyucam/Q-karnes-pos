@@ -34,7 +34,7 @@ export default function DeactivateEntityDialogs({
             </p>
           </div>
           <div className="flex justify-end">
-            <Button type="button" variant="secondary" onClick={onCloseBlocked}>
+            <Button type="button" variant="neutral" onClick={onCloseBlocked}>
               Entendido
             </Button>
           </div>

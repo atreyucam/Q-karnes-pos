@@ -73,7 +73,7 @@ export default function KardexReport() {
         actions={(
           <>
             <Button
-              variant="secondary"
+              variant="neutral"
               className="w-full sm:w-auto"
               onClick={() => {
                 const reset = defaultFilters();

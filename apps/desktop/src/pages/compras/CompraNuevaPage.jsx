@@ -8,10 +8,11 @@ import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoService';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
 const emptyProveedorForm = { nombre: '', telefono: '', direccion: '', dias_pago: '15' };
 const emptyProductoForm = { nombre: '', categoria_id: '', unidad_medida: 'UND', precio_referencia: '0' };
-const MODAL_PAGE_SIZE = 10;
+const MODAL_PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 function getTodayInEcuador() {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Guayaquil', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -378,7 +379,7 @@ export default function CompraNuevaPage() {
         </div>
 
         <div className="mt-8 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--color-border)] pt-6">
-          <Button variant="secondary" onClick={() => navigate('/compras')}>
+          <Button variant="neutral" onClick={() => navigate('/compras')}>
             Cancelar
           </Button>
           <Button onClick={onSolicitarGuardado} disabled={saving}>
@@ -425,7 +426,7 @@ export default function CompraNuevaPage() {
                   <TablaCelda>{proveedor.direccion || '-'}</TablaCelda>
                   <TablaCelda>
                     <div className="flex justify-end">
-                      <Button size="sm" onClick={() => {
+                      <Button variant="secondary" size="sm" onClick={() => {
                         setProveedorId(String(proveedor.id));
                         setShowProveedorPicker(false);
                       }}>
@@ -475,16 +476,16 @@ export default function CompraNuevaPage() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowProveedorCreate(false)}>Cancelar</Button>
+            <Button variant="neutral" onClick={() => setShowProveedorCreate(false)}>Cancelar</Button>
             <Button onClick={onCrearProveedor}>Guardar proveedor</Button>
           </div>
         </div>
       </Modal>
 
-      <Modal open={showProductoPicker} onClose={() => setShowProductoPicker(false)} maxWidthClass="sm:max-w-[min(1120px,calc(100vw-1rem))]" panelClassName="p-0">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="ui-modal-header px-5 py-4">
-            <div className="ui-modal-header-copy">
+      <Modal open={showProductoPicker} onClose={() => setShowProductoPicker(false)} maxWidthClass="max-w-5xl" panelClassName="p-0">
+        <div className="flex min-h-0 flex-col">
+          <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 py-4">
+            <div className="min-w-0">
               <h3 className="text-lg font-semibold text-[var(--color-text)]">Agregar producto</h3>
               <p className="text-sm text-[var(--color-text-muted)]">Busca y selecciona un producto para la orden.</p>
             </div>
@@ -533,7 +534,7 @@ export default function CompraNuevaPage() {
                     <TablaCelda>{getUnidad(producto.unidad_medida || producto.unidad)}</TablaCelda>
                     <TablaCelda>
                       <div className="flex justify-end">
-                        <Button size="sm" onClick={() => addItem(producto)}>Seleccionar</Button>
+                        <Button variant="secondary" size="sm" onClick={() => addItem(producto)}>Seleccionar</Button>
                       </div>
                     </TablaCelda>
                   </TablaFila>
@@ -588,7 +589,7 @@ export default function CompraNuevaPage() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowProductoCreate(false)}>Cancelar</Button>
+            <Button variant="neutral" onClick={() => setShowProductoCreate(false)}>Cancelar</Button>
             <Button onClick={onCrearProducto}>Guardar producto</Button>
           </div>
         </div>
@@ -603,7 +604,7 @@ export default function CompraNuevaPage() {
             </p>
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowConfirmSave(false)}>Cancelar</Button>
+            <Button variant="neutral" onClick={() => setShowConfirmSave(false)}>Cancelar</Button>
             <Button onClick={onGuardarOrden} disabled={saving}>{saving ? 'Guardando...' : 'Confirmar y guardar'}</Button>
           </div>
         </div>
@@ -618,7 +619,7 @@ export default function CompraNuevaPage() {
             </p>
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => {
+            <Button variant="neutral" onClick={() => {
               setShowSuccessModal(false);
               navigate('/compras');
             }}>

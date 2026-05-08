@@ -75,16 +75,24 @@ export function buildVentaCreatePayload({
   descuentoTotal = 0,
   paymentCode,
   total,
+  pagosInput,
+  cobro,
   observacion,
   referencia
 }) {
   const metodoPago = normalizeCode(paymentCode, PAYMENT_CODES.EFECTIVO);
-  const pagos = {};
   const totalNormalizado = normalizeMoney(total);
+  const pagos = {
+    contado: normalizeMoney(pagosInput?.contado ?? 0),
+    transferencia: normalizeMoney(pagosInput?.transferencia ?? 0),
+    credito: normalizeMoney(pagosInput?.credito ?? 0)
+  };
 
-  if (metodoPago === PAYMENT_CODES.TRANSFERENCIA) pagos.transferencia = totalNormalizado;
-  else if (metodoPago === PAYMENT_CODES.CREDITO_CLIENTE) pagos.credito = totalNormalizado;
-  else pagos.contado = totalNormalizado;
+  if ((pagos.contado + pagos.transferencia + pagos.credito) <= 0) {
+    if (metodoPago === PAYMENT_CODES.TRANSFERENCIA) pagos.transferencia = totalNormalizado;
+    else if (metodoPago === PAYMENT_CODES.CREDITO_CLIENTE) pagos.credito = totalNormalizado;
+    else pagos.contado = totalNormalizado;
+  }
 
   return {
     cliente_id: clienteId ?? null,
@@ -95,6 +103,7 @@ export function buildVentaCreatePayload({
     })),
     pagos,
     descuento_total: normalizeMoney(descuentoTotal),
+    ...(cobro ? { cobro } : {}),
     ...(observacion ? { observacion } : {}),
     ...(referencia ? { referencia } : {})
   };

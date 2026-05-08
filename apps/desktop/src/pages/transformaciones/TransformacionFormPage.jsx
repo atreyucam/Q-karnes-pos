@@ -4,6 +4,7 @@ import {
   Alert,
   BackButton,
   Button,
+  IconButton,
   Input,
   Modal,
   Paginador,
@@ -21,8 +22,9 @@ import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoS
 import { useAuthStore } from '../../stores/authStore';
 import { useTransformacionesStore } from '../../stores/transformacionesStore';
 import { getTransformacionStatusHelp, getTransformacionStatusLabel } from './transformacionesUi';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const MODAL_PAGE_SIZE = 10;
+const MODAL_PAGE_SIZE = GLOBAL_PAGE_SIZE;
 const WEIGHT_UNITS = new Set(['KG', 'LB']);
 const UNIT_TO_BASE_PER_MILLI = { KG: 100_000_000, LB: 45_359_237 };
 const UNIT_TO_BASE_PER_UNIT = { KG: 100_000_000_000, LB: 45_359_237_000 };
@@ -240,7 +242,7 @@ function ProductSearchModal({ open, title, search, onSearchChange, filters, rows
             <h3 className="text-lg font-semibold text-text">{title}</h3>
             <p className="text-sm text-text-muted">Busca y selecciona un producto activo.</p>
           </div>
-          <button type="button" aria-label="Cerrar modal" className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-xl leading-none text-text-muted transition hover:border-primary hover:text-text" onClick={onClose}>×</button>
+          <IconButton type="button" variant="icon" size="sm" aria-label="Cerrar modal" onClick={onClose}>×</IconButton>
         </div>
       </div>
       <div className="space-y-4 px-6 py-5">
@@ -274,7 +276,7 @@ function ProductSearchModal({ open, title, search, onSearchChange, filters, rows
                   {getCutTypeLabel && <TableCell>{getCutTypeLabel(row)}</TableCell>}
                   <TableCell>{normalizeUnit(row.unidad_medida || row.unidad)}</TableCell>
                   <TableCell>{getStockLabel(row)}</TableCell>
-                  <TableCell><Button size="sm" onClick={() => onSelect(row)}>Seleccionar</Button></TableCell>
+                  <TableCell><Button variant="secondary" size="sm" onClick={() => onSelect(row)}>Seleccionar</Button></TableCell>
                 </TableRow>
               )) : (
                 <TableRow><TableCell className="py-6 text-text-muted" colSpan={getCutTypeLabel ? 5 : 4}>No hay productos disponibles con esos filtros.</TableCell></TableRow>
@@ -369,7 +371,7 @@ function ApplyConfirmModal({ open, auth, setAuth, onClose, onConfirm, loading, n
             <h3 className="text-lg font-semibold text-text">Confirmar aplicación</h3>
             <p className="text-sm text-text-muted">Esta transformación ya está completa y lista para aplicar. Al confirmar se registrarán movimientos reales de inventario y costo.</p>
           </div>
-          <button type="button" aria-label="Cerrar modal" className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-xl leading-none text-text-muted transition hover:border-primary hover:text-text" onClick={onClose}>×</button>
+          <IconButton type="button" variant="icon" size="sm" aria-label="Cerrar modal" onClick={onClose}>×</IconButton>
         </div>
       </div>
       <div className="space-y-4 px-6 py-5">
@@ -391,7 +393,7 @@ function ApplyConfirmModal({ open, auth, setAuth, onClose, onConfirm, loading, n
           </div>
         )}
         <div className="flex justify-end gap-3 border-t border-border pt-4">
-          <Button variant="secondary" onClick={onClose} disabled={loading}>Cancelar</Button>
+          <Button variant="neutral" onClick={onClose} disabled={loading}>Cancelar</Button>
           <Button onClick={onConfirm} disabled={loading}>{loading ? 'Aplicando...' : 'Confirmar y aplicar'}</Button>
         </div>
       </div>
@@ -924,8 +926,8 @@ export default function TransformacionFormPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">{isEdit && actual?.estado === 'BORRADOR' && <Button variant="danger" onClick={handleDelete} disabled={saving}>Eliminar transformación pendiente</Button>}</div>
               <div className="flex flex-wrap items-center gap-3">
-                <Button variant="secondary" onClick={() => navigate('/transformaciones')} disabled={saving}>Cancelar</Button>
-                {currentStep > 1 && <Button variant="secondary" onClick={() => handleStepChange(currentStep - 1)} disabled={saving}>Volver</Button>}
+                <Button variant="neutral" onClick={() => navigate('/transformaciones')} disabled={saving}>Cancelar</Button>
+                {currentStep > 1 && <Button variant="neutral" onClick={() => handleStepChange(currentStep - 1)} disabled={saving}>Volver</Button>}
                 {currentStep < 5
                   ? <Button onClick={() => handleStepChange(currentStep + 1)} disabled={continueDisabled}>Continuar</Button>
                   : <>

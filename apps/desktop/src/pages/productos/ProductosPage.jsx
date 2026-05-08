@@ -15,6 +15,7 @@ import {
   Paginador,
   Select,
   Switch,
+  Toast,
   TableActions,
   TableActionButton,
   Tabla,
@@ -29,8 +30,9 @@ import { createCategoria, deleteCategoria, fetchCategorias, fetchProductos, upda
 import { formatMoney } from '../../lib/formatMoney';
 import { formatQtyByUnit, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import useBooleanSwitch from '../../shared/hooks/useBooleanSwitch';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 const PRODUCT_ROLE_OPTIONS = [
   { key: 'es_vendible', label: 'Vendible', hint: 'Aparece en ventas.' },
   { key: 'es_transformable', label: 'Transformable', hint: 'Puede usarse como padre en transformaciones.' },
@@ -127,6 +129,42 @@ function normalizeStockInputForUnit(value, unit) {
   return String(Math.trunc(Number(digitsOnly)));
 }
 
+const toNumber = (value) => {
+  if (typeof value === 'number') return value;
+  const cleaned = String(value ?? '0').replace(/[^0-9.-]+/g, '');
+  return Number(cleaned) || 0;
+};
+
+const getProductStockValues = (producto) => {
+  const stockVisible = toNumber(
+    producto.stock_visible
+    ?? producto.stockVisible
+    ?? producto.stock_actual
+    ?? producto.stockActual
+    ?? producto.stock
+  );
+  const stockMinimo = toNumber(
+    producto.stock_minimo
+    ?? producto.stockMinimo
+    ?? 0
+  );
+  return { stockVisible, stockMinimo };
+};
+
+const getProductRowClass = (producto) => {
+  const { stockVisible, stockMinimo } = getProductStockValues(producto);
+  if (stockVisible <= 0) return '!bg-red-50';
+  if (stockMinimo > 0 && stockVisible <= stockMinimo) return '!bg-amber-50';
+  return '';
+};
+
+const getProductStockClass = (producto) => {
+  const { stockVisible, stockMinimo } = getProductStockValues(producto);
+  if (stockVisible <= 0) return '!text-red-600 !font-bold';
+  if (stockMinimo > 0 && stockVisible <= stockMinimo) return '!text-amber-700 !font-bold';
+  return '!text-gray-900 font-semibold';
+};
+
 export default function ProductosPage() {
   const { productos, error, loading, listar, crear, actualizar } = useProductosStore();
   const [categorias, setCategorias] = useState([]);
@@ -137,6 +175,7 @@ export default function ProductosPage() {
   const [productoForm, setProductoForm] = useState(emptyProductoForm);
   const [localError, setLocalError] = useState('');
   const [feedback, setFeedback] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
   const [categoriaManagerOpen, setCategoriaManagerOpen] = useState(false);
   const [categoriaEditorOpen, setCategoriaEditorOpen] = useState(false);
   const [categoriaForm, setCategoriaForm] = useState(emptyCategoriaForm);
@@ -210,6 +249,17 @@ export default function ProductosPage() {
   useEffect(() => {
     if (pagina > totalPaginas) setPagina(totalPaginas);
   }, [pagina, totalPaginas]);
+
+  useEffect(() => {
+    if (!feedback) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setFeedback(''), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [feedback]);
 
   const onChangeFiltro = (key, value) => {
     setPagina(1);
@@ -460,6 +510,21 @@ export default function ProductosPage() {
 
   return (
     <div className="space-y-5">
+      {feedback ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone="success"
+            title="Operacion completada"
+            description={feedback}
+            onClose={() => {
+              setToastVisible(false);
+              setFeedback('');
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
+
       <PageHeader
         title="Productos"
         description="Catálogo operativo con roles explícitos: vendible, transformable, insumo o merma."
@@ -481,9 +546,9 @@ export default function ProductosPage() {
         )}
       />
 
-      {(error || localError || feedback) && (
-        <Alert tone={error || localError ? 'error' : 'success'}>
-          {localError || error || feedback}
+      {(error || localError) && (
+        <Alert tone="error">
+          {localError || error}
         </Alert>
       )}
 
@@ -499,7 +564,7 @@ export default function ProductosPage() {
         )}
         actions={(
           <Button
-            variant="secondary"
+            variant="neutral"
             className="w-full xl:w-auto"
             onClick={() => {
               setPagina(1);
@@ -569,21 +634,24 @@ export default function ProductosPage() {
               </TablaCabecera>
               <TablaCuerpo>
                 {productosPaginados.map((producto) => {
-                  const hasAlert = Number(producto.stock_actual || 0) <= Number(producto.stock_minimo || 0);
+                  const { stockVisible, stockMinimo } = getProductStockValues(producto);
+                  const sinStock = stockVisible <= 0;
+                  const bajoMinimo = stockVisible > 0 && stockMinimo > 0 && stockVisible <= stockMinimo;
+                  const hasAlert = sinStock || bajoMinimo;
                   const unidadMedida = producto.unidad_medida || producto.unidad || 'UND';
                   const currentChecked = productoStatusSwitch.resolveChecked(producto);
                   return (
                     <TablaFila
                       key={producto.id}
-                      className={hasAlert ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_74%,white_26%)]' : ''}
+                      className={getProductRowClass(producto)}
                     >
                       <TablaCelda className="font-semibold text-[var(--color-text)]">
                         <div className="flex items-center gap-2">
                           {hasAlert ? (
                             <PiWarningCircle
-                              className="shrink-0 cursor-pointer text-[1.2rem] text-warning"
-                              title="Stock bajo el mínimo"
-                              aria-label="Stock bajo el mínimo"
+                              className={`shrink-0 cursor-pointer text-[1.2rem] ${sinStock ? 'text-[var(--color-danger)]' : 'text-warning'}`}
+                              title={sinStock ? 'Sin stock' : 'Stock bajo el mínimo'}
+                              aria-label={sinStock ? 'Sin stock' : 'Stock bajo el mínimo'}
                             />
                           ) : null}
                           <span>{producto.codigo}</span>
@@ -598,8 +666,10 @@ export default function ProductosPage() {
                         </div>
                       </TablaCelda>
                       <TablaCelda>{producto.categoria_nombre || 'Sin categoría'}</TablaCelda>
-                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                        {formatQtyByUnit(producto.stock_actual, unidadMedida)}
+                      <TablaCelda className="text-right">
+                        <span className={getProductStockClass(producto)}>
+                          {formatQtyByUnit(stockVisible, unidadMedida)}
+                        </span>
                       </TablaCelda>
                       <TablaCelda>{unidadMedida}</TablaCelda>
                       <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(producto.precio_venta)}</TablaCelda>
@@ -626,7 +696,7 @@ export default function ProductosPage() {
                       <TablaCelda>
                         <TableActions>
                           <TableActionButton
-                            variant="warning"
+                            variant="secondary"
                             icon={<PiPencilSimple />}
                             aria-label="Editar producto"
                             title="Editar producto"
@@ -802,24 +872,27 @@ export default function ProductosPage() {
 
       <Modal open={categoriaManagerOpen} onClose={closeCategoriaManager} maxWidthClass="sm:max-w-[min(1120px,calc(100vw-1rem))]" panelClassName="p-0">
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="border-b border-[var(--color-border)] px-5 py-4">
+          <div className="px-5 py-4">
             <div className="ui-modal-header">
               <div className="ui-modal-header-copy">
                 <h3 className="text-lg font-semibold text-[var(--color-text)]">Gestionar categorías</h3>
                 <p className="text-sm text-[var(--color-text-muted)]">Crea, renombra, activa, desactiva o elimina categorías sin productos asociados.</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Button onClick={openCategoriaCreateModal}>
-                  Nueva categoría
+              <div className="flex items-start">
+                <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeCategoriaManager}>
+                  X
                 </Button>
-              <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeCategoriaManager}>
-                X
-              </Button>
               </div>
             </div>
           </div>
 
-          <div className="min-h-0 overflow-auto px-5 py-5">
+          <div className="min-h-0 overflow-auto px-5 pb-5 pt-0">
+            <div className="mb-4 flex justify-end">
+              <Button onClick={openCategoriaCreateModal}>
+                <PiPlus className="text-base" />
+                Nueva categoría
+              </Button>
+            </div>
             {(categoriaError || categoriaFeedback) && (
               <Alert tone={categoriaError ? 'error' : 'success'} className="mb-4">
                 {categoriaError || categoriaFeedback}
@@ -856,7 +929,7 @@ export default function ProductosPage() {
                         <TablaCelda>
                           <TableActions>
                             <TableActionButton
-                              variant="warning"
+                              variant="secondary"
                               icon={<PiPencilSimple />}
                               aria-label={`Editar categoría ${categoria.nombre}`}
                               title="Editar categoría"

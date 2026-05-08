@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "migrate": "knex migrate:latest",
     "seed": "knex seed:run",
+    "seed:master-demo": "knex seed:run --specific 002_master_demo.js",
     "db:check": "node scripts/sqlite-integrity-check.js",
     "db:paths": "node scripts/sqlite-paths.js",
     "db:backup": "node scripts/sqlite-backup.js",

@@ -21,12 +21,13 @@ export default function Paginador({
 
   return (
     <div className="ui-paginator mt-4">
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          className="ui-pagination-item"
+          className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] transition hover:bg-[var(--color-surface-muted)] disabled:cursor-not-allowed disabled:opacity-45"
           onClick={() => onPageChange(Math.max(1, paginaActual - 1))}
           disabled={paginaActual <= 1}
+          aria-label="Pagina anterior"
         >
           <PiCaretLeft className="text-base" />
         </button>
@@ -41,7 +42,12 @@ export default function Paginador({
               key={page}
               type="button"
               onClick={() => onPageChange(page)}
-              className={clsx('ui-pagination-item', page === paginaActual && 'ui-pagination-item-active')}
+              className={clsx(
+                'flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-semibold transition',
+                page === paginaActual
+                  ? 'border-[var(--color-text)] bg-[var(--color-text)] text-white'
+                  : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]'
+              )}
             >
               {page}
             </button>
@@ -50,9 +56,10 @@ export default function Paginador({
 
         <button
           type="button"
-          className="ui-pagination-item"
+          className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] transition hover:bg-[var(--color-surface-muted)] disabled:cursor-not-allowed disabled:opacity-45"
           onClick={() => onPageChange(Math.min(totalPaginas, paginaActual + 1))}
           disabled={paginaActual >= totalPaginas}
+          aria-label="Pagina siguiente"
         >
           <PiCaretRight className="text-base" />
         </button>

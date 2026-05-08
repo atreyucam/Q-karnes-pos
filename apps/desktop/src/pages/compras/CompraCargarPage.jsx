@@ -557,7 +557,7 @@ export default function CompraCargarPage() {
           </div>
           <div className="flex justify-end gap-2">
             <Button
-              variant="secondary"
+              variant="neutral"
               onClick={() => {
                 setRecepcionSuccess({ open: false, recepcionId: null, total: 0, estado: null });
                 navigate(`/compras/ordenes/${ordenId}`);

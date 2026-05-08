@@ -31,8 +31,10 @@ import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
 import useBooleanSwitch from '../../shared/hooks/useBooleanSwitch';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
+const PHONE_REGEX = /^\d{1,10}$/;
 
 const emptyProveedorForm = {
   id: null,
@@ -45,6 +47,20 @@ const emptyProveedorForm = {
   activo: true
 };
 
+function sanitizePhoneInput(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 10);
+}
+
+const toNumber = (value) => {
+  if (typeof value === 'number') return value;
+  const cleaned = String(value ?? '0').replace(/[^0-9.-]+/g, '');
+  return Number(cleaned) || 0;
+};
+
+const getMoneyTextClass = (value) => (
+  toNumber(value) > 0 ? '!text-red-600 !font-bold' : '!text-gray-900 font-semibold'
+);
+
 export default function ProveedoresPage() {
   const { proveedores, error, loading, listar, crear, actualizar } = useProveedoresStore();
   const navigate = useNavigate();
@@ -53,11 +69,12 @@ export default function ProveedoresPage() {
   const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', credito: 'TODOS' });
   const [proveedorModal, setProveedorModal] = useState({ open: false, mode: 'create' });
   const [proveedorForm, setProveedorForm] = useState(emptyProveedorForm);
-  const [feedback, setFeedback] = useState('');
   const [statusError, setStatusError] = useState('');
   const [blockedDeactivateProveedor, setBlockedDeactivateProveedor] = useState(null);
   const [statusToast, setStatusToast] = useState('');
+  const [statusToastError, setStatusToastError] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
+  const [errorToastVisible, setErrorToastVisible] = useState(false);
   const proveedorFormErrors = useFormErrors();
 
   const refreshList = () => {
@@ -98,13 +115,23 @@ export default function ProveedoresPage() {
   useEffect(() => {
     if (!statusToast) return undefined;
     setToastVisible(true);
-    const hideTimer = window.setTimeout(() => setToastVisible(false), 2400);
-    const clearTimer = window.setTimeout(() => setStatusToast(''), 2580);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setStatusToast(''), 4000);
     return () => {
       window.clearTimeout(hideTimer);
       window.clearTimeout(clearTimer);
     };
   }, [statusToast]);
+  useEffect(() => {
+    if (!statusToastError) return undefined;
+    setErrorToastVisible(true);
+    const hideTimer = window.setTimeout(() => setErrorToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setStatusToastError(''), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToastError]);
 
   const onChangeFiltro = (key, value) => {
     setPagina(1);
@@ -141,10 +168,13 @@ export default function ProveedoresPage() {
   const onSaveProveedor = async () => {
     const nextErrors = {};
     if (!proveedorForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (String(proveedorForm.telefono || '').trim() && !PHONE_REGEX.test(proveedorForm.telefono.trim())) {
+      nextErrors.telefono = 'Ingresa solo números positivos, máximo 10 dígitos.';
+    }
     if (proveedorForm.tiene_credito) {
       const diasPago = Number(proveedorForm.dias_pago || 0);
       if (!String(proveedorForm.dias_pago || '').trim()) nextErrors.dias_pago = 'Este campo es obligatorio.';
-      else if (!Number.isFinite(diasPago) || diasPago < 0) nextErrors.dias_pago = 'Ingresa un valor válido.';
+      else if (!Number.isInteger(diasPago) || diasPago < 0 || diasPago > 365) nextErrors.dias_pago = 'Ingresa un valor entre 0 y 365.';
     }
     if (!proveedorFormErrors.setErrors(nextErrors)) return;
 
@@ -189,15 +219,15 @@ export default function ProveedoresPage() {
     isSensitive: (proveedor, nextValue) => Boolean(proveedor.activo) && !nextValue && Number(proveedor.saldo_pendiente || 0) <= 0,
     onCommit: async (proveedor, nextValue) => {
       setStatusError('');
-      setFeedback('');
+      setStatusToastError('');
       await actualizar(proveedor.id, { activo: nextValue });
       await refreshList();
       setStatusToast(`Proveedor ha sido ${nextValue ? 'activado' : 'desactivado'}.`);
     },
     onError: (nextError, proveedor, nextValue) => {
       setStatusToast('');
-      setFeedback('');
-      setStatusError(nextError.message || `No se pudo ${nextValue ? 'activar' : 'desactivar'} el proveedor ${proveedor.nombre}.`);
+      setStatusError('');
+      setStatusToastError(nextError.message || `No se pudo ${nextValue ? 'activar' : 'desactivar'} el proveedor ${proveedor.nombre}.`);
     }
   });
 
@@ -205,7 +235,30 @@ export default function ProveedoresPage() {
     <div className="space-y-5">
       {statusToast ? (
         <div className="fixed right-5 top-5 z-[1200]">
-          <Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast>
+          <Toast
+            tone="success"
+            title="Operacion completada"
+            description={statusToast}
+            onClose={() => {
+              setToastVisible(false);
+              setStatusToast('');
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
+      {statusToastError ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone="danger"
+            title="No se pudo completar"
+            description={statusToastError}
+            onClose={() => {
+              setErrorToastVisible(false);
+              setStatusToastError('');
+            }}
+            className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
         </div>
       ) : null}
 
@@ -219,9 +272,9 @@ export default function ProveedoresPage() {
         )}
       />
 
-      {(statusError || error || feedback) && (
-        <Alert tone={statusError || error ? 'error' : 'success'}>
-          {statusError || error || feedback}
+      {(statusError || error) && (
+        <Alert tone="error">
+          {statusError || error}
         </Alert>
       )}
 
@@ -237,7 +290,7 @@ export default function ProveedoresPage() {
         )}
         actions={(
           <Button
-            variant="secondary"
+            variant="neutral"
             className="w-full xl:w-auto"
             onClick={() => {
               setPagina(1);
@@ -295,7 +348,12 @@ export default function ProveedoresPage() {
               </TablaCabecera>
               <TablaCuerpo>
                 {proveedoresPaginados.map((proveedor) => {
-                  const saldoPendiente = Number(proveedor.saldo_pendiente || 0);
+                  const saldoPendiente = toNumber(
+                    proveedor.saldo_pendiente
+                    ?? proveedor.saldoPendiente
+                    ?? proveedor.credito_pendiente
+                    ?? proveedor.creditoPendiente
+                  );
                   const currentChecked = proveedorStatusSwitch.resolveChecked(proveedor);
                   return (
                     <TablaFila key={proveedor.id}>
@@ -309,14 +367,15 @@ export default function ProveedoresPage() {
                         </StatusBadge>
                       </TablaCelda>
                       <TablaCelda>{Number(proveedor.dias_pago || 0)}</TablaCelda>
-                      <TablaCelda className={`text-right font-semibold ${saldoPendiente > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}`}>
-                        {formatMoney(saldoPendiente)}
+                      <TablaCelda className="text-right">
+                        <span className={getMoneyTextClass(saldoPendiente)}>
+                          {formatMoney(saldoPendiente)}
+                        </span>
                       </TablaCelda>
                       <TablaCelda>
                         <Switch
                           checked={currentChecked}
                           onChange={(checked) => {
-                            setFeedback('');
                             setStatusError('');
                             if (currentChecked && !checked && saldoPendiente > 0) {
                               setBlockedDeactivateProveedor(proveedor);
@@ -341,7 +400,7 @@ export default function ProveedoresPage() {
                             Ver
                           </TableActionButton>
                           <TableActionButton
-                            variant="warning"
+                            variant="secondary"
                             icon={<PiPencilSimple />}
                             aria-label="Editar proveedor"
                             title="Editar proveedor"
@@ -396,11 +455,15 @@ export default function ProveedoresPage() {
             />
           </Field>
 
-          <Field label="Teléfono">
+          <Field label="Teléfono" error={proveedorFormErrors.errors.telefono}>
             <Input
               className="bg-[var(--color-surface)]"
               value={proveedorForm.telefono}
-              onChange={(e) => setProveedorForm((prev) => ({ ...prev, telefono: e.target.value }))}
+              inputMode="numeric"
+              onChange={(e) => {
+                proveedorFormErrors.clearFieldError('telefono');
+                setProveedorForm((prev) => ({ ...prev, telefono: sanitizePhoneInput(e.target.value) }));
+              }}
               placeholder="0990000000"
             />
           </Field>
@@ -429,9 +492,11 @@ export default function ProveedoresPage() {
               value={proveedorForm.dias_pago}
               onChange={(e) => {
                 proveedorFormErrors.clearFieldError('dias_pago');
-                setProveedorForm((prev) => ({ ...prev, dias_pago: e.target.value }));
+                const cleaned = String(e.target.value || '').replace(/\D/g, '');
+                setProveedorForm((prev) => ({ ...prev, dias_pago: cleaned }));
               }}
               disabled={!proveedorForm.tiene_credito}
+              inputMode="numeric"
               placeholder="15"
             />
           </Field>

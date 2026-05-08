@@ -25,7 +25,7 @@ export default function BackButton({ to, children = 'Volver', onClick, className
   };
 
   return (
-    <Button type="button" variant="primary" className={className} onClick={handleClick}>
+    <Button type="button" variant="neutral" className={className} onClick={handleClick}>
       <PiArrowLeft className="text-base" />
       <span className="pl-1">{children}</span>
     </Button>

@@ -1,50 +1,58 @@
 export const colors = {
   primary: {
-    DEFAULT: '#D32F2F',
-    hover: '#B71C1C',
-    soft: '#FDECEC',
+    DEFAULT: '#EF4444',
+    hover: '#DC2626',
+    active: '#B91C1C',
+    soft: '#FEE2E2',
+    softText: '#991B1B',
     contrast: '#FFFFFF'
   },
   neutral: {
     white: '#FFFFFF',
-    background: '#F5F5F5',
+    background: '#F8FAFC',
     surface: '#FFFFFF',
-    surfaceAlt: '#FAFAFA',
+    surfaceAlt: '#F9FAFB',
+    hover: '#F3F4F6',
     border: '#E5E7EB',
     borderStrong: '#D1D5DB'
   },
   text: {
-    DEFAULT: '#1F2937',
+    DEFAULT: '#111827',
+    secondary: '#374151',
     muted: '#6B7280',
     subtle: '#9CA3AF',
     inverse: '#FFFFFF'
   },
   success: {
     DEFAULT: '#10B981',
-    hover: '#0F9F72',
-    soft: '#ECFDF5'
+    hover: '#059669',
+    soft: '#D1FAE5',
+    softText: '#065F46'
   },
   warning: {
     DEFAULT: '#F59E0B',
     hover: '#D97706',
-    soft: '#FFFBEB'
+    soft: '#FEF3C7',
+    softText: '#92400E'
   },
   danger: {
-    DEFAULT: '#DC2626',
+    DEFAULT: '#EF4444',
     hover: '#B91C1C',
-    soft: '#FEF2F2'
+    soft: '#FEE2E2',
+    softText: '#991B1B'
   },
   info: {
-    DEFAULT: '#2563EB',
-    hover: '#1D4ED8',
-    soft: '#EFF6FF'
+    DEFAULT: '#3B82F6',
+    hover: '#2563EB',
+    soft: '#DBEAFE',
+    softText: '#1E40AF'
   },
   chart: {
-    primary: '#D32F2F',
+    primary: '#EF4444',
     success: '#10B981',
     warning: '#F59E0B',
-    danger: '#DC2626',
-    info: '#2563EB',
+    danger: '#EF4444',
+    info: '#3B82F6',
     axis: '#6B7280',
     grid: '#E5E7EB'
   }
@@ -53,31 +61,39 @@ export const colors = {
 export const cssColorVariables = {
   '--color-primary': colors.primary.DEFAULT,
   '--color-primary-hover': colors.primary.hover,
+  '--color-primary-active': colors.primary.active,
   '--color-primary-soft': colors.primary.soft,
+  '--color-primary-soft-text': colors.primary.softText,
   '--color-background': colors.neutral.background,
   '--color-background-alt': colors.neutral.surfaceAlt,
   '--color-surface': colors.neutral.surface,
   '--color-surface-alt': colors.neutral.surfaceAlt,
   '--color-surface-muted': colors.neutral.background,
+  '--color-hover': colors.neutral.hover,
   '--color-border': colors.neutral.border,
   '--color-border-strong': colors.neutral.borderStrong,
   '--color-text': colors.text.DEFAULT,
+  '--color-text-secondary': colors.text.secondary,
   '--color-text-muted': colors.text.muted,
   '--color-text-subtle': colors.text.subtle,
   '--color-text-inverse': colors.text.inverse,
   '--color-success': colors.success.DEFAULT,
   '--color-success-hover': colors.success.hover,
   '--color-success-soft': colors.success.soft,
+  '--color-success-soft-text': colors.success.softText,
   '--color-warning': colors.warning.DEFAULT,
   '--color-warning-hover': colors.warning.hover,
   '--color-warning-soft': colors.warning.soft,
+  '--color-warning-soft-text': colors.warning.softText,
   '--color-danger': colors.danger.DEFAULT,
   '--color-danger-hover': colors.danger.hover,
   '--color-danger-soft': colors.danger.soft,
+  '--color-danger-soft-text': colors.danger.softText,
   '--color-info': colors.info.DEFAULT,
   '--color-info-hover': colors.info.hover,
   '--color-info-soft': colors.info.soft,
-  '--color-focus': colors.primary.DEFAULT,
+  '--color-info-soft-text': colors.info.softText,
+  '--color-focus': '#93C5FD',
   '--color-chart-primary': colors.chart.primary,
   '--color-chart-success': colors.chart.success,
   '--color-chart-warning': colors.chart.warning,

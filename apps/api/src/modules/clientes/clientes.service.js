@@ -39,6 +39,7 @@ const abonoSchema = z.object({
   monto: z.number().positive(),
   venta_id: z.number().int().positive(),
   metodo_pago: z.enum(['EFECTIVO', 'TRANSFERENCIA']).optional(),
+  banco: z.string().trim().optional(),
   referencia: z.string().optional(),
   observacion: z.string().optional()
 });
@@ -192,15 +193,26 @@ async function abono(id, body, actorUser) {
     const deudaDocumento = mapDebtDocument(deuda);
     const monto = moneyRound(parsed.data.monto);
     const metodoPago = String(parsed.data.metodo_pago || 'EFECTIVO').trim().toUpperCase();
+    const banco = String(parsed.data.banco || '').trim();
 
     if (monto > deudaDocumento.saldo) {
       throw new AppError(400, 'El abono no puede exceder el saldo del documento');
     }
+    if (metodoPago === 'TRANSFERENCIA' && !banco) {
+      throw new AppError(400, 'Selecciona el banco de la transferencia');
+    }
+
+    await configuracionService.assertPaymentMethodEnabled(metodoPago, trx);
 
     const turno = await cajaRepository.findOpenShift(trx);
     if (config.exigir_caja_abierta_para_cobros && metodoPago === 'EFECTIVO' && !turno) {
-      throw new AppError(400, 'Se requiere turno abierto para registrar cobranza de cliente');
+      throw new AppError(400, 'Para registrar abonos en efectivo debes abrir caja');
     }
+
+    const observacionAbono = [
+      parsed.data.observacion || 'Abono manual',
+      metodoPago === 'TRANSFERENCIA' && banco ? `Banco: ${banco}` : null
+    ].filter(Boolean).join(' | ');
 
     const movimiento = await repository.insertCxc(
       {
@@ -212,7 +224,7 @@ async function abono(id, body, actorUser) {
         fecha_emision: deudaDocumento.fecha_emision,
         fecha_vencimiento: deudaDocumento.fecha_vencimiento,
         referencia: parsed.data.referencia || null,
-        observacion: parsed.data.observacion || 'Abono manual'
+        observacion: observacionAbono
       },
       trx
     );
@@ -221,7 +233,6 @@ async function abono(id, body, actorUser) {
     let movimientoCaja = null;
 
     if (turno && metodoPago === 'EFECTIVO') {
-      await configuracionService.assertPaymentMethodEnabled('EFECTIVO', trx);
       const existingCash = await cajaRepository.findMovementByOrigin(
         {
           tipo: CASH_MOVEMENT_TYPES.ABONO_CLIENTE,

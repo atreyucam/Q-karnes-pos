@@ -6,8 +6,9 @@ import { parseApiError } from '../../lib/apiClient';
 import { useComprasStore } from '../../stores/comprasStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { resolveCompraStatus } from './comprasStatus';
+import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 export default function ComprasPage() {
   const { ordenes, error, listarOrdenes, cancelarOrden, cerrarOrdenParcial } = useComprasStore();
@@ -151,7 +152,7 @@ export default function ComprasPage() {
         )}
         actions={(
           <Button
-            variant="secondary"
+            variant="neutral"
             className="w-full xl:w-auto"
             onClick={() => {
               setPagina(1);
@@ -239,7 +240,7 @@ export default function ComprasPage() {
                       )}
                       {orden.estado === 'PARCIAL' && (
                         <TableActionButton
-                          variant="success"
+                          variant="primary"
                           icon={<PiCheckCircle />}
                           aria-label={`Cerrar orden ${orden.id}`}
                           title="Cerrar pendiente"
@@ -296,7 +297,7 @@ export default function ComprasPage() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={closeActionModal}>Volver</Button>
+            <Button variant="neutral" onClick={closeActionModal}>Volver</Button>
             <Button variant={actionModal.mode === 'cancelar' ? 'danger' : 'primary'} onClick={onConfirmAction} disabled={actionLoading}>
               {actionLoading ? 'Procesando...' : actionModal.mode === 'cancelar' ? 'Confirmar cancelación' : 'Cerrar orden'}
             </Button>

@@ -26,7 +26,6 @@ export function printSaleTicketDocument(ticket, options = {}) {
       <tr>
         <td style="padding:4px 6px 4px 0; vertical-align:top;">
           <div class="detail-name">${escapeHtml(row.producto_nombre)}</div>
-          <div class="detail-code">${escapeHtml(row.producto_codigo)}</div>
         </td>
         <td style="padding:4px 6px 4px 0; text-align:right; vertical-align:top; white-space:nowrap;">${escapeHtml(formatTicketQty(row.cantidad, row.unidad_medida || 'UND'))}</td>
         <td style="padding:4px 6px 4px 0; text-align:right; vertical-align:top; white-space:nowrap;">${escapeHtml(formatMoney(row.precio_unit))}</td>
@@ -118,13 +117,6 @@ export function printSaleTicketDocument(ticket, options = {}) {
             word-break: break-word;
             font-size: 11px;
           }
-          .detail-code {
-            font-size: 10px;
-            color: black;
-            text-transform: uppercase;
-            letter-spacing: .03em;
-            font-weight: 800;
-          }
           .text-right { text-align: right; }
           .footer-note {
             text-align: center;
@@ -157,7 +149,6 @@ export function printSaleTicketDocument(ticket, options = {}) {
           <div class="divider"></div>
 
           <div style="font-size:12px; font-weight:800;">
-            <div class="meta-row"><strong>Venta:</strong> #${escapeHtml(ticket.venta?.id || '-')}</div>
             <div class="meta-row"><strong>Fecha:</strong> ${escapeHtml(ticketFecha)}</div>
             <div class="meta-row"><strong>Cliente:</strong> ${escapeHtml(ticket.cliente?.nombre || 'Comprobante final')}</div>
             <div class="meta-row"><strong>Cajero:</strong> ${escapeHtml(ticket.usuario?.nombre || '-')}</div>
@@ -197,7 +188,6 @@ export function printSaleTicketDocument(ticket, options = {}) {
 
           <div class="muted footer-note">
             <div>${escapeHtml(ticket.ticket_config?.mensaje || 'Gracias por su compra')}</div>
-            <div>Impresion simulada de ticket (offline desktop)</div>
           </div>
         </div>
       </body>

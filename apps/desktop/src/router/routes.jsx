@@ -60,7 +60,9 @@ export const appRoutes = [
               { path: '/transformaciones', element: <TransformacionesListPage /> },
               { path: '/transformaciones/nueva', element: <TransformacionFormPage /> },
               { path: '/transformaciones/:id/editar', element: <TransformacionFormPage /> },
-              { path: '/transformaciones/:id', element: <TransformacionDetallePage /> }
+              { path: '/transformaciones/:id', element: <TransformacionDetallePage /> },
+              { path: '/reportes', element: <Navigate to="/reportes/resumen" replace /> },
+              { path: '/reportes/:section', element: <ReportesPage /> }
             ]
           },
           {
@@ -71,7 +73,6 @@ export const appRoutes = [
               { path: '/admin/sistema', element: <SistemaPage /> }
             ]
           },
-          { path: '/reportes', element: <ReportesPage /> },
           { path: '*', element: <Navigate to="/dashboard" replace /> }
         ]
       }

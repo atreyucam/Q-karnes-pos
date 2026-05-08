@@ -2,12 +2,12 @@ import { chartPalette, colors } from './colorTokens';
 
 export const posTokens = {
   typography: {
-    fontSans: '"Inter", "Segoe UI", "Trebuchet MS", sans-serif',
+    fontSans: '"Inter", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", sans-serif',
     screenTitle: '24px',
     sectionTitle: '20px',
-    panelTitle: '18px',
-    body: '15px',
-    bodyStrong: '15px',
+    panelTitle: '16px',
+    body: '14px',
+    bodyStrong: '14px',
     small: '12px',
     total: '32px',
     grandTotal: '36px'
@@ -32,31 +32,33 @@ export const posTokens = {
     surface: colors.neutral.surface,
     surfaceAlt: colors.neutral.surfaceAlt,
     surfaceMuted: colors.neutral.background,
+    hover: colors.neutral.hover,
     border: colors.neutral.border,
     borderStrong: colors.neutral.borderStrong,
     text: colors.text.DEFAULT,
+    textSecondary: colors.text.secondary,
     textMuted: colors.text.muted,
     textSubtle: colors.text.subtle,
-    focus: colors.primary.DEFAULT
+    focus: '#93C5FD'
   },
   radii: {
-    sm: '10px',
-    md: '14px',
-    lg: '18px',
-    xl: '24px'
+    sm: '8px',
+    md: '10px',
+    lg: '12px',
+    xl: '16px'
   },
   shadows: {
-    sm: '0 10px 30px -22px rgba(31, 41, 55, 0.28)',
-    md: '0 18px 48px -28px rgba(31, 41, 55, 0.32)',
-    lg: '0 28px 72px -36px rgba(31, 41, 55, 0.34)'
+    sm: '0 1px 2px rgba(17, 24, 39, 0.04)',
+    md: '0 8px 24px rgba(17, 24, 39, 0.10)',
+    lg: '0 24px 48px rgba(17, 24, 39, 0.16)'
   },
   motion: {
     fast: '160ms',
     normal: '240ms'
   },
   sizes: {
-    sidebarExpanded: '272px',
-    sidebarCollapsed: '88px',
-    topbarHeight: '68px'
+    sidebarExpanded: '240px',
+    sidebarCollapsed: '72px',
+    topbarHeight: '64px'
   }
 };

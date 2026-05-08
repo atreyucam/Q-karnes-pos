@@ -13,7 +13,7 @@ export default function PosShell({
   children
 }) {
   const location = useLocation();
-  const isNuevaVentaRoute = location.pathname === '/ventas/nueva' || /^\/ventas\/\d+$/.test(location.pathname);
+  const isNuevaVentaRoute = location.pathname === '/ventas/nueva';
 
   return (
     <div
@@ -34,18 +34,23 @@ export default function PosShell({
         <PosTopbar user={user} onToggleMenu={onToggleMenu} />
         <main
           className={clsx(
-            'h-screen pt-[calc(var(--topbar-height)+0.45rem)]',
-            isNuevaVentaRoute ? 'overflow-hidden pb-4' : 'overflow-y-auto pb-8'
+            'h-[calc(100dvh-var(--topbar-height))] overflow-x-hidden pt-1.5 sm:pt-2',
+            isNuevaVentaRoute ? 'overflow-hidden pb-1.5' : 'overflow-y-auto pb-8'
           )}
         >
           <section
             className={clsx(
               uiClassTokens.page.section,
-              'pt-4 sm:pt-5 lg:pt-6',
-              isNuevaVentaRoute && '!min-h-0 h-[calc(100dvh-var(--topbar-height)-1.25rem)] overflow-hidden pb-4 sm:pb-4 lg:pb-4'
+              'pt-1.5 sm:pt-2 lg:pt-2.5',
+              isNuevaVentaRoute && '!min-h-0 h-[calc(100dvh-var(--topbar-height)-0.7rem)] overflow-hidden !px-2 !pt-1.5 !pb-1.5 sm:!px-2.5 sm:!pt-2 sm:!pb-2 lg:!px-3 lg:!pt-2.5 lg:!pb-2.5'
             )}
           >
-            <div className={clsx(uiClassTokens.page.container, isNuevaVentaRoute && 'flex h-full min-h-0 flex-col overflow-hidden')}>
+            <div
+              className={clsx(
+                uiClassTokens.page.container,
+                isNuevaVentaRoute && 'flex h-full min-h-0 flex-col overflow-hidden !p-1.5 sm:!p-2 lg:!p-2.5'
+              )}
+            >
               {children}
             </div>
           </section>

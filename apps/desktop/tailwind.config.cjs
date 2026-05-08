@@ -6,7 +6,9 @@ module.exports = {
         primary: {
           DEFAULT: 'var(--color-primary)',
           hover: 'var(--color-primary-hover)',
-          soft: 'var(--color-primary-soft)'
+          active: 'var(--color-primary-active)',
+          soft: 'var(--color-primary-soft)',
+          softText: 'var(--color-primary-soft-text)'
         },
         background: {
           DEFAULT: 'var(--color-background)',
@@ -17,8 +19,10 @@ module.exports = {
           alt: 'var(--color-surface-alt)',
           muted: 'var(--color-surface-muted)'
         },
+        hover: 'var(--color-hover)',
         text: {
           DEFAULT: 'var(--color-text)',
+          secondary: 'var(--color-text-secondary)',
           muted: 'var(--color-text-muted)',
           subtle: 'var(--color-text-subtle)',
           inverse: 'var(--color-text-inverse)'
@@ -30,22 +34,26 @@ module.exports = {
         success: {
           DEFAULT: 'var(--color-success)',
           hover: 'var(--color-success-hover)',
-          soft: 'var(--color-success-soft)'
+          soft: 'var(--color-success-soft)',
+          text: 'var(--color-success-soft-text)'
         },
         warning: {
           DEFAULT: 'var(--color-warning)',
           hover: 'var(--color-warning-hover)',
-          soft: 'var(--color-warning-soft)'
+          soft: 'var(--color-warning-soft)',
+          text: 'var(--color-warning-soft-text)'
         },
         danger: {
           DEFAULT: 'var(--color-danger)',
           hover: 'var(--color-danger-hover)',
-          soft: 'var(--color-danger-soft)'
+          soft: 'var(--color-danger-soft)',
+          text: 'var(--color-danger-soft-text)'
         },
         info: {
           DEFAULT: 'var(--color-info)',
           hover: 'var(--color-info-hover)',
-          soft: 'var(--color-info-soft)'
+          soft: 'var(--color-info-soft)',
+          text: 'var(--color-info-soft-text)'
         },
         brand: 'var(--color-brand)',
         cashier: 'var(--color-cashier)',
