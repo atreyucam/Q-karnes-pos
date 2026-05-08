@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiEye, PiPencilSimple } from 'react-icons/pi';
+import { PiEye, PiPencilSimple, PiPlus } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Button,
   Card,
-  ConfirmDialog,
   EmptyState,
   Field,
   FiltersBar,
@@ -15,9 +14,7 @@ import {
   PageHeader,
   Paginador,
   Select,
-  StatusBadge,
   Switch,
-  Toast,
   TableActions,
   TableActionButton,
   Tabla,
@@ -29,7 +26,6 @@ import {
 } from '../../shared/ui';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
-import useBooleanSwitch from '../../shared/hooks/useBooleanSwitch';
 import useFormErrors from '../../shared/hooks/useFormErrors';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
@@ -57,10 +53,6 @@ const toNumber = (value) => {
   return Number(cleaned) || 0;
 };
 
-const getMoneyTextClass = (value) => (
-  toNumber(value) > 0 ? '!text-red-600 !font-bold' : '!text-gray-900 font-semibold'
-);
-
 export default function ProveedoresPage() {
   const { proveedores, error, loading, listar, crear, actualizar } = useProveedoresStore();
   const navigate = useNavigate();
@@ -69,12 +61,7 @@ export default function ProveedoresPage() {
   const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', credito: 'TODOS' });
   const [proveedorModal, setProveedorModal] = useState({ open: false, mode: 'create' });
   const [proveedorForm, setProveedorForm] = useState(emptyProveedorForm);
-  const [statusError, setStatusError] = useState('');
   const [blockedDeactivateProveedor, setBlockedDeactivateProveedor] = useState(null);
-  const [statusToast, setStatusToast] = useState('');
-  const [statusToastError, setStatusToastError] = useState('');
-  const [toastVisible, setToastVisible] = useState(false);
-  const [errorToastVisible, setErrorToastVisible] = useState(false);
   const proveedorFormErrors = useFormErrors();
 
   const refreshList = () => {
@@ -111,27 +98,6 @@ export default function ProveedoresPage() {
       setPagina(totalPaginas);
     }
   }, [pagina, totalPaginas]);
-
-  useEffect(() => {
-    if (!statusToast) return undefined;
-    setToastVisible(true);
-    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
-    const clearTimer = window.setTimeout(() => setStatusToast(''), 4000);
-    return () => {
-      window.clearTimeout(hideTimer);
-      window.clearTimeout(clearTimer);
-    };
-  }, [statusToast]);
-  useEffect(() => {
-    if (!statusToastError) return undefined;
-    setErrorToastVisible(true);
-    const hideTimer = window.setTimeout(() => setErrorToastVisible(false), 3800);
-    const clearTimer = window.setTimeout(() => setStatusToastError(''), 4000);
-    return () => {
-      window.clearTimeout(hideTimer);
-      window.clearTimeout(clearTimer);
-    };
-  }, [statusToastError]);
 
   const onChangeFiltro = (key, value) => {
     setPagina(1);
@@ -214,67 +180,22 @@ export default function ProveedoresPage() {
     }
   };
 
-  const proveedorStatusSwitch = useBooleanSwitch({
-    getValue: (proveedor) => Boolean(proveedor.activo),
-    isSensitive: (proveedor, nextValue) => Boolean(proveedor.activo) && !nextValue && Number(proveedor.saldo_pendiente || 0) <= 0,
-    onCommit: async (proveedor, nextValue) => {
-      setStatusError('');
-      setStatusToastError('');
-      await actualizar(proveedor.id, { activo: nextValue });
-      await refreshList();
-      setStatusToast(`Proveedor ha sido ${nextValue ? 'activado' : 'desactivado'}.`);
-    },
-    onError: (nextError, proveedor, nextValue) => {
-      setStatusToast('');
-      setStatusError('');
-      setStatusToastError(nextError.message || `No se pudo ${nextValue ? 'activar' : 'desactivar'} el proveedor ${proveedor.nombre}.`);
-    }
-  });
-
   return (
     <div className="space-y-5">
-      {statusToast ? (
-        <div className="fixed right-5 top-5 z-[1200]">
-          <Toast
-            tone="success"
-            title="Operacion completada"
-            description={statusToast}
-            onClose={() => {
-              setToastVisible(false);
-              setStatusToast('');
-            }}
-            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
-          />
-        </div>
-      ) : null}
-      {statusToastError ? (
-        <div className="fixed right-5 top-5 z-[1200]">
-          <Toast
-            tone="danger"
-            title="No se pudo completar"
-            description={statusToastError}
-            onClose={() => {
-              setErrorToastVisible(false);
-              setStatusToastError('');
-            }}
-            className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
-          />
-        </div>
-      ) : null}
-
       <PageHeader
         title="Proveedores"
         description="Catálogo, estado y créditos por proveedor."
         actions={(
           <Button onClick={openCreateModal}>
+            <PiPlus className="text-base" />
             Nuevo proveedor
           </Button>
         )}
       />
 
-      {(statusError || error) && (
+      {error && (
         <Alert tone="error">
-          {statusError || error}
+          {error}
         </Alert>
       )}
 
@@ -338,10 +259,10 @@ export default function ProveedoresPage() {
               <TablaCabecera>
                 <tr>
                   <TablaCelda as="th">Proveedor</TablaCelda>
-                  <TablaCelda as="th">Teléfono</TablaCelda>
+                  <TablaCelda as="th">Contacto</TablaCelda>
                   <TablaCelda as="th">Crédito</TablaCelda>
-                  <TablaCelda as="th">Pago cada (días)</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Crédito pendiente</TablaCelda>
+                  <TablaCelda as="th">Pago cada</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Deuda</TablaCelda>
                   <TablaCelda as="th">Estado</TablaCelda>
                   <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
                 </tr>
@@ -354,44 +275,52 @@ export default function ProveedoresPage() {
                     ?? proveedor.credito_pendiente
                     ?? proveedor.creditoPendiente
                   );
-                  const currentChecked = proveedorStatusSwitch.resolveChecked(proveedor);
+                  const diasPago = Number(proveedor.dias_pago || 0);
+                  const pagoCadaText = Number.isFinite(diasPago) && diasPago > 0 ? `${diasPago} días` : '—';
+                  const tieneDeuda = saldoPendiente > 0;
                   return (
                     <TablaFila key={proveedor.id}>
-                      <TablaCelda>
+                      <TablaCelda className="py-3">
                         <p className="font-semibold text-[var(--color-text)]">{proveedor.nombre}</p>
                       </TablaCelda>
-                      <TablaCelda>{proveedor.telefono || '-'}</TablaCelda>
-                      <TablaCelda>
-                        <StatusBadge tone={proveedor.tiene_credito ? 'warning' : 'neutral'}>
-                          {proveedor.tiene_credito ? 'Crédito' : 'Sin crédito'}
-                        </StatusBadge>
+                      <TablaCelda className="py-3">{proveedor.telefono || '-'}</TablaCelda>
+                      <TablaCelda className="py-3">
+                        {proveedor.tiene_credito ? (
+                          <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+                            Crédito
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                            Sin crédito
+                          </span>
+                        )}
                       </TablaCelda>
-                      <TablaCelda>{Number(proveedor.dias_pago || 0)}</TablaCelda>
-                      <TablaCelda className="text-right">
-                        <span className={getMoneyTextClass(saldoPendiente)}>
-                          {formatMoney(saldoPendiente)}
+                      <TablaCelda className="py-3">{pagoCadaText}</TablaCelda>
+                      <TablaCelda className="py-3 text-right">
+                        <span className={tieneDeuda
+                          ? 'rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]'
+                          : 'rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]'}
+                        >
+                          {tieneDeuda ? `Pendiente ${formatMoney(saldoPendiente)}` : 'Sin deuda'}
                         </span>
                       </TablaCelda>
-                      <TablaCelda>
-                        <Switch
-                          checked={currentChecked}
-                          onChange={(checked) => {
-                            setStatusError('');
-                            if (currentChecked && !checked && saldoPendiente > 0) {
-                              setBlockedDeactivateProveedor(proveedor);
-                              return;
-                            }
-                            proveedorStatusSwitch.requestChange(proveedor, checked);
-                          }}
-                          label={currentChecked ? 'Activo' : 'Inactivo'}
-                          busy={proveedorStatusSwitch.isPending(proveedor)}
-                          disabled={proveedorStatusSwitch.isPending(proveedor)}
-                        />
+                      <TablaCelda className="py-3">
+                        {proveedor.activo ? (
+                          <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                            Activo
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
+                            Inactivo
+                          </span>
+                        )}
                       </TablaCelda>
-                      <TablaCelda>
-                        <TableActions>
+                      <TablaCelda className="py-3">
+                        <div className="flex justify-end">
+                          <TableActions>
                           <TableActionButton
                             variant="neutral"
+                            className="border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]"
                             icon={<PiEye />}
                             aria-label="Ver proveedor"
                             title="Ver proveedor"
@@ -401,6 +330,7 @@ export default function ProveedoresPage() {
                           </TableActionButton>
                           <TableActionButton
                             variant="secondary"
+                            className="border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                             icon={<PiPencilSimple />}
                             aria-label="Editar proveedor"
                             title="Editar proveedor"
@@ -408,7 +338,8 @@ export default function ProveedoresPage() {
                           >
                             Editar
                           </TableActionButton>
-                        </TableActions>
+                          </TableActions>
+                        </div>
                       </TablaCelda>
                     </TablaFila>
                   );
@@ -538,17 +469,6 @@ export default function ProveedoresPage() {
           </Button>
         </div>
       </Modal>
-
-      <ConfirmDialog
-        open={Boolean(proveedorStatusSwitch.confirmState)}
-        onClose={proveedorStatusSwitch.cancelConfirm}
-        onConfirm={proveedorStatusSwitch.confirmChange}
-        title="Desactivar proveedor"
-        description={proveedorStatusSwitch.confirmState ? `Vas a desactivar al proveedor ${proveedorStatusSwitch.confirmState.item.nombre}.` : ''}
-        confirmLabel={proveedorStatusSwitch.confirmState && proveedorStatusSwitch.isPending(proveedorStatusSwitch.confirmState.item) ? 'Desactivando...' : 'Sí, desactivar'}
-        confirmVariant="danger"
-        confirmLoading={Boolean(proveedorStatusSwitch.confirmState && proveedorStatusSwitch.isPending(proveedorStatusSwitch.confirmState.item))}
-      />
 
       <Modal
         open={Boolean(blockedDeactivateProveedor)}

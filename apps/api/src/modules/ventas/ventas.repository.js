@@ -193,6 +193,19 @@ async function listCxcMovementsByVenta(ventaId, trx = db) {
     .orderBy('id', 'asc');
 }
 
+async function listCashMovementsByCxcOrigins(origenIds = [], trx = db) {
+  const normalized = (origenIds || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (!normalized.length) return [];
+
+  return trx('caja_movimientos')
+    .where({ modulo_origen: 'CXC' })
+    .whereIn('origen_id', normalized)
+    .orderBy('id', 'asc');
+}
+
 async function getReturnedQuantityBySaleDetail(ventaDetalleId, trx = db) {
   const row = await trx('devolucion_detalle')
     .where({ venta_detalle_id: ventaDetalleId })
@@ -317,6 +330,7 @@ module.exports = {
   getSaleTicket,
   listCxcAbonosByVenta,
   listCxcMovementsByVenta,
+  listCashMovementsByCxcOrigins,
   getReturnedQuantityBySaleDetail,
   getReturnStatsBySaleDetail,
   getRefundTotalsByVenta,

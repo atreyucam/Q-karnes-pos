@@ -17,6 +17,7 @@ import {
   PageHeader,
   Paginador,
   Select,
+  Tabs,
   TableActions,
   TableActionButton,
   Tabla,
@@ -28,8 +29,8 @@ import {
 } from '../../ui';
 import { useInventarioStore } from '../../stores/inventarioStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
-import { formatMoney } from '../../lib/formatMoney';
-import { formatQtyByUnit, getUnidad, sanitizeQtyInput } from '../../lib/formatQty';
+import { formatCurrency, formatNumber, formatWeight } from '../../lib/formatNumber';
+import { getUnidad, sanitizeQtyInput } from '../../lib/formatQty';
 import { fetchCategorias } from '../../services/catalogoService';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
@@ -38,8 +39,8 @@ const MODAL_PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 function formatInventoryQty(value, unidad, options = {}) {
   const unit = getUnidad(unidad);
-  if (options.appendUnit) return `${formatQtyByUnit(value, unit, { fixedLB: unit !== 'UND' })} ${unit}`;
-  return formatQtyByUnit(value, unit, { fixedLB: unit !== 'UND' });
+  if (options.appendUnit) return formatWeight(value, unit);
+  return formatNumber(value);
 }
 
 function sanitizeCostInput(value) {
@@ -60,24 +61,10 @@ function hasInventoryAlert(row) {
   return Number(row?.stock_actual || 0) <= Number(row?.stock_minimo || 0);
 }
 
-const normalizeText = (value = '') => String(value)
-  .trim()
-  .toLowerCase()
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '');
-
-function getInventoryRowClass(alerta) {
-  const text = normalizeText(alerta);
-  if (text.includes('sin stock')) return '!bg-red-50';
-  if (text.includes('bajo minimo')) return '!bg-amber-50';
-  return '';
-}
-
-function getStockVisibleClass(alerta) {
-  const text = normalizeText(alerta);
-  if (text.includes('sin stock')) return '!text-red-600 !font-bold';
-  if (text.includes('bajo minimo')) return '!text-amber-700 !font-bold';
-  return '!text-gray-900 font-semibold';
+function getInventoryStatus(row) {
+  if (Number(row?.stock_actual || 0) <= 0) return { label: 'Sin stock', tone: 'danger' };
+  if (hasInventoryAlert(row)) return { label: 'Bajo mínimo', tone: 'warning' };
+  return { label: 'Normal', tone: 'normal' };
 }
 
 function getInventoryAlertPriority(row) {
@@ -89,9 +76,7 @@ function getInventoryAlertPriority(row) {
 }
 
 function resolveAlertLabel(row) {
-  if (Number(row?.stock_actual || 0) <= 0) return 'Sin stock';
-  if (hasInventoryAlert(row)) return 'Bajo mínimo';
-  return 'OK';
+  return getInventoryStatus(row).label;
 }
 
 function resolveOrigenLabel(row) {
@@ -607,29 +592,29 @@ export default function InventarioPage() {
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <MetricTile icon={PiPackage} value={disponible.length} label="Productos activos" tone="primary" />
-          <MetricTile icon={PiWarningCircle} value={alertas.length} label="Alertas" tone="warning" />
-          <MetricTile icon={PiClipboardText} value={conteos.length} label="Conteos" tone="success" />
-          <MetricTile icon={PiWaves} value={mermas.length} label="Mermas" tone="danger" />
-          <MetricTile icon={PiArrowsClockwise} value={formatMoney(totalValorInventario)} label="Valor visible" tone="info" />
+          <MetricTile icon={PiWarningCircle} value={formatNumber(alertas.length)} label="Alertas" tone="warning" />
+          <MetricTile icon={PiArrowsClockwise} value={formatCurrency(totalValorInventario)} label="Valor inventario" tone="info" />
+          <MetricTile icon={PiPackage} value={formatNumber(disponible.length)} label="Productos" tone="primary" />
+          <MetricTile icon={PiClipboardText} value={formatNumber(conteos.length)} label="Conteos" tone="success" />
+          <MetricTile icon={PiWaves} value={formatNumber(mermas.length)} label="Mermas" tone="danger" />
         </div>
       </section>
 
       <Card className="space-y-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
-            {[
+          <Tabs
+            value={tab}
+            onChange={(nextTab) => setTab(nextTab)}
+            items={[
               { key: 'stock', label: 'Stock actual' },
               { key: 'movimientos', label: 'Movimientos / Kardex' },
               { key: 'conteos', label: 'Conteos' },
               { key: 'ajustes', label: 'Ajustes' },
               { key: 'mermas', label: 'Mermas' }
-            ].map((item) => (
-              <Button key={item.key} type="button" variant={tab === item.key ? 'primary' : 'secondary'} onClick={() => setTab(item.key)}>
-                {item.label}
-              </Button>
-            ))}
-          </div>
+            ]}
+            className="w-full"
+            listClassName="flex-wrap"
+          />
         </div>
 
         {tab === 'stock' && (
@@ -693,13 +678,12 @@ export default function InventarioPage() {
             <tr>
               {tab === 'stock' && (
                 <>
+                  <TablaCelda as="th" className="w-3 px-0" aria-hidden />
                   <TablaCelda as="th">Producto</TablaCelda>
-                  <TablaCelda as="th">Unidad</TablaCelda>
                   <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
                   <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
                   <TablaCelda as="th" className="text-right">Valor visible</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Stock mínimo</TablaCelda>
-                  <TablaCelda as="th">Alerta</TablaCelda>
+                  <TablaCelda as="th">Estado Alerta</TablaCelda>
                   <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
                 </>
               )}
@@ -750,7 +734,7 @@ export default function InventarioPage() {
           <TablaCuerpo>
             {pagedRows.length === 0 && (
               <TablaFila>
-                <TablaCelda colSpan={tab === 'stock' ? 8 : tab === 'movimientos' ? 8 : tab === 'conteos' ? 8 : tab === 'ajustes' ? 6 : 4}>
+                <TablaCelda colSpan={tab === 'stock' ? 7 : tab === 'movimientos' ? 8 : tab === 'conteos' ? 8 : tab === 'ajustes' ? 6 : 4}>
                   <EmptyState title="Sin registros" description="No hay datos para la vista actual." />
                 </TablaCelda>
               </TablaFila>
@@ -758,39 +742,37 @@ export default function InventarioPage() {
 
             {pagedRows.map((row) => {
               const alertaLabel = tab === 'stock' ? resolveAlertLabel(row) : '';
+              const stockStatus = tab === 'stock' ? getInventoryStatus(row) : null;
+              const statusAccentClass = stockStatus?.tone === 'danger'
+                ? 'bg-[#d72c0d]'
+                : stockStatus?.tone === 'warning'
+                  ? 'bg-[#b98900]'
+                  : 'bg-[#c4cdd5]';
               return (
-              <TablaFila key={`${tab}-${row.id}`} className={tab === 'stock' ? getInventoryRowClass(alertaLabel) : ''}>
+              <TablaFila key={`${tab}-${row.id}`} className="hover:!bg-[#fafafa] hover:outline hover:outline-1 hover:outline-[#dfe3e8]">
                 {tab === 'stock' && (
                   <>
+                    <TablaCelda className="w-3 px-0">
+                      <span className={`block h-14 w-[3px] rounded-r ${statusAccentClass}`} aria-hidden />
+                    </TablaCelda>
                     <TablaCelda className="font-semibold text-[var(--color-text)]">
-                      <div className="flex items-center gap-2">
-                        {hasInventoryAlert(row) ? (
-                          <PiWarningCircle
-                            className={`shrink-0 text-[1.2rem] ${Number(row.stock_actual || 0) <= 0 ? 'text-[var(--color-danger)]' : 'text-warning'}`}
-                            title={Number(row.stock_actual || 0) <= 0 ? 'Sin stock' : 'Stock bajo el mínimo'}
-                            aria-label={Number(row.stock_actual || 0) <= 0 ? 'Sin stock' : 'Stock bajo el mínimo'}
-                          />
-                        ) : null}
-                        <div>
-                          <p>{row.codigo} - {row.nombre}</p>
-                          <p className="text-xs font-normal text-[var(--color-text-muted)]">{row.categoria_nombre || 'Sin categoría'}</p>
-                        </div>
+                      <div>
+                        <p>{row.nombre}</p>
+                        <p className="text-xs font-normal text-[var(--color-text-muted)]">{row.categoria_nombre || 'Sin categoría'}</p>
                       </div>
                     </TablaCelda>
-                    <TablaCelda>{getUnidad(row.unidad_medida || row.unidad || 'UND')}</TablaCelda>
                     <TablaCelda className="text-right">
-                      <span className={getStockVisibleClass(alertaLabel)}>
-                        {formatInventoryQty(row.stock_actual, row.unidad_medida || row.unidad)}
-                      </span>
+                      <div className="font-semibold text-[var(--color-text)]">{formatInventoryQty(row.stock_actual, row.unidad_medida || row.unidad, { appendUnit: true })}</div>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">Mín: {formatInventoryQty(row.stock_minimo, row.unidad_medida || row.unidad, { appendUnit: true })}</p>
                     </TablaCelda>
-                    <TablaCelda className="text-right">{formatMoney(row.costo_promedio)}</TablaCelda>
-                    <TablaCelda className="text-right">{formatMoney(getInventoryValue(row))}</TablaCelda>
-                    <TablaCelda className="text-right">{formatInventoryQty(row.stock_minimo, row.unidad_medida || row.unidad)}</TablaCelda>
+                    <TablaCelda className="text-right">{formatCurrency(row.costo_promedio)}</TablaCelda>
+                    <TablaCelda className="text-right">{formatCurrency(getInventoryValue(row))}</TablaCelda>
                     <TablaCelda>{alertaLabel}</TablaCelda>
                     <TablaCelda>
                       <TableActions>
                         <TableActionButton
-                          variant="secondary"
+                          variant="neutral"
+                          className="border-[#dfe3e8] bg-white hover:bg-[#f6f6f7]"
                           icon={<PiPencilSimple />}
                           aria-label={`Editar ${row.nombre}`}
                           title="Editar producto"
@@ -825,8 +807,8 @@ export default function InventarioPage() {
                         ? '-'
                         : formatInventoryQty(row.saldo_resultante, row.unidad_medida, { appendUnit: true })}
                     </TablaCelda>
-                    <TablaCelda className="text-right">{row.costo_unitario == null ? '-' : formatMoney(row.costo_unitario)}</TablaCelda>
-                    <TablaCelda className="text-right">{row.costo_total == null ? '-' : formatMoney(row.costo_total)}</TablaCelda>
+                    <TablaCelda className="text-right">{row.costo_unitario == null ? '-' : formatCurrency(row.costo_unitario)}</TablaCelda>
+                    <TablaCelda className="text-right">{row.costo_total == null ? '-' : formatCurrency(row.costo_total)}</TablaCelda>
                   </>
                 )}
 
@@ -836,8 +818,8 @@ export default function InventarioPage() {
                     <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
                     <TablaCelda>{row.estado}</TablaCelda>
                     <TablaCelda>{row.usuario_nombre || '-'}</TablaCelda>
-                    <TablaCelda className="text-right">{row.items_count}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{Number(row.diferencia_total || 0).toFixed(3)}</TablaCelda>
+                    <TablaCelda className="text-right">{formatNumber(row.items_count)}</TablaCelda>
+                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatNumber(row.diferencia_total)}</TablaCelda>
                     <TablaCelda>{row.observacion || '-'}</TablaCelda>
                     <TablaCelda>
                       <TableActions>
@@ -867,8 +849,8 @@ export default function InventarioPage() {
                     <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
                       {formatInventoryQty(Number(row.cantidad || 0) * Number(row.signo || 1), row.unidad_medida, { appendUnit: true })}
                     </TablaCelda>
-                    <TablaCelda className="text-right">{row.costo_unitario == null ? '-' : formatMoney(row.costo_unitario)}</TablaCelda>
-                    <TablaCelda className="text-right">{row.costo_total == null ? '-' : formatMoney(row.costo_total)}</TablaCelda>
+                    <TablaCelda className="text-right">{row.costo_unitario == null ? '-' : formatCurrency(row.costo_unitario)}</TablaCelda>
+                    <TablaCelda className="text-right">{row.costo_total == null ? '-' : formatCurrency(row.costo_total)}</TablaCelda>
                   </>
                 )}
 

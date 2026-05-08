@@ -187,6 +187,32 @@ function parseTransferMetadataFromVenta(venta = {}) {
   };
 }
 
+function parseBankFromObservation(observacion = '') {
+  const match = String(observacion || '').match(/(?:^|\|)\s*Banco\s*:\s*([^|]+)/i);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function parseReferenceFromObservation(observacion = '') {
+  const match = String(observacion || '').match(/(?:^|\|)\s*Ref(?:erencia)?\s*:\s*([^|]+)/i);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function resolveAbonoPaymentCode(abono, cashMovement) {
+  const taggedCode = toUpper(extractPaymentCodeTag(abono?.observacion));
+  const cashCode = toUpper(cashMovement?.metodo_pago);
+  if (taggedCode) return taggedCode;
+  if (cashCode) return cashCode;
+
+  const inferredBank = parseBankFromObservation(abono?.observacion);
+  const inferredRef = parseReferenceFromObservation(abono?.observacion);
+  const hasTransferHint = Boolean(
+    inferredBank
+    || inferredRef
+    || String(abono?.referencia || '').trim()
+  );
+  return hasTransferHint ? PAYMENT_CODES.TRANSFERENCIA : PAYMENT_CODES.EFECTIVO;
+}
+
 function buildTicketNumber(prefix, ventaId) {
   const safePrefix = String(prefix || 'TK').trim().toUpperCase() || 'TK';
   return `${safePrefix}-${String(ventaId).padStart(6, '0')}`;
@@ -928,10 +954,16 @@ async function listVentas(query = {}) {
 async function getVenta(id) {
   const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(id));
   if (!pack) throw new AppError(404, 'Venta no encontrada');
-  const [abonos, cxcMovements] = await Promise.all([
+  const [abonosRaw, cxcMovements] = await Promise.all([
     repository.listCxcAbonosByVenta(id),
     repository.listCxcMovementsByVenta(id)
   ]);
+  const cashMovements = await repository.listCashMovementsByCxcOrigins(
+    abonosRaw.map((row) => row.id)
+  );
+  const cashByCxcOrigin = new Map(
+    cashMovements.map((row) => [Number(row.origen_id), row])
+  );
 
   const saldoCreditoCentavos = (cxcMovements || []).reduce((acc, row) => {
     const cents = moneyToCents(row.monto ?? 0, 'monto');
@@ -942,6 +974,50 @@ async function getVenta(id) {
 
   const saldoCredito = centsToMoney(Math.max(0, saldoCreditoCentavos));
   const transferMeta = parseTransferMetadataFromVenta(pack.venta);
+  const abonos = (abonosRaw || []).map((abono) => {
+    const cashMovement = cashByCxcOrigin.get(Number(abono.id));
+    const metodoPago = resolveAbonoPaymentCode(abono, cashMovement);
+    const banco = parseBankFromObservation(abono.observacion);
+    const referenciaFromObservation = parseReferenceFromObservation(abono.observacion);
+    const referencia = String(abono.referencia || '').trim() || referenciaFromObservation || null;
+
+    return {
+      ...abono,
+      metodo_pago: metodoPago,
+      metodo_pago_label: paymentLabelFromCode(metodoPago),
+      banco: banco || null,
+      referencia
+    };
+  });
+
+  const pagosInicialesReales = (pack.pagos || [])
+    .filter((row) => {
+      const tipo = toUpper(row?.tipo);
+      const metodoCodigo = toUpper(row?.metodo_codigo);
+      return !(
+        tipo === PAYMENT_TYPES.CREDITO
+        || metodoCodigo === PAYMENT_CODES.CREDITO_CLIENTE
+      );
+    });
+
+  const pagosInicialesRealesCentavos = pagosInicialesReales.reduce(
+    (acc, row) => acc + centsFromStored(row, 'monto_centavos', 'monto'),
+    0
+  );
+  const creditoInicialCentavos = Number(pack.resumen_pago?.credito_centavos || 0);
+  const abonosCentavos = abonos.reduce(
+    (acc, row) => acc + moneyToCents(row?.monto ?? 0, 'abono.monto'),
+    0
+  );
+  const totalVentaCentavos = Number(pack.venta.total_centavos || 0);
+  const pagadoRealCentavos = Math.max(
+    0,
+    Math.min(totalVentaCentavos, pagosInicialesRealesCentavos + abonosCentavos)
+  );
+  const saldoPendienteCentavos = Math.max(0, totalVentaCentavos - pagadoRealCentavos);
+  const estadoCredito = creditoInicialCentavos <= 0
+    ? null
+    : (saldoPendienteCentavos <= 0 ? 'PAGADO' : 'PENDIENTE');
 
   const pagos = (pack.pagos || []).map((row) => {
     const tipo = toUpper(row?.tipo);
@@ -963,7 +1039,21 @@ async function getVenta(id) {
       ...pack,
       pagos,
       credito: {
-        saldo_pendiente: saldoCredito
+        saldo_pendiente: saldoCredito,
+        credito_inicial: centsToMoney(creditoInicialCentavos),
+        estado: estadoCredito
+      },
+      resumen_financiero: {
+        total: centsToMoney(totalVentaCentavos),
+        pagado_real: centsToMoney(pagadoRealCentavos),
+        saldo_pendiente: centsToMoney(saldoPendienteCentavos),
+        credito_inicial: centsToMoney(creditoInicialCentavos),
+        pagos_iniciales_reales: centsToMoney(pagosInicialesRealesCentavos),
+        abonos_reales: centsToMoney(abonosCentavos),
+        total_centavos: totalVentaCentavos,
+        pagado_real_centavos: pagadoRealCentavos,
+        saldo_pendiente_centavos: saldoPendienteCentavos,
+        credito_inicial_centavos: creditoInicialCentavos
       },
       abonos
     }

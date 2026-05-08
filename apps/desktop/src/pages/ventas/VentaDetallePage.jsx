@@ -33,6 +33,7 @@ function isUsefulValue(value) {
 function formatMetodoPagoLabel(value) {
   const text = String(value || '').replace(/_/g, ' ').trim().toLowerCase();
   if (!text) return 'Metodo de pago';
+  if (text.includes('inicial')) return 'Crédito inicial';
   if (text.includes('efectivo')) return 'Efectivo';
   if (text.includes('transferencia')) return 'Transferencia';
   if (text.includes('credito') || text.includes('crédito')) return 'Crédito cliente';
@@ -51,9 +52,14 @@ function formatFechaCompacta(value) {
 }
 
 function buildPagoDetalle(pago) {
+  if (pago?.kind === 'CREDITO_INICIAL') {
+    const saldoInicial = Number(pago?.saldo_inicial ?? pago?.monto ?? 0);
+    return `Saldo inicial pendiente: ${formatMoney(saldoInicial)}`;
+  }
+
   const raw = `${String(pago?.tipo || '')} ${String(pago?.metodo || '')}`.toLowerCase();
   const isTransferencia = raw.includes('transferencia');
-  const isCredito = raw.includes('credito') || raw.includes('crédito');
+  const isCredito = raw.includes('credito') || raw.includes('crédito') || pago?.kind === 'ABONO_CREDITO';
 
   if (isTransferencia) {
     const parts = [];
@@ -63,8 +69,11 @@ function buildPagoDetalle(pago) {
   }
 
   if (isCredito) {
+    if (isUsefulValue(pago?.observacion)) return String(pago.observacion);
+    if (isUsefulValue(pago?.referencia)) return String(pago.referencia);
     const saldo = Number(pago?.saldo || 0);
     if (Number.isFinite(saldo) && saldo > 0) return `Saldo pendiente: ${formatMoney(saldo)}`;
+    return 'Abono a crédito';
   }
 
   return '';
@@ -137,6 +146,7 @@ export default function VentaDetallePage() {
   );
 
   const resumenPago = ventaDetalle?.resumen_pago || null;
+  const resumenFinanciero = ventaDetalle?.resumen_financiero || null;
   const metodoPagoLabel = resumenPago?.label || '-';
 
   const devolucionesRows = useMemo(
@@ -149,17 +159,29 @@ export default function VentaDetallePage() {
     [devoluciones?.detalle]
   );
 
-  const ventaAbonos = useMemo(
-    () => (Array.isArray(ventaDetalle?.abonos) ? ventaDetalle.abonos : []),
-    [ventaDetalle?.abonos]
-  );
+  const ventaAbonos = useMemo(() => {
+    if (!Array.isArray(ventaDetalle?.abonos)) return [];
+    return ventaDetalle.abonos.map((abono) => ({
+      ...abono,
+      metodo_pago: abono.metodo_pago || 'EFECTIVO',
+      metodo_pago_label: abono.metodo_pago_label || formatMetodoPagoLabel(abono.metodo_pago || 'Efectivo')
+    }));
+  }, [ventaDetalle?.abonos]);
 
   const movimientosPagoRows = useMemo(() => {
-    const pagosBase = pagos.map((row) => ({
+    const pagosBase = pagos
+      .filter((row) => {
+        const tipo = String(row?.tipo || '').toUpperCase();
+        const metodoCodigo = String(row?.metodo_codigo || '').toUpperCase();
+        return tipo !== 'CREDITO' && metodoCodigo !== 'CREDITO_CLIENTE';
+      })
+      .map((row) => ({
       id: `pago-${row.id}`,
       fecha: row.fecha || row.fecha_emision || venta?.fecha || null,
       tipo: String(row.tipo || '').toUpperCase(),
+      kind: 'PAGO_REAL',
       metodo: resolveMetodoLabel(row.metodo_codigo || row.tipo || '-'),
+      label: formatMetodoPagoLabel(row.metodo_codigo || row.tipo || '-'),
       monto: Number(row.monto || 0),
       referencia: row.referencia || row.observacion || '',
       banco: row.banco || row.banco_nombre || row.entidad || '',
@@ -169,20 +191,44 @@ export default function VentaDetallePage() {
     const abonosCredito = ventaAbonos.map((abono) => ({
       id: `abono-${abono.id}`,
       fecha: abono.fecha || abono.fecha_emision || venta?.fecha || null,
-      tipo: 'CREDITO',
-      metodo: resolveMetodoLabel(abono.metodo_pago || abono.metodo || 'CREDITO'),
+      tipo: String(abono.metodo_pago || '').toUpperCase() === 'TRANSFERENCIA' ? 'TRANSFERENCIA' : 'CONTADO',
+      kind: 'ABONO_CREDITO',
+      metodo: resolveMetodoLabel(abono.metodo_pago || abono.metodo || 'EFECTIVO'),
+      label: formatMetodoPagoLabel(abono.metodo_pago_label || abono.metodo_pago || 'Efectivo'),
       monto: Number(abono.monto || 0),
-      referencia: abono.observacion || abono.referencia || '',
+      referencia: abono.referencia || '',
+      observacion: abono.observacion || '',
       banco: abono.banco || abono.banco_nombre || '',
       saldo: abono.saldo_pendiente ?? abono.saldo ?? null
     }));
 
-    return [...pagosBase, ...abonosCredito].sort((a, b) => {
+    const creditoInicialMonto = Number(
+      resumenFinanciero?.credito_inicial
+      ?? ventaDetalle?.credito?.credito_inicial
+      ?? 0
+    );
+    const creditoInicial = creditoInicialMonto > 0
+      ? [{
+          id: `credito-inicial-${ventaId}`,
+          fecha: venta?.fecha || null,
+          tipo: 'CREDITO_INICIAL',
+          kind: 'CREDITO_INICIAL',
+          metodo: 'Crédito inicial',
+          label: 'Crédito inicial',
+          monto: creditoInicialMonto,
+          referencia: '',
+          banco: '',
+          saldo: null,
+          saldo_inicial: creditoInicialMonto
+        }]
+      : [];
+
+    return [...pagosBase, ...abonosCredito, ...creditoInicial].sort((a, b) => {
       const fechaA = a.fecha ? new Date(a.fecha).getTime() : 0;
       const fechaB = b.fecha ? new Date(b.fecha).getTime() : 0;
       return fechaB - fechaA;
     });
-  }, [pagos, ventaAbonos, venta, ventaId]);
+  }, [pagos, resumenFinanciero?.credito_inicial, venta, ventaAbonos, ventaDetalle?.credito?.credito_inicial, ventaId]);
 
   const canReturn =
     Boolean(venta) && ![SALE_STATUS.ANULADA, SALE_STATUS.DEVUELTA_TOTAL].includes(venta.estado);
@@ -204,10 +250,21 @@ export default function VentaDetallePage() {
   const descuentoVenta = Number(venta?.descuento || 0);
   const totalVenta = Number(venta?.total || 0);
 
-  const pagadoTotal = useMemo(
-    () => movimientosPagoRows.reduce((acc, row) => acc + Number(row.monto || 0), 0),
-    [movimientosPagoRows]
-  );
+  const pagadoTotal = useMemo(() => {
+    if (resumenFinanciero && Number.isFinite(Number(resumenFinanciero.pagado_real))) {
+      return Number(resumenFinanciero.pagado_real || 0);
+    }
+    return movimientosPagoRows
+      .filter((row) => row.kind !== 'CREDITO_INICIAL')
+      .reduce((acc, row) => acc + Number(row.monto || 0), 0);
+  }, [movimientosPagoRows, resumenFinanciero]);
+
+  const saldoPendienteVenta = useMemo(() => {
+    if (resumenFinanciero && Number.isFinite(Number(resumenFinanciero.saldo_pendiente))) {
+      return Number(resumenFinanciero.saldo_pendiente || 0);
+    }
+    return Math.max(0, totalVenta - pagadoTotal);
+  }, [resumenFinanciero, totalVenta, pagadoTotal]);
 
   const cambioTotal = useMemo(() => {
     let found = false;
@@ -454,12 +511,14 @@ export default function VentaDetallePage() {
                   <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Total</span>
                   <span className="text-xl font-black text-[var(--color-text)]">{formatMoney(totalVenta)}</span>
                 </div>
-                {movimientosPagoRows.length > 0 ? (
-                  <div className="flex items-center justify-between">
-                    <span className="text-[var(--color-text-secondary)]">Pagado</span>
-                    <span className="font-semibold text-[var(--color-text)]">{formatMoney(pagadoTotal)}</span>
-                  </div>
-                ) : null}
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--color-text-secondary)]">Pagado</span>
+                  <span className="font-semibold text-[var(--color-text)]">{formatMoney(pagadoTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--color-text-secondary)]">Saldo pendiente</span>
+                  <span className="font-semibold text-[var(--color-text)]">{formatMoney(saldoPendienteVenta)}</span>
+                </div>
                 {cambioTotal !== null ? (
                   <div className="flex items-center justify-between">
                     <span className="text-[var(--color-text-secondary)]">Cambio</span>
@@ -481,7 +540,7 @@ export default function VentaDetallePage() {
                     <article key={row.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2">
                       <div className="flex items-center justify-between gap-2">
                         <p className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">
-                          {formatMetodoPagoLabel(row.metodo || row.tipo)}
+                          {row.label || formatMetodoPagoLabel(row.metodo || row.tipo)}
                         </p>
                         <p className="shrink-0 text-right text-sm font-bold text-[var(--color-text)]">
                           {formatMoney(row.monto || 0)}

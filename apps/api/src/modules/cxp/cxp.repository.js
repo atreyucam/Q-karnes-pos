@@ -112,6 +112,19 @@ async function listPagosByProveedor(proveedorId, trx = db) {
     .orderBy('cm.id', 'desc');
 }
 
+async function listCashMovementsByCxpOrigins(origenIds = [], trx = db) {
+  const normalized = (origenIds || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (!normalized.length) return [];
+
+  return trx('caja_movimientos')
+    .where({ modulo_origen: 'CXP' })
+    .whereIn('origen_id', normalized)
+    .orderBy('id', 'asc');
+}
+
 module.exports = {
   getProveedorById,
   getFacturaById,
@@ -122,5 +135,6 @@ module.exports = {
   getMovimientoById,
   findMovimientoByReference,
   listFacturasProveedor,
-  listPagosByProveedor
+  listPagosByProveedor,
+  listCashMovementsByCxpOrigins
 };

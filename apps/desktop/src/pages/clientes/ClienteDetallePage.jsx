@@ -12,6 +12,7 @@ import {
   Modal,
   PageHeader,
   Paginador,
+  DeactivateEntityDialogs,
   Select,
   StatusBadge,
   Switch,
@@ -43,6 +44,11 @@ const emptyClienteForm = {
   activo: true
 };
 
+const PAYMENT_METHOD_LABELS = {
+  EFECTIVO: 'Efectivo',
+  TRANSFERENCIA: 'Transferencia'
+};
+
 function sanitizeCedulaInput(value) {
   return String(value || '').replace(/[^0-9]/g, '').slice(0, 10);
 }
@@ -56,7 +62,13 @@ export default function ClienteDetallePage() {
   const clienteId = Number(id);
   const [pagina, setPagina] = useState(1);
   const [modalAbono, setModalAbono] = useState(null);
-  const [abonoForm, setAbonoForm] = useState({ monto: '', metodo_pago: 'EFECTIVO', observacion: '' });
+  const [abonoForm, setAbonoForm] = useState({
+    monto: '',
+    metodo_pago: 'EFECTIVO',
+    banco: '',
+    referencia: '',
+    observacion: ''
+  });
   const [abonoError, setAbonoError] = useState('');
   const [clienteModal, setClienteModal] = useState({ open: false, mode: 'edit' });
   const [clienteForm, setClienteForm] = useState(emptyClienteForm);
@@ -67,6 +79,7 @@ export default function ClienteDetallePage() {
   const [toastVisible, setToastVisible] = useState(false);
   const clienteFormErrors = useFormErrors();
   const abonoFormErrors = useFormErrors();
+  const saldoCliente = Number(resumen?.saldo || 0);
 
   const loadData = async () => {
     await Promise.all([detalle(clienteId), cargarFacturas(clienteId), creditoResumen(clienteId)]);
@@ -118,7 +131,7 @@ export default function ClienteDetallePage() {
 
   const abrirModalAbono = (factura) => {
     setModalAbono(factura);
-    setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', observacion: '' });
+    setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', banco: '', referencia: '', observacion: '' });
     setAbonoError('');
     abonoFormErrors.resetErrors();
   };
@@ -143,20 +156,38 @@ export default function ClienteDetallePage() {
       return;
     }
 
+    const metodo = String(abonoForm.metodo_pago || '').toUpperCase();
+    if (metodo === 'TRANSFERENCIA' && !String(abonoForm.banco || '').trim()) {
+      nextErrors.banco = 'Selecciona el banco de la transferencia.';
+    }
+    if (!abonoFormErrors.setErrors(nextErrors)) return;
+
     abonoFormErrors.resetErrors();
 
     await abonar(clienteId, {
       monto,
       venta_id: modalAbono.id,
-      metodo_pago: abonoForm.metodo_pago,
+      metodo_pago: metodo,
+      banco: metodo === 'TRANSFERENCIA' ? abonoForm.banco || undefined : undefined,
+      referencia: metodo === 'TRANSFERENCIA' ? abonoForm.referencia || undefined : undefined,
       observacion: abonoForm.observacion || undefined
     });
 
     setModalAbono(null);
-    setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', observacion: '' });
+    setAbonoForm({ monto: '', metodo_pago: 'EFECTIVO', banco: '', referencia: '', observacion: '' });
     setAbonoError('');
     await loadData();
   };
+
+  const saldoActualAbono = useMemo(
+    () => Math.min(Number(modalAbono?.credito_pendiente || 0), Number(resumen?.saldo || 0)),
+    [modalAbono?.credito_pendiente, resumen?.saldo]
+  );
+
+  const saldoPosterior = useMemo(() => {
+    const monto = Number(abonoForm.monto || 0);
+    return Math.max(0, saldoActualAbono - (Number.isFinite(monto) ? monto : 0));
+  }, [abonoForm.monto, saldoActualAbono]);
 
   const openEditModal = () => {
     if (!clienteDetalle) return;
@@ -186,7 +217,7 @@ export default function ClienteDetallePage() {
     else if (!/^\d{10}$/.test(clienteForm.cedula)) nextErrors.cedula = 'La cédula debe tener 10 dígitos numéricos.';
     if (!clienteFormErrors.setErrors(nextErrors)) return;
 
-    const saldoPendiente = Number(resumen?.saldo || 0);
+    const saldoPendiente = saldoCliente;
     const estabaActivo = Boolean(clienteDetalle?.activo);
     const quiereDesactivar = estabaActivo && !clienteForm.activo;
 
@@ -214,7 +245,7 @@ export default function ClienteDetallePage() {
     if (!clienteDetalle) return;
 
     if (clienteDetalle.activo) {
-      if (Number(resumen?.saldo || 0) > 0) {
+      if (saldoCliente > 0) {
         setBlockedDeactivateOpen(true);
         return;
       }
@@ -375,7 +406,8 @@ export default function ClienteDetallePage() {
                         Ver
                       </TableActionButton>
                       <TableActionButton
-                        variant="primary"
+                        variant="success"
+                        className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
                         icon={<PiCurrencyDollar />}
                         aria-label="Registrar abono"
                         title={sinPendiente ? 'Sin saldo pendiente' : 'Registrar abono'}
@@ -487,19 +519,31 @@ export default function ClienteDetallePage() {
       <Modal open={Boolean(modalAbono)} onClose={() => setModalAbono(null)} maxWidthClass="max-w-3xl" panelClassName="p-5">
         <div className="ui-modal-header">
           <div className="ui-modal-header-copy">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Registrar abono</h3>
-            <p className="text-xl font-bold text-[var(--color-text)]">{clienteDetalle?.nombre || '-'}</p>
-            <p className="text-base font-semibold text-[var(--color-text-muted)]">
-              Saldo actual: {formatMoney(Math.min(Number(modalAbono?.credito_pendiente || 0), Number(resumen?.saldo || 0)))}
-            </p>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Abonar crédito</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Registra un pago parcial o total del saldo pendiente.</p>
           </div>
           <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setModalAbono(null)}>
             X
           </Button>
         </div>
 
-        <p className="mt-1 text-sm text-[var(--color-text-muted)]">Factura {modalAbono?.referencia || `#${modalAbono?.id || ''}`}</p>
-        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Cliente</p>
+            <p className="text-lg font-semibold text-[var(--color-text)]">{clienteDetalle?.nombre || '-'}</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Teléfono: {clienteDetalle?.telefono || '-'}</p>
+            <p className="text-sm font-semibold text-[var(--color-text)]">Crédito pendiente: {formatMoney(saldoActualAbono)}</p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Documento con deuda</p>
+            <div className="inline-flex rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+              {`Venta #${modalAbono?.id || ''} • Pendiente ${formatMoney(saldoActualAbono)}`}
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">{modalAbono?.referencia || 'Factura sin referencia'}</p>
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-[var(--color-text-muted)]">
           {configuracion?.exigir_caja_abierta_para_cobros
             ? 'El método efectivo requiere turno abierto. Transferencia no impacta caja.'
             : 'Efectivo impacta caja si existe turno abierto. Transferencia no impacta caja.'}
@@ -508,10 +552,10 @@ export default function ClienteDetallePage() {
         {abonoError && <Alert tone="error" className="mt-3">{abonoError}</Alert>}
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Field label="Valor" required error={abonoFormErrors.errors.monto}>
+          <Field label="Monto a abonar" required error={abonoFormErrors.errors.monto}>
             <Input
-              className="mt-2"
-              placeholder="10.00"
+              className="h-11 text-base font-semibold"
+              placeholder="0.00"
               value={abonoForm.monto}
               onChange={(e) => {
                 abonoFormErrors.clearFieldError('monto');
@@ -519,20 +563,73 @@ export default function ClienteDetallePage() {
               }}
             />
           </Field>
-          <Field label="Método de pago">
+          <Field label="Saldo después del abono">
+            {(() => {
+              const saldoPagadoCompleto = saldoPosterior <= 0;
+              return (
+                <div
+                  className={`min-h-[52px] rounded-lg border px-3 py-2 ${saldoPagadoCompleto
+                    ? 'border-green-200 bg-green-50 text-green-700'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface-alt)] text-[var(--color-text)]'}`}
+                >
+                  {saldoPagadoCompleto ? (
+                    <div className="flex h-full min-h-[36px] flex-col justify-center">
+                      <p className="text-sm font-semibold">Pagado completamente</p>
+                      <p className="mt-0.5 text-sm font-bold">{formatMoney(0)}</p>
+                    </div>
+                  ) : (
+                    <div className="flex h-full min-h-[36px] items-center">
+                      <p className="text-base font-semibold">{formatMoney(saldoPosterior)}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </Field>
+          <Field label="Método de pago" required error={abonoFormErrors.errors.metodo_pago}>
             <Select
-              className="mt-2"
               value={abonoForm.metodo_pago}
-              onChange={(e) => setAbonoForm((s) => ({ ...s, metodo_pago: e.target.value }))}
+              onChange={(e) => {
+                abonoFormErrors.clearFieldError('metodo_pago');
+                setAbonoForm((s) => ({ ...s, metodo_pago: e.target.value }));
+              }}
             >
-              <option value="EFECTIVO">Efectivo</option>
-              <option value="TRANSFERENCIA">Transferencia</option>
+              {['EFECTIVO', 'TRANSFERENCIA'].map((codigo) => (
+                <option key={codigo} value={codigo}>{PAYMENT_METHOD_LABELS[codigo] || codigo}</option>
+              ))}
             </Select>
           </Field>
+          {String(abonoForm.metodo_pago).toUpperCase() === 'TRANSFERENCIA' ? (
+            <>
+              <Field label="Banco" required error={abonoFormErrors.errors.banco}>
+                <Input
+                  value={abonoForm.banco}
+                  onChange={(e) => {
+                    abonoFormErrors.clearFieldError('banco');
+                    setAbonoForm((s) => ({ ...s, banco: e.target.value }));
+                  }}
+                  placeholder="Banco Pichincha"
+                />
+              </Field>
+              <Field label="Referencia">
+                <Input
+                  value={abonoForm.referencia}
+                  onChange={(e) => setAbonoForm((s) => ({ ...s, referencia: e.target.value }))}
+                  placeholder="847291"
+                />
+              </Field>
+            </>
+          ) : null}
         </div>
         <div className="mt-3">
           <Field label="Observación">
-            <Textarea className="mt-2" value={abonoForm.observacion} onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))} />
+            <Textarea
+              rows={3}
+              className="min-h-[84px]"
+              placeholder="Observación opcional"
+              value={abonoForm.observacion}
+              onChange={(e) => setAbonoForm((s) => ({ ...s, observacion: e.target.value }))}
+            />
           </Field>
         </div>
 
@@ -540,57 +637,28 @@ export default function ClienteDetallePage() {
           <Button variant="secondary" onClick={() => setModalAbono(null)}>
             Cancelar
           </Button>
-          <Button onClick={registrarAbono}>
-            Guardar abono
+          <Button
+            className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
+            onClick={registrarAbono}
+            disabled={saldoActualAbono <= 0}
+          >
+            Registrar abono
           </Button>
         </div>
       </Modal>
 
-      <Modal open={blockedDeactivateOpen} onClose={() => setBlockedDeactivateOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
-        <div className="space-y-4">
-          <div className="ui-modal-header">
-            <div className="ui-modal-header-copy">
-              <h3 className="ui-panel-title">No se puede desactivar</h3>
-              <p className="ui-panel-description">
-                {clienteDetalle ? `No puedes desactivar a ${clienteDetalle.nombre} porque tiene saldo pendiente.` : ''}
-              </p>
-            </div>
-          </div>
-          <div className="rounded-lg border border-[var(--color-danger-soft)] bg-[color-mix(in_oklab,var(--color-danger-soft)_82%,white_18%)] p-3 text-sm text-[var(--color-text)]">
-            Saldo pendiente actual:{' '}
-            <strong className="text-[var(--color-danger)]">{formatMoney(resumen?.saldo || 0)}</strong>
-          </div>
-          <div className="flex justify-end">
-            <Button type="button" variant="danger" onClick={() => setBlockedDeactivateOpen(false)}>
-              Entendido
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={confirmDeactivateOpen} onClose={() => setConfirmDeactivateOpen(false)} maxWidthClass="max-w-lg" panelClassName="p-5">
-        <div className="space-y-4">
-          <div className="ui-modal-header">
-            <div className="ui-modal-header-copy">
-              <h3 className="ui-panel-title">Confirmar desactivación</h3>
-            </div>
-            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={() => setConfirmDeactivateOpen(false)}>
-              X
-            </Button>
-          </div>
-          <p className="text-sm text-[var(--color-text-muted)]">
-            {clienteDetalle ? `Vas a desactivar al cliente ${clienteDetalle.nombre}.` : ''}
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setConfirmDeactivateOpen(false)} disabled={deactivateLoading}>
-              Cancelar
-            </Button>
-            <Button type="button" variant="danger" onClick={onConfirmDeactivate} disabled={deactivateLoading}>
-              {deactivateLoading ? 'Desactivando...' : 'Sí, desactivar'}
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <DeactivateEntityDialogs
+        confirmOpen={confirmDeactivateOpen}
+        blockedOpen={blockedDeactivateOpen}
+        entityType="cliente"
+        entityName={clienteDetalle?.nombre || '-'}
+        pendingAmountLabel={formatMoney(saldoCliente)}
+        blockedMessage="El cliente mantiene saldo pendiente de crédito."
+        confirmLoading={deactivateLoading}
+        onCloseConfirm={() => setConfirmDeactivateOpen(false)}
+        onConfirm={onConfirmDeactivate}
+        onCloseBlocked={() => setBlockedDeactivateOpen(false)}
+      />
     </div>
   );
 }

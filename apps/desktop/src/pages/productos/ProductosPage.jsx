@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiFolders, PiPencilSimple, PiPlus, PiTrash, PiWarningCircle } from 'react-icons/pi';
+import { PiFolders, PiPencilSimple, PiPlus, PiTrash } from 'react-icons/pi';
 import {
   Alert,
   Button,
@@ -27,9 +27,8 @@ import {
 import { parseApiError } from '../../lib/apiClient';
 import { useProductosStore } from '../../stores/productosStore';
 import { createCategoria, deleteCategoria, fetchCategorias, fetchProductos, updateCategoria } from '../../services/catalogoService';
-import { formatMoney } from '../../lib/formatMoney';
-import { formatQtyByUnit, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
-import useBooleanSwitch from '../../shared/hooks/useBooleanSwitch';
+import { formatCurrency, formatWeight } from '../../lib/formatNumber';
+import { sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
 const PAGE_SIZE = GLOBAL_PAGE_SIZE;
@@ -40,11 +39,10 @@ const PRODUCT_ROLE_OPTIONS = [
   { key: 'es_merma', label: 'Merma', hint: 'Producto técnico no comercial.' }
 ];
 const PRODUCT_ROLE_FILTER_OPTIONS = [
-  { value: 'TODOS', label: 'Todos' },
-  { value: 'VENDIBLE', label: 'Vendible', key: 'es_vendible' },
-  { value: 'TRANSFORMABLE', label: 'Transformable', key: 'es_transformable' },
-  { value: 'INSUMO', label: 'Insumo', key: 'es_insumo' },
-  { value: 'MERMA', label: 'Merma', key: 'es_merma' }
+  { label: 'Vendible', key: 'es_vendible' },
+  { label: 'Transformable', key: 'es_transformable' },
+  { label: 'Insumo', key: 'es_insumo' },
+  { label: 'Merma', key: 'es_merma' }
 ];
 
 const emptyProductoForm = {
@@ -85,34 +83,19 @@ function validateProductRoles(productoForm) {
   return '';
 }
 
-function RoleBadge({ label, tone = 'neutral' }) {
-  const toneClass = {
-    success: 'border-[color-mix(in_oklab,var(--color-success)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-success)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-success)_68%,black_32%)]',
-    info: 'border-[color-mix(in_oklab,var(--color-primary)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-primary)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-primary)_72%,black_28%)]',
-    warning: 'border-[color-mix(in_oklab,var(--color-warning)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-warning)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-warning)_72%,black_28%)]',
-    danger: 'border-[color-mix(in_oklab,var(--color-danger)_35%,white_65%)] bg-[color-mix(in_oklab,var(--color-danger)_12%,white_88%)] text-[color-mix(in_oklab,var(--color-danger)_72%,black_28%)]',
-    neutral: 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
-  };
-
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${toneClass[tone] || toneClass.neutral}`}>
-      {label}
-    </span>
-  );
+function formatDecimalInput(value, decimals = 2) {
+  const parsed = Number(String(value ?? '').replace(',', '.'));
+  if (!Number.isFinite(parsed)) return '';
+  return parsed.toFixed(decimals);
 }
 
-function roleTone(roleKey) {
-  if (roleKey === 'es_vendible') return 'success';
-  if (roleKey === 'es_transformable') return 'info';
-  if (roleKey === 'es_insumo') return 'warning';
-  if (roleKey === 'es_merma') return 'danger';
-  return 'neutral';
-}
-
-function resolveRoleFilterParams(roleValue) {
-  const selectedRole = PRODUCT_ROLE_FILTER_OPTIONS.find((option) => option.value === roleValue);
-  if (!selectedRole?.key) return {};
-  return { [selectedRole.key]: 1 };
+function normalizeStockFieldInput(value, unit) {
+  if (unit === 'UND') {
+    const parsed = Number(String(value ?? '').replace(',', '.'));
+    if (!Number.isFinite(parsed)) return '';
+    return String(Math.trunc(parsed));
+  }
+  return formatDecimalInput(value, 2);
 }
 
 function normalizeStockInputForUnit(value, unit) {
@@ -151,18 +134,11 @@ const getProductStockValues = (producto) => {
   return { stockVisible, stockMinimo };
 };
 
-const getProductRowClass = (producto) => {
+const getProductStatus = (producto) => {
   const { stockVisible, stockMinimo } = getProductStockValues(producto);
-  if (stockVisible <= 0) return '!bg-red-50';
-  if (stockMinimo > 0 && stockVisible <= stockMinimo) return '!bg-amber-50';
-  return '';
-};
-
-const getProductStockClass = (producto) => {
-  const { stockVisible, stockMinimo } = getProductStockValues(producto);
-  if (stockVisible <= 0) return '!text-red-600 !font-bold';
-  if (stockMinimo > 0 && stockVisible <= stockMinimo) return '!text-amber-700 !font-bold';
-  return '!text-gray-900 font-semibold';
+  if (stockVisible <= 0) return { label: 'Sin stock', tone: 'danger' };
+  if (stockMinimo > 0 && stockVisible <= stockMinimo) return { label: 'Bajo mínimo', tone: 'warning' };
+  return { label: 'Normal', tone: 'normal' };
 };
 
 export default function ProductosPage() {
@@ -170,29 +146,29 @@ export default function ProductosPage() {
   const [categorias, setCategorias] = useState([]);
   const [allProductos, setAllProductos] = useState([]);
   const [pagina, setPagina] = useState(1);
-  const [filtros, setFiltros] = useState({ search: '', categoria: 'TODAS', estado: 'TODOS', rol: 'TODOS' });
+  const [filtros, setFiltros] = useState({ search: '', categoria: 'TODAS', estado: 'TODOS', roles: [] });
   const [productoModal, setProductoModal] = useState({ open: false, mode: 'create' });
   const [productoForm, setProductoForm] = useState(emptyProductoForm);
   const [localError, setLocalError] = useState('');
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState(null);
   const [toastVisible, setToastVisible] = useState(false);
   const [categoriaManagerOpen, setCategoriaManagerOpen] = useState(false);
   const [categoriaEditorOpen, setCategoriaEditorOpen] = useState(false);
   const [categoriaForm, setCategoriaForm] = useState(emptyCategoriaForm);
+  const [categoriaInitialActivo, setCategoriaInitialActivo] = useState(true);
   const [categoriaMode, setCategoriaMode] = useState('create');
   const [categoriaError, setCategoriaError] = useState('');
-  const [categoriaFeedback, setCategoriaFeedback] = useState('');
   const [categoriaSaving, setCategoriaSaving] = useState(false);
   const [categoriaDeleteTarget, setCategoriaDeleteTarget] = useState(null);
-  const [categoriaDeleteError, setCategoriaDeleteError] = useState('');
+  const [categoriaDeleteError, setCategoriaDeleteError] = useState(null);
   const [categoriaDeleteLoading, setCategoriaDeleteLoading] = useState(false);
+  const [categoriaDeactivateConfirm, setCategoriaDeactivateConfirm] = useState(null);
 
   const refreshList = () =>
     listar({
       search: filtros.search || undefined,
       categoria_id: filtros.categoria === 'TODAS' ? undefined : Number(filtros.categoria),
-      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
-      ...resolveRoleFilterParams(filtros.rol)
+      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado
     });
 
   const refreshCategorias = async () => {
@@ -230,14 +206,19 @@ export default function ProductosPage() {
     return counts;
   }, [allProductos]);
 
+  const productosFiltradosPorRol = useMemo(() => {
+    if (!filtros.roles.length) return productos;
+    return productos.filter((producto) => filtros.roles.some((roleKey) => Boolean(producto?.[roleKey])));
+  }, [productos, filtros.roles]);
+
   const productosOrdenados = useMemo(
-    () => [...productos].sort((a, b) => {
+    () => [...productosFiltradosPorRol].sort((a, b) => {
       const aEnMinimo = Number(a.stock_actual || 0) <= Number(a.stock_minimo || 0) ? 0 : 1;
       const bEnMinimo = Number(b.stock_actual || 0) <= Number(b.stock_minimo || 0) ? 0 : 1;
       if (aEnMinimo !== bEnMinimo) return aEnMinimo - bEnMinimo;
       return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
     }),
-    [productos]
+    [productosFiltradosPorRol]
   );
 
   const totalPaginas = Math.max(1, Math.ceil(productosOrdenados.length / PAGE_SIZE));
@@ -251,10 +232,10 @@ export default function ProductosPage() {
   }, [pagina, totalPaginas]);
 
   useEffect(() => {
-    if (!feedback) return undefined;
+    if (!feedback?.description) return undefined;
     setToastVisible(true);
     const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
-    const clearTimer = window.setTimeout(() => setFeedback(''), 4000);
+    const clearTimer = window.setTimeout(() => setFeedback(null), 4000);
     return () => {
       window.clearTimeout(hideTimer);
       window.clearTimeout(clearTimer);
@@ -264,6 +245,17 @@ export default function ProductosPage() {
   const onChangeFiltro = (key, value) => {
     setPagina(1);
     setFiltros((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const onToggleRoleFiltro = (roleKey) => {
+    setPagina(1);
+    setFiltros((prev) => {
+      const exists = prev.roles.includes(roleKey);
+      return {
+        ...prev,
+        roles: exists ? prev.roles.filter((item) => item !== roleKey) : [...prev.roles, roleKey]
+      };
+    });
   };
 
   const onChangeUnidadMedida = (value) => {
@@ -312,8 +304,8 @@ export default function ProductosPage() {
       nombre: producto.nombre || '',
       categoria_id: producto.categoria_id ? String(producto.categoria_id) : '',
       unidad_medida: producto.unidad_medida || producto.unidad || 'UND',
-      precio_venta: String(Number(producto.precio_venta || producto.precio_referencia || 0)),
-      stock_minimo: String(Number(producto.stock_minimo || 0)),
+      precio_venta: formatDecimalInput(producto.precio_venta || producto.precio_referencia || 0, 2),
+      stock_minimo: normalizeStockFieldInput(producto.stock_minimo || 0, producto.unidad_medida || producto.unidad || 'UND'),
       activo: Boolean(producto.activo),
       es_vendible: Boolean(producto.es_vendible),
       es_transformable: Boolean(producto.es_transformable),
@@ -337,12 +329,14 @@ export default function ProductosPage() {
     setCategoriaManagerOpen(false);
     setCategoriaEditorOpen(false);
     setCategoriaMode('create');
+    setCategoriaInitialActivo(true);
     setCategoriaForm(emptyCategoriaForm);
     setCategoriaError('');
   };
 
   const openCategoriaCreateModal = () => {
     setCategoriaMode('create');
+    setCategoriaInitialActivo(true);
     setCategoriaForm(emptyCategoriaForm);
     setCategoriaError('');
     setCategoriaEditorOpen(true);
@@ -355,6 +349,7 @@ export default function ProductosPage() {
       nombre: categoria.nombre || '',
       activo: Boolean(categoria.activo ?? true)
     });
+    setCategoriaInitialActivo(Boolean(categoria.activo ?? true));
     setCategoriaError('');
     setCategoriaEditorOpen(true);
   };
@@ -407,87 +402,85 @@ export default function ProductosPage() {
     try {
       if (productoModal.mode === 'edit' && productoForm.id) {
         await actualizar(productoForm.id, payload);
+        setFeedback({ tone: 'success', title: 'Producto guardado', description: 'Producto actualizado correctamente' });
       } else {
         await crear(payload);
+        setFeedback({ tone: 'success', title: 'Producto guardado', description: 'Producto creado correctamente' });
       }
       closeProductoModal();
       await Promise.all([refreshList(), refreshCategorias()]);
     } catch (err) {
-      setLocalError(err.message || 'No se pudo guardar el producto');
+      const errorMessage = err.message || 'No se pudo actualizar el producto';
+      setLocalError(errorMessage);
+      setFeedback({ tone: 'error', title: 'Error al guardar', description: errorMessage });
     }
   };
 
-  const productoStatusSwitch = useBooleanSwitch({
-    getValue: (producto) => Boolean(producto.activo),
-    isSensitive: (producto, nextValue) => Boolean(producto.activo) && !nextValue,
-    onCommit: async (producto, nextValue) => {
-      setFeedback('');
-      setLocalError('');
-      await actualizar(producto.id, { activo: nextValue });
-      await Promise.all([refreshList(), refreshCategorias()]);
-      setFeedback(`Producto ${nextValue ? 'activado' : 'desactivado'}: ${producto.nombre}`);
-    },
-    onError: (nextError, producto, nextValue) => {
-      setFeedback('');
-      setLocalError(nextError.message || `No se pudo ${nextValue ? 'activar' : 'desactivar'} el producto ${producto.nombre}.`);
-    }
-  });
-
-  const onSaveCategoria = async () => {
+  const commitSaveCategoria = async (payloadOverride = null) => {
     setCategoriaError('');
-    setCategoriaFeedback('');
     if (!categoriaForm.nombre.trim()) {
       setCategoriaError('El nombre de la categoría es obligatorio.');
       return;
     }
 
+    const payload = payloadOverride || {
+      nombre: categoriaForm.nombre.trim(),
+      activo: categoriaForm.activo
+    };
+
     setCategoriaSaving(true);
     try {
       if (categoriaMode === 'edit' && categoriaForm.id) {
-        await updateCategoria(categoriaForm.id, {
-          nombre: categoriaForm.nombre.trim(),
-          activo: categoriaForm.activo
+        await updateCategoria(categoriaForm.id, payload);
+        setFeedback({
+          tone: 'success',
+          title: 'Categoría guardada',
+          description: payload.activo ? 'Categoría actualizada correctamente' : 'Categoría desactivada correctamente'
         });
       } else {
-        await createCategoria({
-          nombre: categoriaForm.nombre.trim(),
-          activo: true
-        });
+        await createCategoria(payload);
+        setFeedback({ tone: 'success', title: 'Categoría guardada', description: 'Categoría creada correctamente' });
       }
       await refreshCategorias();
       await refreshList();
       setCategoriaEditorOpen(false);
       setCategoriaMode('create');
+      setCategoriaInitialActivo(true);
       setCategoriaForm(emptyCategoriaForm);
-      setCategoriaFeedback(categoriaMode === 'edit' ? 'Categoría actualizada correctamente.' : 'Categoría creada correctamente.');
     } catch (nextError) {
-      setCategoriaError(parseApiError(nextError));
+      const message = parseApiError(nextError) || 'No se pudo completar la acción';
+      setCategoriaError(message);
+      setFeedback({ tone: 'error', title: 'No se pudo completar la acción', description: message });
     } finally {
       setCategoriaSaving(false);
     }
   };
 
-  const categoriaStatusSwitch = useBooleanSwitch({
-    getValue: (categoria) => Boolean(categoria.activo ?? true),
-    isSensitive: (categoria, nextValue) => Boolean(categoria.activo ?? true) && !nextValue,
-    onCommit: async (categoria, nextValue) => {
-      setCategoriaError('');
-      setCategoriaFeedback('');
-      await updateCategoria(categoria.id, { activo: nextValue });
-      await refreshCategorias();
-      await refreshList();
-      setCategoriaFeedback(`Categoría ${nextValue ? 'activada' : 'desactivada'}: ${categoria.nombre}`);
-    },
-    onError: (nextError, categoria, nextValue) => {
-      setCategoriaFeedback('');
-      setCategoriaError(parseApiError(nextError) || `No se pudo ${nextValue ? 'activar' : 'desactivar'} la categoría ${categoria.nombre}.`);
+  const onSaveCategoria = async () => {
+    if (categoriaMode === 'edit' && categoriaForm.id && categoriaInitialActivo && !categoriaForm.activo) {
+      setCategoriaDeactivateConfirm({
+        nombre: categoriaForm.nombre,
+        payload: { nombre: categoriaForm.nombre.trim(), activo: false }
+      });
+      return;
     }
-  });
+
+    if (categoriaMode === 'edit' && categoriaForm.id && !categoriaInitialActivo && categoriaForm.activo) {
+      await commitSaveCategoria({ nombre: categoriaForm.nombre.trim(), activo: true });
+      setFeedback({ tone: 'success', title: 'Categoría guardada', description: 'Categoría activada correctamente' });
+      return;
+    }
+
+    await commitSaveCategoria();
+  };
 
   const onRequestDeleteCategoria = (categoria) => {
     const totalProductos = categoriaUsageMap.get(String(categoria.id)) || 0;
     if (totalProductos > 0) {
-      setCategoriaDeleteError('No se puede eliminar la categoría porque tiene productos asociados. Puedes desactivarla.');
+      setCategoriaDeleteError({
+        message: 'La categoría todavía tiene productos asociados. Puedes desactivarla para ocultarla de formularios y nuevas operaciones.',
+        totalProductos
+      });
       return;
     }
     setCategoriaDeleteTarget(categoria);
@@ -500,9 +493,13 @@ export default function ProductosPage() {
       await deleteCategoria(categoriaDeleteTarget.id);
       setCategoriaDeleteTarget(null);
       await refreshCategorias();
+      await refreshList();
+      setFeedback({ tone: 'success', title: 'Categoría eliminada', description: 'Categoría eliminada correctamente' });
     } catch (nextError) {
       setCategoriaDeleteTarget(null);
-      setCategoriaDeleteError(parseApiError(nextError));
+      const message = parseApiError(nextError) || 'No se pudo completar la acción';
+      setCategoriaDeleteError({ message, totalProductos: null });
+      setFeedback({ tone: 'error', title: 'No se pudo completar la acción', description: message });
     } finally {
       setCategoriaDeleteLoading(false);
     }
@@ -510,15 +507,15 @@ export default function ProductosPage() {
 
   return (
     <div className="space-y-5">
-      {feedback ? (
+      {feedback?.description ? (
         <div className="fixed right-5 top-5 z-[1200]">
           <Toast
-            tone="success"
-            title="Operacion completada"
-            description={feedback}
+            tone={feedback.tone || 'success'}
+            title={feedback.title || 'Operación completada'}
+            description={feedback.description}
             onClose={() => {
               setToastVisible(false);
-              setFeedback('');
+              setFeedback(null);
             }}
             className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
           />
@@ -568,7 +565,7 @@ export default function ProductosPage() {
             className="w-full xl:w-auto"
             onClick={() => {
               setPagina(1);
-              setFiltros({ search: '', categoria: 'TODAS', estado: 'TODOS', rol: 'TODOS' });
+              setFiltros({ search: '', categoria: 'TODAS', estado: 'TODOS', roles: [] });
             }}
           >
             Limpiar filtros
@@ -597,13 +594,25 @@ export default function ProductosPage() {
 
         {/* labelClassName()}>Rol< */}
         <Field label="Rol">
-          <Select value={filtros.rol} onChange={(e) => onChangeFiltro('rol', e.target.value)}>
-            {PRODUCT_ROLE_FILTER_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {PRODUCT_ROLE_FILTER_OPTIONS.map((role) => {
+              const isActive = filtros.roles.includes(role.key);
+              return (
+                <button
+                  key={role.key}
+                  type="button"
+                  onClick={() => onToggleRoleFiltro(role.key)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    isActive
+                      ? 'border-[#1f2937] bg-[#1f2937] text-white'
+                      : 'border-[#dfe3e8] bg-white text-[#4b5563] hover:bg-[#f6f6f7]'
+                  }`}
+                >
+                  {role.label}
+                </button>
+              );
+            })}
+          </div>
         </Field>
       </FiltersBar>
 
@@ -620,83 +629,65 @@ export default function ProductosPage() {
             <Tabla>
               <TablaCabecera>
                 <tr>
+                  <TablaCelda as="th" className="w-3 px-0" aria-hidden />
                   <TablaCelda as="th">Código</TablaCelda>
-                  <TablaCelda as="th">Nombre</TablaCelda>
-                  <TablaCelda as="th">Categoría</TablaCelda>
+                  <TablaCelda as="th">Producto</TablaCelda>
                   <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
-                  <TablaCelda as="th">Unidad</TablaCelda>
                   <TablaCelda as="th" className="text-right">Precio venta</TablaCelda>
                   <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
-                  <TablaCelda as="th">Roles</TablaCelda>
-                  <TablaCelda as="th">Estado</TablaCelda>
+                  <TablaCelda as="th">Estado stock</TablaCelda>
+                  <TablaCelda as="th">Activo</TablaCelda>
                   <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
                 </tr>
               </TablaCabecera>
               <TablaCuerpo>
                 {productosPaginados.map((producto) => {
                   const { stockVisible, stockMinimo } = getProductStockValues(producto);
-                  const sinStock = stockVisible <= 0;
-                  const bajoMinimo = stockVisible > 0 && stockMinimo > 0 && stockVisible <= stockMinimo;
-                  const hasAlert = sinStock || bajoMinimo;
+                  const stockStatus = getProductStatus(producto);
                   const unidadMedida = producto.unidad_medida || producto.unidad || 'UND';
-                  const currentChecked = productoStatusSwitch.resolveChecked(producto);
+                  const roles = getProductRoles(producto);
+                  const roleText = roles.length ? roles.map((role) => role.label.toLowerCase()).join(' · ') : 'sin rol';
+                  const statusAccentClass = stockStatus.tone === 'danger'
+                    ? 'bg-[#d72c0d]'
+                    : stockStatus.tone === 'warning'
+                      ? 'bg-[#b98900]'
+                      : 'bg-[#c4cdd5]';
                   return (
                     <TablaFila
                       key={producto.id}
-                      className={getProductRowClass(producto)}
+                      className="hover:!bg-[#fafafa] hover:outline hover:outline-1 hover:outline-[#dfe3e8]"
                     >
+                      <TablaCelda className="w-3 px-0">
+                        <span className={`block h-14 w-[3px] rounded-r ${statusAccentClass}`} aria-hidden />
+                      </TablaCelda>
                       <TablaCelda className="font-semibold text-[var(--color-text)]">
-                        <div className="flex items-center gap-2">
-                          {hasAlert ? (
-                            <PiWarningCircle
-                              className={`shrink-0 cursor-pointer text-[1.2rem] ${sinStock ? 'text-[var(--color-danger)]' : 'text-warning'}`}
-                              title={sinStock ? 'Sin stock' : 'Stock bajo el mínimo'}
-                              aria-label={sinStock ? 'Sin stock' : 'Stock bajo el mínimo'}
-                            />
-                          ) : null}
-                          <span>{producto.codigo}</span>
-                        </div>
+                        <span>{producto.codigo}</span>
                       </TablaCelda>
                       <TablaCelda>
                         <div className="space-y-1">
                           <p className="font-semibold text-[var(--color-text)]">{producto.nombre}</p>
-                          <p className="text-xs text-[var(--color-text-muted)]">
-                            Stock mínimo: {formatQtyByUnit(producto.stock_minimo, unidadMedida)} {unidadMedida}
-                          </p>
+                          <p className="text-xs text-[var(--color-text-muted)]">{`${producto.categoria_nombre || 'Sin categoría'} · ${roleText}`}</p>
                         </div>
                       </TablaCelda>
-                      <TablaCelda>{producto.categoria_nombre || 'Sin categoría'}</TablaCelda>
-                      <TablaCelda className="text-right">
-                        <span className={getProductStockClass(producto)}>
-                          {formatQtyByUnit(stockVisible, unidadMedida)}
+                      <TablaCelda>
+                        <div className="text-right font-semibold text-[var(--color-text)]">{formatWeight(stockVisible, unidadMedida)}</div>
+                        <p className="text-right text-[11px] text-[var(--color-text-muted)]">Mín: {formatWeight(stockMinimo, unidadMedida)}</p>
+                      </TablaCelda>
+                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatCurrency(producto.precio_venta)}</TablaCelda>
+                      <TablaCelda className="text-right">{formatCurrency(producto.costo_promedio)}</TablaCelda>
+                      <TablaCelda>
+                        <span className="text-sm text-[var(--color-text-secondary)]">{stockStatus.label}</span>
+                      </TablaCelda>
+                      <TablaCelda>
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${Boolean(producto.activo) ? 'border-[#cce5d0] bg-[#f5fbf6] text-[#1f7a35]' : 'border-[#d9dce1] bg-[#f6f7f8] text-[#5c6670]'}`}>
+                          {Boolean(producto.activo) ? 'Activo' : 'Inactivo'}
                         </span>
-                      </TablaCelda>
-                      <TablaCelda>{unidadMedida}</TablaCelda>
-                      <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatMoney(producto.precio_venta)}</TablaCelda>
-                      <TablaCelda className="text-right">{formatMoney(producto.costo_promedio)}</TablaCelda>
-                      <TablaCelda>
-                        <div className="flex flex-wrap gap-1.5">
-                          {getProductRoles(producto).map((role) => (
-                            <RoleBadge key={`${producto.id}-${role.key}`} label={role.label} tone={roleTone(role.key)} />
-                          ))}
-                        </div>
-                      </TablaCelda>
-                      <TablaCelda>
-                        <Switch
-                          checked={currentChecked}
-                          onChange={(checked) => {
-                            setFeedback('');
-                            productoStatusSwitch.requestChange(producto, checked);
-                          }}
-                          label={currentChecked ? 'Activo' : 'Inactivo'}
-                          busy={productoStatusSwitch.isPending(producto)}
-                          disabled={productoStatusSwitch.isPending(producto)}
-                        />
                       </TablaCelda>
                       <TablaCelda>
                         <TableActions>
                           <TableActionButton
-                            variant="secondary"
+                            variant="neutral"
+                            className="border-[#dfe3e8] bg-white hover:bg-[#f6f6f7]"
                             icon={<PiPencilSimple />}
                             aria-label="Editar producto"
                             title="Editar producto"
@@ -740,120 +731,125 @@ export default function ProductosPage() {
           </Button>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {productoModal.mode === 'edit' ? (
-            <div>
-              <label className={labelClassName()}>Código</label>
-              <Input className="mt-2" value={productoForm.codigo} disabled />
-            </div>
-          ) : null}
-
-          <div>
-            <label className={labelClassName()}>Nombre descriptivo</label>
-            <Input
-              className="mt-2"
-              value={productoForm.nombre}
-              onChange={(e) => setProductoForm((prev) => ({ ...prev, nombre: e.target.value }))}
-              placeholder="Chorizo argentino"
-            />
-          </div>
-
-          <div>
-            <label className={labelClassName()}>Categoría</label>
-            <Select
-              className="mt-2"
-              value={productoForm.categoria_id}
-              onChange={(e) => setProductoForm((prev) => ({ ...prev, categoria_id: e.target.value }))}
-            >
-              <option value="">Sin categoría</option>
-              {categorias.map((categoria) => (
-                <option key={categoria.id} value={categoria.id}>
-                  {categoria.nombre}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <label className={labelClassName()}>Unidad de medida</label>
-            <Select
-              className="mt-2"
-              value={productoForm.unidad_medida}
-              onChange={(e) => onChangeUnidadMedida(e.target.value)}
-            >
-              <option value="UND">UND</option>
-              <option value="KG">KG</option>
-              <option value="LB">LB</option>
-            </Select>
-          </div>
-
-          <div>
-            <label className={labelClassName()}>
-              {productoForm.es_vendible ? 'Precio de venta' : 'Precio de referencia'}
-            </label>
-            <Input
-              className="mt-2"
-              value={productoForm.precio_venta}
-              onChange={(e) => setProductoForm((prev) => ({ ...prev, precio_venta: sanitizeDecimalInput(e.target.value, 2) }))}
-              placeholder={productoForm.es_vendible ? '0.00' : 'Opcional'}
-            />
-            <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-              {productoForm.es_vendible ? 'Obligatorio y mayor que cero para productos vendibles.' : 'Puede quedar en cero si el producto no aparece en ventas.'}
-            </p>
-          </div>
-
-          <div>
-            <label className={labelClassName()}>Stock mínimo</label>
-            <Input
-              className="mt-2"
-              value={productoForm.stock_minimo}
-              onChange={(e) => setProductoForm((prev) => ({ ...prev, stock_minimo: sanitizeQtyInput(e.target.value, prev.unidad_medida) }))}
-              placeholder="0"
-            />
-            <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-              {productoForm.unidad_medida === 'UND' ? 'UND se maneja como entero.' : 'KG y LB permiten decimales visibles.'}
-            </p>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className={labelClassName()}>Roles del producto</label>
-            <div className="mt-2 grid gap-3 md:grid-cols-2">
-              {PRODUCT_ROLE_OPTIONS.map((role) => (
-                <div
-                  key={role.key}
-                  className={`rounded-lg border px-3 py-3 ${
-                    productoForm.es_merma && role.key !== 'es_merma'
-                      ? 'border-[var(--color-border)] bg-[var(--color-surface-muted)]'
-                      : 'border-[var(--color-border)] bg-[var(--color-surface)]'
-                  }`}
-                >
-                  <Switch
-                    checked={Boolean(productoForm[role.key])}
-                    disabled={productoForm.es_merma && role.key !== 'es_merma'}
-                    onChange={(checked) => onToggleRole(role.key, checked)}
-                    label={role.label}
-                    description={role.hint}
-                  />
+        <div className="mt-4 space-y-4">
+          <div className="rounded-lg border border-[var(--color-border)] p-4">
+            <p className="text-sm font-semibold text-[var(--color-text)]">Datos del producto</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {productoModal.mode === 'edit' ? (
+                <div>
+                  <label className={labelClassName()}>Código</label>
+                  <Input className="mt-2" value={productoForm.codigo} disabled />
                 </div>
-              ))}
+              ) : null}
 
-              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
-                <Switch
-                  checked={productoForm.activo}
-                  onChange={(checked) => setProductoForm((prev) => ({ ...prev, activo: checked }))}
-                  label="Producto activo"
-                  description="Si está inactivo no aparece para nuevas operaciones."
+              <div>
+                <label className={labelClassName()}>Nombre descriptivo</label>
+                <Input
+                  className="mt-2"
+                  value={productoForm.nombre}
+                  onChange={(e) => setProductoForm((prev) => ({ ...prev, nombre: e.target.value }))}
+                  placeholder="Chorizo argentino"
                 />
               </div>
+
+              <div>
+                <label className={labelClassName()}>Categoría</label>
+                <Select
+                  className="mt-2"
+                  value={productoForm.categoria_id}
+                  onChange={(e) => setProductoForm((prev) => ({ ...prev, categoria_id: e.target.value }))}
+                >
+                  <option value="">Sin categoría</option>
+                  {categorias.map((categoria) => (
+                    <option key={categoria.id} value={categoria.id}>
+                      {categoria.nombre}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <label className={labelClassName()}>Unidad de medida</label>
+                <Select
+                  className="mt-2"
+                  value={productoForm.unidad_medida}
+                  onChange={(e) => onChangeUnidadMedida(e.target.value)}
+                >
+                  <option value="UND">UND</option>
+                  <option value="KG">KG</option>
+                  <option value="LB">LB</option>
+                </Select>
+              </div>
+
+              <div>
+                <label className={labelClassName()}>
+                  {productoForm.es_vendible ? 'Precio de venta' : 'Precio de referencia'}
+                </label>
+                <Input
+                  className="mt-2"
+                  value={productoForm.precio_venta}
+                  onChange={(e) => setProductoForm((prev) => ({ ...prev, precio_venta: sanitizeDecimalInput(e.target.value, 2) }))}
+                  onBlur={() => setProductoForm((prev) => ({ ...prev, precio_venta: formatDecimalInput(prev.precio_venta, 2) }))}
+                  placeholder={productoForm.es_vendible ? '0.00' : 'Opcional'}
+                />
+              </div>
+
+              <div>
+                <label className={labelClassName()}>Stock mínimo</label>
+                <Input
+                  className="mt-2"
+                  value={productoForm.stock_minimo}
+                  onChange={(e) => setProductoForm((prev) => ({ ...prev, stock_minimo: sanitizeQtyInput(e.target.value, prev.unidad_medida) }))}
+                  onBlur={() => setProductoForm((prev) => ({ ...prev, stock_minimo: normalizeStockFieldInput(prev.stock_minimo, prev.unidad_medida) }))}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[var(--color-border)] p-4">
+            <p className="text-sm font-semibold text-[var(--color-text)]">Roles del producto</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {PRODUCT_ROLE_OPTIONS.map((role) => {
+                const isActive = Boolean(productoForm[role.key]);
+                const isDisabled = productoForm.es_merma && role.key !== 'es_merma';
+                return (
+                  <button
+                    key={role.key}
+                    type="button"
+                    disabled={isDisabled}
+                    onClick={() => onToggleRole(role.key, !isActive)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      isActive
+                        ? 'border-[#1f2937] bg-[#1f2937] text-white'
+                        : 'border-[#dfe3e8] bg-white text-[#4b5563] hover:bg-[#f6f6f7]'
+                    } ${isDisabled ? 'cursor-not-allowed opacity-50' : ''}`}
+                  >
+                    {role.label}
+                  </button>
+                );
+              })}
             </div>
             <p className="mt-2 text-xs text-[var(--color-text-muted)]">
               Debe existir al menos un rol activo. `Merma` es exclusivo y bloquea los demás roles mientras esté activo.
             </p>
           </div>
 
+          <div className="rounded-lg border border-[var(--color-border)] p-4">
+            <p className="text-sm font-semibold text-[var(--color-text)]">Estado del producto</p>
+            <div className="mt-3">
+              <Switch
+                checked={productoForm.activo}
+                onChange={(checked) => setProductoForm((prev) => ({ ...prev, activo: checked }))}
+                label="Activo"
+                description="Si está inactivo no aparece para nuevas operaciones."
+              />
+            </div>
+          </div>
+
           {productoModal.mode === 'edit' && (
-            <div className="md:col-span-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm text-[var(--color-text-muted)]">
-              Costo promedio actual: <strong className="text-[var(--color-text)]">{formatMoney(Number(productos.find((row) => row.id === productoForm.id)?.costo_promedio || 0))}</strong>
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm text-[var(--color-text-muted)]">
+              Costo promedio actual: <strong className="text-[var(--color-text)]">{formatCurrency(Number(productos.find((row) => row.id === productoForm.id)?.costo_promedio || 0))}</strong>
             </div>
           )}
         </div>
@@ -893,9 +889,9 @@ export default function ProductosPage() {
                 Nueva categoría
               </Button>
             </div>
-            {(categoriaError || categoriaFeedback) && (
-              <Alert tone={categoriaError ? 'error' : 'success'} className="mb-4">
-                {categoriaError || categoriaFeedback}
+            {categoriaError && (
+              <Alert tone="error" className="mb-4">
+                {categoriaError}
               </Alert>
             )}
               <Tabla>
@@ -910,21 +906,15 @@ export default function ProductosPage() {
                 <TablaCuerpo>
                   {categoriasOrdenadas.map((categoria) => {
                     const totalProductos = categoriaUsageMap.get(String(categoria.id)) || 0;
+                    const productosLabel = `${totalProductos} ${totalProductos === 1 ? 'producto' : 'productos'}`;
                     return (
-                      <TablaFila key={categoria.id}>
+                      <TablaFila key={categoria.id} className="transition-colors hover:bg-[var(--color-surface-muted)]">
                         <TablaCelda className="font-semibold text-[var(--color-text)]">{categoria.nombre}</TablaCelda>
-                        <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{totalProductos}</TablaCelda>
+                        <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{productosLabel}</TablaCelda>
                         <TablaCelda>
-                          <Switch
-                            checked={categoriaStatusSwitch.resolveChecked(categoria)}
-                            onChange={(checked) => {
-                              setCategoriaFeedback('');
-                              categoriaStatusSwitch.requestChange(categoria, checked);
-                            }}
-                            label={categoriaStatusSwitch.resolveChecked(categoria) ? 'Activa' : 'Inactiva'}
-                            busy={categoriaStatusSwitch.isPending(categoria)}
-                            disabled={categoriaStatusSwitch.isPending(categoria)}
-                          />
+                          <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${Boolean(categoria.activo ?? true) ? 'border-green-200 bg-green-50 text-green-700' : 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'}`}>
+                            {Boolean(categoria.activo ?? true) ? 'Activa' : 'Inactiva'}
+                          </span>
                         </TablaCelda>
                         <TablaCelda>
                           <TableActions>
@@ -989,12 +979,13 @@ export default function ProductosPage() {
             />
           </Field>
 
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+          <div className="space-y-2 rounded-lg border border-[var(--color-border)] px-3 py-2">
+            <p className={labelClassName()}>Estado</p>
             <Switch
               checked={categoriaForm.activo}
               onChange={(checked) => setCategoriaForm((prev) => ({ ...prev, activo: checked }))}
               label="Categoría activa"
-              description="Si está inactiva deja de aparecer como opción en formularios."
+              description="Si está inactiva, dejará de aparecer en formularios y nuevas operaciones."
             />
           </div>
 
@@ -1009,27 +1000,36 @@ export default function ProductosPage() {
         </div>
       </Modal>
 
-      <ConfirmDialog
-        open={Boolean(productoStatusSwitch.confirmState)}
-        onClose={productoStatusSwitch.cancelConfirm}
-        onConfirm={productoStatusSwitch.confirmChange}
-        title="Desactivar producto"
-        description={productoStatusSwitch.confirmState ? `Vas a desactivar el producto ${productoStatusSwitch.confirmState.item.nombre}.` : ''}
-        confirmLabel={productoStatusSwitch.confirmState && productoStatusSwitch.isPending(productoStatusSwitch.confirmState.item) ? 'Desactivando...' : 'Si, desactivar'}
-        confirmVariant="danger"
-        confirmLoading={Boolean(productoStatusSwitch.confirmState && productoStatusSwitch.isPending(productoStatusSwitch.confirmState.item))}
-      />
-
-      <ConfirmDialog
-        open={Boolean(categoriaStatusSwitch.confirmState)}
-        onClose={categoriaStatusSwitch.cancelConfirm}
-        onConfirm={categoriaStatusSwitch.confirmChange}
-        title="Desactivar categoría"
-        description={categoriaStatusSwitch.confirmState ? `Vas a desactivar la categoría ${categoriaStatusSwitch.confirmState.item.nombre}.` : ''}
-        confirmLabel={categoriaStatusSwitch.confirmState && categoriaStatusSwitch.isPending(categoriaStatusSwitch.confirmState.item) ? 'Desactivando...' : 'Si, desactivar'}
-        confirmVariant="danger"
-        confirmLoading={Boolean(categoriaStatusSwitch.confirmState && categoriaStatusSwitch.isPending(categoriaStatusSwitch.confirmState.item))}
-      />
+      <Modal open={Boolean(categoriaDeactivateConfirm)} onClose={() => setCategoriaDeactivateConfirm(null)} maxWidthClass="max-w-md" panelClassName="p-5">
+        <div className="space-y-4">
+          <div>
+            <h3 className="ui-panel-title">Desactivar categoría</h3>
+            <p className="ui-panel-description">
+              La categoría dejará de aparecer en formularios y nuevas operaciones.
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Categoría:</p>
+            <p className="text-sm font-semibold text-[var(--color-text)]">{categoriaDeactivateConfirm?.nombre}</p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCategoriaDeactivateConfirm(null)} disabled={categoriaSaving}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={async () => {
+                if (!categoriaDeactivateConfirm?.payload) return;
+                await commitSaveCategoria(categoriaDeactivateConfirm.payload);
+                setCategoriaDeactivateConfirm(null);
+              }}
+              disabled={categoriaSaving}
+            >
+              {categoriaSaving ? 'Desactivando...' : 'Desactivar categoría'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={Boolean(categoriaDeleteTarget)}
@@ -1041,14 +1041,19 @@ export default function ProductosPage() {
         confirmVariant="danger"
       />
 
-      <Modal open={Boolean(categoriaDeleteError)} onClose={() => setCategoriaDeleteError('')} maxWidthClass="max-w-lg" panelClassName="p-5">
+      <Modal open={Boolean(categoriaDeleteError)} onClose={() => setCategoriaDeleteError(null)} maxWidthClass="max-w-lg" panelClassName="p-5">
         <div className="space-y-4">
           <div>
-            <h3 className="ui-panel-title">No se pudo completar la acción</h3>
-            <p className="ui-panel-description">{categoriaDeleteError}</p>
+            <h3 className="ui-panel-title">No se puede eliminar</h3>
+            <p className="ui-panel-description">{categoriaDeleteError?.message || 'No se pudo completar la acción'}</p>
+            {Number.isFinite(Number(categoriaDeleteError?.totalProductos)) ? (
+              <p className="mt-2 text-sm font-semibold text-[var(--color-text)]">
+                Productos asociados: {categoriaDeleteError.totalProductos}
+              </p>
+            ) : null}
           </div>
           <div className="flex justify-end">
-            <Button variant="secondary" onClick={() => setCategoriaDeleteError('')}>
+            <Button variant="secondary" onClick={() => setCategoriaDeleteError(null)}>
               Entendido
             </Button>
           </div>

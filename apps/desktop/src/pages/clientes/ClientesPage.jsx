@@ -78,7 +78,6 @@ export default function ClientesPage() {
   const turnoActual = useCajaStore((state) => state.turnoActual);
   const fetchTurnoActual = useCajaStore((state) => state.fetchTurnoActual);
   const configuracion = useConfiguracionStore((state) => state.configuracion);
-  const metodosPago = useConfiguracionStore((state) => state.metodosPago);
   const cargarMetodosPago = useConfiguracionStore((state) => state.cargarMetodosPago);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -285,13 +284,7 @@ export default function ClientesPage() {
     return Math.max(0, saldo - (Number.isFinite(monto) ? monto : 0));
   }, [abonoModal?.saldo_credito, abonoForm.monto]);
 
-  const metodosPagoDisponibles = useMemo(() => {
-    const habilitados = (metodosPago || [])
-      .filter((method) => method.habilitado)
-      .map((method) => String(method.codigo || '').toUpperCase());
-    const base = habilitados.length ? habilitados : ['EFECTIVO', 'TRANSFERENCIA'];
-    return base.filter((code, index) => base.indexOf(code) === index);
-  }, [metodosPago]);
+  const metodosPagoDisponibles = useMemo(() => ['EFECTIVO', 'TRANSFERENCIA'], []);
 
   const abrirModalAbono = async (cliente) => {
     if (toNumber(cliente.saldo_credito) <= 0) return;
@@ -660,15 +653,27 @@ export default function ClientesPage() {
             />
           </Field>
           <Field label="Saldo después del abono">
-            <div className={`h-11 rounded-[10px] border px-3 py-2 ${saldoPosterior <= 0
-              ? 'border-green-200 bg-green-50 text-green-700'
-              : 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text)]'}`}
-            >
-              <p className="text-base font-semibold">
-                {saldoPosterior <= 0 ? 'Pagado completamente' : formatMoney(saldoPosterior)}
-              </p>
-              {saldoPosterior <= 0 ? <p className="text-xs font-medium text-green-700/85">{formatMoney(saldoPosterior)}</p> : null}
-            </div>
+            {(() => {
+              const saldoPagadoCompleto = saldoPosterior <= 0;
+              return (
+                <div
+                  className={`min-h-[52px] rounded-lg border px-3 py-2 ${saldoPagadoCompleto
+                    ? 'border-green-200 bg-green-50 text-green-700'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface-alt)] text-[var(--color-text)]'}`}
+                >
+                  {saldoPagadoCompleto ? (
+                    <div className="flex h-full min-h-[36px] flex-col justify-center">
+                      <p className="text-sm font-semibold">Pagado completamente</p>
+                      <p className="mt-0.5 text-sm font-bold">{formatMoney(0)}</p>
+                    </div>
+                  ) : (
+                    <div className="flex h-full min-h-[36px] items-center">
+                      <p className="text-base font-semibold">{formatMoney(saldoPosterior)}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </Field>
           <Field label="Método de pago" required error={abonoFormErrors.errors.metodo_pago}>
             <Select

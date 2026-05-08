@@ -11,6 +11,7 @@ import ClientesPage from '../pages/clientes/ClientesPage';
 import ClienteDetallePage from '../pages/clientes/ClienteDetallePage';
 import ProveedoresPage from '../pages/proveedores/ProveedoresPage';
 import ProveedorDetallePage from '../pages/proveedores/ProveedorDetallePage';
+import ProveedorFacturaDetallePage from '../pages/proveedores/ProveedorFacturaDetallePage';
 import ProductosPage from '../pages/productos/ProductosPage';
 import ComprasPage from '../pages/compras/ComprasPage';
 import CompraNuevaPage from '../pages/compras/CompraNuevaPage';
@@ -51,6 +52,7 @@ export const appRoutes = [
             children: [
               { path: '/proveedores', element: <ProveedoresPage /> },
               { path: '/proveedores/:id', element: <ProveedorDetallePage /> },
+              { path: '/proveedores/:id/facturas/:facturaId', element: <ProveedorFacturaDetallePage /> },
               { path: '/productos', element: <ProductosPage /> },
               { path: '/compras', element: <ComprasPage /> },
               { path: '/compras/nueva', element: <CompraNuevaPage /> },
