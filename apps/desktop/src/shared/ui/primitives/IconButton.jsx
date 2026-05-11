@@ -1,17 +1,26 @@
 import clsx from 'clsx';
 import Button from './Button';
+import { uiClassTokens } from '../../tokens/uiClassTokens';
 
-export default function IconButton({ className, size = 'md', variant = 'icon', 'aria-label': ariaLabel, children, ...props }) {
-  const resolvedSize = size === 'lg' ? 'lg' : 'icon';
+export default function IconButton({
+  variant = 'neutral',
+  size = 'md',
+  className,
+  ariaLabel,
+  children,
+  ...props
+}) {
+  const sizeClass = size === 'lg'
+    ? 'h-10 w-10 rounded-xl'
+    : size === 'sm'
+      ? 'h-8 w-8 rounded-lg'
+      : 'h-9 w-9 rounded-[10px]';
+
   return (
     <Button
       variant={variant}
-      size={resolvedSize}
-      className={clsx(
-        'ui-icon-btn shadow-none',
-        size === 'lg' && 'h-10 w-10',
-        className
-      )}
+      size="icon"
+      className={clsx(uiClassTokens.button.iconAction, sizeClass, className)}
       aria-label={ariaLabel}
       {...props}
     >

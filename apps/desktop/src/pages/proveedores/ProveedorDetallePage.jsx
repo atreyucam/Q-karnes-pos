@@ -13,6 +13,7 @@ import {
   PageHeader,
   Paginador,
   DeactivateEntityDialogs,
+  StatusBadge,
   Switch,
   TableActions,
   TableActionButton,
@@ -106,7 +107,9 @@ export default function ProveedorDetallePage() {
   const [deactivateLoading, setDeactivateLoading] = useState(false);
   const [blockedDeactivateOpen, setBlockedDeactivateOpen] = useState(false);
   const [statusToast, setStatusToast] = useState('');
+  const [statusToastError, setStatusToastError] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
+  const [errorToastVisible, setErrorToastVisible] = useState(false);
   const proveedorFormErrors = useFormErrors();
 
   const proveedorId = Number(id);
@@ -160,6 +163,17 @@ export default function ProveedorDetallePage() {
     };
   }, [statusToast]);
 
+  useEffect(() => {
+    if (!statusToastError) return undefined;
+    setErrorToastVisible(true);
+    const hideTimer = window.setTimeout(() => setErrorToastVisible(false), 2400);
+    const clearTimer = window.setTimeout(() => setStatusToastError(''), 2580);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToastError]);
+
   const onRegistrarPago = async (payload) => {
     await pagarCredito(proveedorId, payload);
     setModalPago(null);
@@ -203,6 +217,7 @@ export default function ProveedorDetallePage() {
     const quiereDesactivar = estabaActivo && !proveedorForm.activo;
     if (quiereDesactivar && saldoProveedor > 0) {
       setBlockedDeactivateOpen(true);
+      setStatusToastError('No se puede desactivar este proveedor porque mantiene deuda pendiente.');
       return;
     }
 
@@ -217,9 +232,12 @@ export default function ProveedorDetallePage() {
     };
 
     await actualizar(proveedorId, payload);
+    setStatusToast('Proveedor actualizado correctamente.');
+    if (proveedorForm.tiene_credito !== Boolean(proveedorDetalle?.tiene_credito)) {
+      setStatusToast('Crédito del proveedor actualizado correctamente.');
+    }
     closeProveedorModal();
     await loadData();
-    setStatusToast('Proveedor actualizado.');
   };
 
   const onToggleProveedor = async () => {
@@ -228,6 +246,7 @@ export default function ProveedorDetallePage() {
     if (proveedorDetalle.activo) {
       if (saldoProveedor > 0) {
         setBlockedDeactivateOpen(true);
+        setStatusToastError('No se puede desactivar este proveedor porque mantiene deuda pendiente.');
         return;
       }
       setConfirmDeactivateOpen(true);
@@ -239,7 +258,7 @@ export default function ProveedorDetallePage() {
       await loadData();
       setStatusToast('Proveedor ha sido activado.');
     } catch (_) {
-      // store error already exposed in page alert
+      setStatusToastError('Error al actualizar proveedor.');
     }
   };
 
@@ -251,6 +270,7 @@ export default function ProveedorDetallePage() {
       await loadData();
       setStatusToast('Proveedor ha sido desactivado.');
     } catch (_) {
+      setStatusToastError('Error al actualizar proveedor.');
       setConfirmDeactivateOpen(false);
     } finally {
       setDeactivateLoading(false);
@@ -262,6 +282,11 @@ export default function ProveedorDetallePage() {
       {statusToast ? (
         <div className="fixed right-5 top-5 z-[1200]">
           <Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast>
+        </div>
+      ) : null}
+      {statusToastError ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast tone="danger" className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToastError}</Toast>
         </div>
       ) : null}
 
@@ -311,25 +336,17 @@ export default function ProveedorDetallePage() {
               <div className="space-y-1.5">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Estado</p>
                 {proveedorDetalle.activo ? (
-                  <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
-                    Activo
-                  </span>
+                  <StatusBadge status="ACTIVO" />
                 ) : (
-                  <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                    Inactivo
-                  </span>
+                  <StatusBadge status="INACTIVO" />
                 )}
               </div>
               <div className="space-y-1.5">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Crédito / días</p>
                 {proveedorDetalle.tiene_credito ? (
-                  <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
-                    Crédito • {Number(proveedorDetalle.dias_pago || 0)} días
-                  </span>
+                  <StatusBadge tone="warning">Crédito • {Number(proveedorDetalle.dias_pago || 0)} días</StatusBadge>
                 ) : (
-                  <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                    Sin crédito
-                  </span>
+                  <StatusBadge tone="neutral">Sin crédito</StatusBadge>
                 )}
               </div>
               <div className="space-y-1.5">
@@ -345,13 +362,9 @@ export default function ProveedorDetallePage() {
               </p>
               <div className="mt-2">
                 {saldoProveedor > 0 ? (
-                  <span className="inline-flex rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
-                    Pendiente
-                  </span>
+                  <StatusBadge tone="warning">Pendiente</StatusBadge>
                 ) : (
-                  <span className="inline-flex rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                    Sin deuda
-                  </span>
+                  <StatusBadge tone="neutral">Sin deuda</StatusBadge>
                 )}
               </div>
               <p className="mt-2 text-xs font-medium text-[var(--color-text)]">
@@ -395,58 +408,45 @@ export default function ProveedorDetallePage() {
                   <TablaCelda className="py-3">{formatDateQuito(factura.fecha)}</TablaCelda>
                   <TablaCelda className="py-3">
                     {condicion === 'Crédito' ? (
-                      <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
-                        Crédito
-                      </span>
+                      <StatusBadge tone="warning">Crédito</StatusBadge>
                     ) : (
-                      <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                        Contado
-                      </span>
+                      <StatusBadge tone="neutral">Contado</StatusBadge>
                     )}
                   </TablaCelda>
                   <TablaCelda className="py-3 text-right font-semibold text-[var(--color-text)]">{formatMoney(factura.total)}</TablaCelda>
                   <TablaCelda className="py-3 text-right">
                     {pendiente > 0 ? (
-                      <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
-                        Pendiente {formatMoney(pendiente)}
-                      </span>
+                      <StatusBadge tone="warning">Pendiente {formatMoney(pendiente)}</StatusBadge>
                     ) : (
-                      <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                        Sin deuda
-                      </span>
+                      <StatusBadge tone="neutral">Sin deuda</StatusBadge>
                     )}
                   </TablaCelda>
                   <TablaCelda className="py-3">
                     {estado === 'Pendiente' ? (
-                      <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
-                        Pendiente
-                      </span>
+                      <StatusBadge tone="warning">Pendiente</StatusBadge>
                     ) : (
-                      <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
-                        Pagada
-                      </span>
+                      <StatusBadge tone="success">Pagada</StatusBadge>
                     )}
                   </TablaCelda>
                   <TablaCelda className="py-3">
                     <div className="flex justify-end">
                       <TableActions>
                         <TableActionButton
-                          variant="neutral"
+                          variant="view"
                           icon={<PiEye />}
                           aria-label="Ver factura"
                           title="Ver factura"
-                          className="border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]"
                           onClick={() => navigate(`/proveedores/${proveedorId}/facturas/${factura.id}`)}
                         >
                           Ver
                         </TableActionButton>
                         {sinPendiente ? null : (
                           <TableActionButton
-                            variant="secondary"
+                            variant="primary"
                             icon={<PiCurrencyDollar />}
                             aria-label="Pagar factura"
                             title="Pagar factura"
-                            className="h-8 border border-[var(--color-text)] bg-[var(--color-text)] px-3 text-white hover:border-black hover:bg-black"
+
                             onClick={() => setModalPago(factura)}
                           >
                             Pagar
@@ -474,11 +474,11 @@ export default function ProveedorDetallePage() {
 
       {loading ? <LoadingState label="Cargando proveedor..." /> : null}
 
-      <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
+      <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-4xl" panelClassName="p-5">
         <div className="ui-modal-header">
           <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Editar proveedor</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, crédito y estado.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, crédito y estado del proveedor.</p>
           </div>
           <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeProveedorModal}>
             X
@@ -516,12 +516,7 @@ export default function ProveedorDetallePage() {
             />
           </Field>
 
-          <Field
-            label="Días de pago"
-            hint="Solo aplica cuando el proveedor trabaja a crédito."
-            error={proveedorFormErrors.errors.dias_pago}
-            className="md:col-span-2"
-          >
+          <Field label="Días de pago" hint="Solo aplica cuando compras a crédito está activo." error={proveedorFormErrors.errors.dias_pago}>
             <Input
               className={
                 !proveedorForm.tiene_credito
@@ -547,22 +542,33 @@ export default function ProveedorDetallePage() {
             />
           </Field>
 
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-            <Switch
-              checked={proveedorForm.tiene_credito}
-              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, tiene_credito: checked }))}
-              label="Tiene crédito"
-              description="Habilita compras a crédito y saldo pendiente."
-            />
-          </div>
-
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-            <Switch
-              checked={proveedorForm.activo}
-              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, activo: checked }))}
-              label="Proveedor activo"
-              description="Si está inactivo no aparece para nuevas órdenes."
-            />
+          <div className="md:col-span-2 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Configuración comercial</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+                <Switch
+                  checked={proveedorForm.activo}
+                  onChange={(checked) => setProveedorForm((prev) => ({ ...prev, activo: checked }))}
+                  label="Proveedor activo"
+                  description="Si está inactivo no aparece como opción para nuevas compras."
+                />
+              </div>
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+                <Switch
+                  checked={proveedorForm.tiene_credito}
+                  onChange={(checked) => setProveedorForm((prev) => ({ ...prev, tiene_credito: checked }))}
+                  label="Compras a crédito"
+                  description="Permite registrar nuevas compras con saldo pendiente."
+                />
+              </div>
+            </div>
+            {(saldoProveedor > 0 || totalFacturasPendientes > 0) ? (
+              <div className="rounded-xl border border-[#F5D08A] bg-[#FFF7E6] p-3 text-sm text-[#9A6700]">
+                <p>Deuda pendiente actual: ${Number(saldoProveedor || 0).toFixed(2)}</p>
+                <p>Facturas pendientes: {Number(totalFacturasPendientes || 0)}</p>
+                <p>Desactivar esta opción solo impedirá nuevas compras a crédito. Las cuentas pendientes seguirán activas.</p>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -593,7 +599,7 @@ export default function ProveedorDetallePage() {
         entityType="proveedor"
         entityName={proveedorDetalle?.nombre || '-'}
         pendingAmountLabel={formatMoney(saldoProveedor)}
-        blockedMessage="El proveedor mantiene cuentas pendientes por pagar."
+        blockedMessage="No se puede desactivar este proveedor porque mantiene deuda pendiente."
         confirmLoading={deactivateLoading}
         onCloseConfirm={() => setConfirmDeactivateOpen(false)}
         onConfirm={onConfirmDeactivate}

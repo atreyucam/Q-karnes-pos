@@ -23,6 +23,8 @@ export function businessTodayString() {
   return `${year}-${month}-${day}`;
 }
 
+export const todayString = businessTodayString;
+
 export function shiftDate(dateString, days) {
   const source = new Date(`${dateString}T00:00:00Z`);
   source.setUTCDate(source.getUTCDate() + Number(days || 0));

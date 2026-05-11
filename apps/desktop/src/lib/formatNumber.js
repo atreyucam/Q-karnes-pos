@@ -15,7 +15,10 @@ export function formatCurrency(value) {
 
 export function formatWeight(value, unit = '') {
   const normalizedUnit = String(unit || '').trim().toUpperCase();
+  const numericValue = toSafeNumber(value);
   const suffix = normalizedUnit ? ` ${normalizedUnit}` : '';
-  return `${formatNumber(value)}${suffix}`;
+  if (normalizedUnit === 'UND') return `${Math.trunc(numericValue)}${suffix}`;
+  if (normalizedUnit === 'KG' || normalizedUnit === 'LB') return `${numericValue.toFixed(3)}${suffix}`;
+  return `${formatNumber(numericValue)}${suffix}`;
 }
 

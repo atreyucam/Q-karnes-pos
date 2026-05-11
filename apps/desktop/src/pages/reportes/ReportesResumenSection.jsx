@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PiCashRegister, PiChartBar, PiPackage, PiReceipt, PiWarningCircle } from 'react-icons/pi';
+import { useEffect, useMemo, useState } from 'react';
+import { PiCashRegister, PiPackage, PiReceipt, PiStorefront, PiUsersThree, PiWarningCircle } from 'react-icons/pi';
 import {
   Alert,
   EmptyState,
+  Input,
   LoadingState,
   MetricTile,
-  Paginador,
+  PageHeader,
   Panel,
   StatusChip,
   Table,
@@ -15,335 +16,286 @@ import {
   TableRow
 } from '../../shared/ui';
 import { useReportesStore } from '../../stores/reportesStore';
-import ReportDateFilters from './ReportesFilters';
-import { ChartPanel, HorizontalBarChart, PaymentDonutChart, SalesLineChart } from './ReportesCharts';
-import { exportRowsToCsv } from './reportesExport';
-import {
-  createDefaultQuickFilters,
-  formatCentavos,
-  formatDateLabel,
-  formatDateOnly,
-  formatNumber,
-  formatPercent,
-  formatSignedCentavos,
-  sanitizeDateRange
-} from './reportesUtils';
-import { useReportTablePagination } from './useReportTablePagination';
+import { ChartPanel, VerticalBarChart } from './ReportesCharts';
+import { businessTodayString, formatCentavos, formatDateLabel, formatNumber, formatSignedPercent } from './reportesUtils';
+import { useDebouncedValue } from './useDebouncedValue';
 
-function normalizePaymentLabel(code = '') {
-  const normalized = String(code || '').trim().toUpperCase();
-  if (normalized === 'CREDITO_CLIENTE') return 'Crédito cliente';
-  if (normalized === 'CONTADO') return 'Contado';
-  if (normalized === 'EFECTIVO') return 'Efectivo';
-  if (normalized === 'TRANSFERENCIA') return 'Transferencia';
-  if (normalized === 'TARJETA') return 'Tarjeta';
-  return normalized || 'Sin método';
+function toneBySigned(value) {
+  const amount = Number(value || 0);
+  if (amount > 0) return 'text-emerald-600';
+  if (amount < 0) return 'text-red-600';
+  return 'text-slate-500';
+}
+
+function toneByCount(value, warningThreshold = 1) {
+  const amount = Number(value || 0);
+  if (amount <= 0) return 'text-slate-500';
+  if (amount >= warningThreshold) return 'text-red-600';
+  return 'text-amber-600';
+}
+
+function SummaryTable({ title, subtitle, columns, rows, emptyTitle, emptyDescription }) {
+  return (
+    <Panel className="p-0">
+      <div className="border-b border-[var(--color-border)] px-4 py-4">
+        <h3 className="text-base font-semibold text-[var(--color-text)]">{title}</h3>
+        <p className="text-sm text-[var(--color-text-muted)]">{subtitle}</p>
+      </div>
+      {rows.length === 0 ? (
+        <div className="p-4">
+          <EmptyState title={emptyTitle} description={emptyDescription} />
+        </div>
+      ) : (
+        <Table>
+          <TableHead>
+            <TableRow>
+              {columns.map((column) => (
+                <TableCell key={column.key} as="th" className={column.className}>{column.label}</TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody emptyColSpan={columns.length} emptyMessage="Sin datos disponibles.">
+            {rows.map((row, index) => (
+              <TableRow key={row.id || row.producto_id || row.cliente_id || row.proveedor_id || `${title}-${index}`}>
+                {columns.map((column) => (
+                  <TableCell key={column.key} className={column.className}>
+                    {column.render ? column.render(row) : row[column.key]}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Panel>
+  );
 }
 
 export default function ReportesResumenSection() {
   const cargarReporte = useReportesStore((state) => state.cargarReporte);
-  const views = useReportesStore((state) => state.views);
-  const [filters, setFilters] = useState(() => createDefaultQuickFilters('last7'));
-
-  const loadSection = useCallback(async (currentFilters) => {
-    const range = sanitizeDateRange(currentFilters);
-    await Promise.all([
-      cargarReporte('dashboard', {}, true),
-      cargarReporte('ventasPeriodo', range, true),
-      cargarReporte('ventasDiarias', range, true),
-      cargarReporte('ventasPorProducto', range, true),
-      cargarReporte('inventarioActual', {}, true),
-      cargarReporte('inventario', {}, true),
-      cargarReporte('cajaDiaria', { fecha: range.fecha_fin }, true)
-    ]);
-  }, [cargarReporte]);
+  const view = useReportesStore((state) => state.views.resumenOperativo);
+  const [filters, setFilters] = useState(() => ({
+    fecha: businessTodayString()
+  }));
+  const debouncedFilters = useDebouncedValue(filters, 280);
 
   useEffect(() => {
-    loadSection(filters);
-  }, [loadSection, filters]);
+    cargarReporte('resumenOperativo', debouncedFilters);
+  }, [cargarReporte, debouncedFilters]);
 
-  const loading = [
-    views.dashboard.loading,
-    views.ventasPeriodo.loading,
-    views.ventasDiarias.loading,
-    views.ventasPorProducto.loading,
-    views.inventarioActual.loading,
-    views.inventario.loading,
-    views.cajaDiaria.loading
-  ].some(Boolean);
-
-  const hasData = Boolean(
-    views.dashboard.data ||
-    views.ventasPeriodo.data ||
-    views.ventasDiarias.data ||
-    views.ventasPorProducto.data ||
-    views.inventarioActual.data
-  );
-
-  const error = views.dashboard.error || views.ventasPeriodo.error || views.inventario.error || views.cajaDiaria.error;
-
-  const resumenVentas = views.ventasPeriodo.data?.resumen || {};
-  const ventasRows = views.ventasPeriodo.data?.ventas || [];
-  const seriesVentas = (views.ventasDiarias.data || []).map((row) => ({
-    label: formatDateOnly(row.fecha),
-    value: Number(row.total || 0) * 100
-  }));
-  const topProductos = (views.ventasPorProducto.data?.items || []).slice(0, 8).map((row) => ({
-    label: `${row.codigo} ${row.nombre}`.slice(0, 28),
-    value: Number(row.ingreso_total_centavos || 0)
-  }));
-  const inventarioResumen = views.inventarioActual.data?.resumen || {};
-  const inventarioRows = views.inventario.data?.items || [];
-  const lowStockRows = inventarioRows
-    .filter((row) => row.bajo_minimo)
-    .slice(0, 8)
-    .map((row) => ({
-      codigo: row.codigo,
-      producto: row.producto,
-      stock_actual: row.stock_actual,
-      stock_minimo: row.stock_minimo,
-      unidad: row.unidad_medida
-    }));
-  const cajaResumen = views.cajaDiaria.data?.resumen || {};
-  const dashboardData = views.dashboard.data || {};
-  const alerts = dashboardData.alertas_operativas || [];
-
-  const paymentDistribution = useMemo(() => {
-    const grouped = new Map();
-    for (const row of ventasRows) {
-      const key = normalizePaymentLabel(row.metodo_pago_codigo);
-      grouped.set(key, Number(grouped.get(key) || 0) + Number(row.total_ventas_centavos || 0));
-    }
-    return Array.from(grouped.entries())
-      .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [ventasRows]);
+  const data = view.data;
+  const loading = view.loading;
+  const error = view.error;
+  const resumen = data?.resumen || {};
+  const ventas7 = data?.ventas_ultimos_7_dias || [];
+  const tablas = data?.tablas || {};
+  const actividad = data?.actividad_reciente || [];
+  const alertas = data?.alertas || [];
 
   const kpis = [
     {
-      label: 'Ventas netas',
-      value: formatCentavos(resumenVentas.total_ventas_centavos),
+      label: 'Ventas Hoy',
+      value: formatCentavos(resumen.ventas_hoy_centavos),
+      note: `${formatSignedPercent(resumen.variacion_ventas_vs_ayer_porcentaje)} vs ayer`,
+      noteClass: toneBySigned(resumen.variacion_ventas_vs_ayer_porcentaje),
       icon: PiCashRegister
     },
     {
-      label: 'Número de ventas',
-      value: formatNumber(resumenVentas.numero_ventas),
+      label: 'Ticket Promedio',
+      value: formatCentavos(resumen.ticket_promedio_centavos),
+      note: `${formatNumber(resumen.numero_ventas)} ventas`,
       icon: PiReceipt
     },
     {
-      label: 'Ticket promedio',
-      value: formatCentavos(resumenVentas.ticket_promedio_centavos),
+      label: 'Caja Actual',
+      value: formatCentavos(resumen.caja_actual_centavos),
+      note: Number(resumen.caja_diferencia_centavos || 0) === 0 ? 'Sin diferencias' : `Diferencia ${formatCentavos(Math.abs(resumen.caja_diferencia_centavos || 0))}`,
+      noteClass: Number(resumen.caja_diferencia_centavos || 0) === 0 ? 'text-emerald-600' : toneBySigned(-Math.abs(resumen.caja_diferencia_centavos || 0)),
       icon: PiCashRegister
     },
     {
-      label: 'Utilidad',
-      value: formatCentavos(resumenVentas.utilidad_centavos),
-      icon: PiChartBar
-    },
-    {
-      label: 'Caja esperada',
-      value: formatCentavos(cajaResumen.saldo_esperado_centavos),
-      icon: PiCashRegister
-    },
-    {
-      label: 'Diferencia caja',
-      value: formatSignedCentavos(cajaResumen.diferencia_centavos),
+      label: 'Stock Crítico',
+      value: `${formatNumber(resumen.stock_critico)} productos`,
+      note: `${formatNumber(resumen.inconsistencias_stock)} inconsistencias`,
+      noteClass: toneByCount(resumen.inconsistencias_stock),
       icon: PiWarningCircle
     },
     {
-      label: 'Inventario valorizado',
-      value: formatCentavos(inventarioResumen.valor_total_inventario_centavos),
-      icon: PiPackage
+      label: 'Clientes con Deuda',
+      value: `${formatNumber(resumen.clientes_con_deuda)} clientes`,
+      note: `Saldo: ${formatCentavos(resumen.deuda_clientes_centavos)}`,
+      noteClass: Number(resumen.deuda_clientes_centavos || 0) > 100000 ? 'text-red-600' : Number(resumen.deuda_clientes_centavos || 0) > 0 ? 'text-amber-600' : 'text-slate-500',
+      icon: PiUsersThree
     },
     {
-      label: 'Stock bajo',
-      value: formatNumber(inventarioRows.filter((row) => row.bajo_minimo).length),
-      icon: PiWarningCircle
+      label: 'Proveedores Pendientes',
+      value: `${formatNumber(resumen.proveedores_pendientes)} proveedores`,
+      note: `Saldo: ${formatCentavos(resumen.saldo_proveedores_centavos)}`,
+      noteClass: Number(resumen.saldo_proveedores_centavos || 0) > 0 ? 'text-amber-600' : 'text-slate-500',
+      icon: PiStorefront
     }
   ];
 
-  const latestSalesRows = (dashboardData.ultimas_ventas || []).map((row) => ({
-    venta: row.venta,
-    hora: row.hora,
-    cliente: row.cliente,
-    metodo: row.metodo,
-    total: formatCentavos(Math.round(Number(row.total || 0) * 100)),
-    usuario: row.usuario
-  }));
-  const latestSalesPagination = useReportTablePagination(latestSalesRows, 8);
-  const lowStockPagination = useReportTablePagination(lowStockRows, 8);
+  const chartData = useMemo(() => (
+    ventas7.map((row) => ({
+      label: new Intl.DateTimeFormat('es-EC', { weekday: 'short', day: '2-digit' }).format(new Date(`${row.fecha}T00:00:00`)),
+      value: Number(row.total_ventas_centavos || 0)
+    }))
+  ), [ventas7]);
+
+  if (loading && !data) {
+    return <LoadingState label="Construyendo resumen operativo..." />;
+  }
 
   return (
     <div className="space-y-5">
-      <ReportDateFilters
-        filters={filters}
-        setFilters={setFilters}
-        loading={loading}
-        submitLabel="Actualizar resumen"
-        showExport
-        onSubmit={(next) => loadSection(next)}
-        onExport={() => {
-          exportRowsToCsv('reportes-resumen-ultimas-ventas.csv', [
-            { key: 'venta', label: 'Venta' },
-            { key: 'hora', label: 'Hora' },
-            { key: 'cliente', label: 'Cliente' },
-            { key: 'metodo', label: 'Método' },
-            { key: 'total', label: 'Total' },
-            { key: 'usuario', label: 'Usuario' }
-          ], latestSalesRows);
-        }}
+      <PageHeader
+        title="Resumen Operativo"
+        description="Vista general del negocio en tiempo real"
+        actions={(
+          <Input
+            type="date"
+            value={filters.fecha}
+            onChange={(event) => setFilters({ fecha: event.target.value || businessTodayString() })}
+            className="w-[180px]"
+          />
+        )}
       />
 
       {error ? <Alert tone="error">{error}</Alert> : null}
-      {loading && !hasData ? <LoadingState label="Construyendo reporte resumen..." /> : null}
 
-      {hasData ? (
-        <>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {kpis.map((kpi) => (
-              <MetricTile key={kpi.label} icon={kpi.icon} value={kpi.value} label={kpi.label} tone="primary" />
-            ))}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {kpis.map((kpi) => (
+          <div key={kpi.label} className="rounded-[1.2rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+            <MetricTile icon={kpi.icon} value={kpi.value} label={kpi.label} tone="primary" className="border-0 bg-transparent px-0 py-0" />
+            <p className={`mt-2 text-sm font-semibold ${kpi.noteClass || 'text-[var(--color-text-muted)]'}`}>{kpi.note}</p>
           </div>
+        ))}
+      </div>
 
-          <div className="grid gap-4 xl:grid-cols-2">
-            <ChartPanel
-              title="Ventas por día"
-              subtitle="Evolución diaria de ventas netas dentro del rango seleccionado."
-            >
-              <SalesLineChart data={seriesVentas} yType="money" label="Ventas netas" />
-            </ChartPanel>
-            <ChartPanel
-              title="Métodos de pago"
-              subtitle="Distribución de ventas del periodo por método predominante."
-            >
-              <PaymentDonutChart data={paymentDistribution} />
-            </ChartPanel>
+      <ChartPanel
+        title="Ventas últimos 7 días"
+        subtitle="Siempre toma como referencia el día seleccionado."
+      >
+        <VerticalBarChart data={chartData} label="Ventas" />
+      </ChartPanel>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <SummaryTable
+          title="Productos críticos"
+          subtitle="Solo los casos más urgentes."
+          rows={tablas.productos_criticos || []}
+          emptyTitle="Sin productos críticos"
+          emptyDescription="No hay alertas críticas de stock para este corte."
+          columns={[
+            {
+              key: 'producto',
+              label: 'Producto',
+              render: (row) => ` ${row.producto}`
+            },
+            {
+              key: 'stock_actual',
+              label: 'Stock',
+              render: (row) => `${formatNumber(row.stock_actual)} ${row.unidad_medida}`
+            },
+            {
+              key: 'estado',
+              label: 'Estado',
+              render: (row) => (
+                <StatusChip tone={row.estado === 'SIN_STOCK' ? 'danger' : 'warning'}>
+                  {row.estado === 'SIN_STOCK' ? 'Sin stock' : 'Bajo mínimo'}
+                </StatusChip>
+              )
+            }
+          ]}
+        />
+
+        <SummaryTable
+          title="Clientes con deuda"
+          subtitle="Mayor exposición pendiente."
+          rows={tablas.clientes_con_deuda || []}
+          emptyTitle="Sin deuda activa"
+          emptyDescription="No hay clientes con saldo pendiente."
+          columns={[
+            { key: 'cliente', label: 'Cliente' },
+            {
+              key: 'saldo_pendiente_centavos',
+              label: 'Saldo',
+              className: 'text-right',
+              render: (row) => <span className={Number(row.saldo_pendiente_centavos || 0) > 100000 ? 'text-red-600 font-semibold' : 'text-amber-600 font-semibold'}>{formatCentavos(row.saldo_pendiente_centavos)}</span>
+            }
+          ]}
+        />
+
+        <SummaryTable
+          title="Proveedores pendientes"
+          subtitle="Facturas por pagar vigentes."
+          rows={tablas.proveedores_pendientes || []}
+          emptyTitle="Sin cuentas por pagar"
+          emptyDescription="No hay proveedores con saldo pendiente."
+          columns={[
+            { key: 'proveedor', label: 'Proveedor' },
+            {
+              key: 'saldo_pendiente_centavos',
+              label: 'Saldo',
+              className: 'text-right',
+              render: (row) => <span className="font-semibold text-amber-600">{formatCentavos(row.saldo_pendiente_centavos)}</span>
+            }
+          ]}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.95fr]">
+        <Panel className="p-0">
+          <div className="border-b border-[var(--color-border)] px-4 py-4">
+            <h3 className="text-base font-semibold text-[var(--color-text)]">Actividad reciente</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Solo eventos operativos relevantes.</p>
           </div>
-
-          <ChartPanel
-            title="Top productos"
-            subtitle="Productos con mayor ingreso dentro del periodo."
-          >
-            <HorizontalBarChart data={topProductos} xType="money" label="Ingreso" />
-          </ChartPanel>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Panel className="p-0">
-              <div className="border-b border-[var(--color-border)] px-4 py-4">
-                <h3 className="text-base font-semibold text-[var(--color-text)]">Últimas ventas</h3>
-                <p className="text-sm text-[var(--color-text-muted)]">Lectura rápida de emisión reciente.</p>
-              </div>
-              <div className="p-0">
-                {latestSalesRows.length === 0 ? (
-                  <div className="p-4">
-                    <EmptyState title="Sin ventas recientes" description="Las últimas ventas aparecerán aquí." />
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell as="th">Venta</TableCell>
-                        <TableCell as="th">Hora</TableCell>
-                        <TableCell as="th">Cliente</TableCell>
-                        <TableCell as="th">Método</TableCell>
-                        <TableCell as="th">Total</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody emptyMessage="Sin ventas registradas." emptyColSpan={5}>
-                      {latestSalesPagination.pagedRows.map((row) => (
-                        <TableRow key={`${row.venta}-${row.hora}`}>
-                          <TableCell>{row.venta}</TableCell>
-                          <TableCell>{row.hora}</TableCell>
-                          <TableCell>{row.cliente}</TableCell>
-                          <TableCell>{row.metodo}</TableCell>
-                          <TableCell>{row.total}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-                <div className="px-4 pb-4">
-                  <Paginador
-                    paginaActual={latestSalesPagination.page}
-                    totalPaginas={latestSalesPagination.totalPages}
-                    totalRegistros={latestSalesPagination.totalRecords}
-                    mostrarSiempre
-                    onPageChange={latestSalesPagination.setPage}
-                  />
-                </div>
-              </div>
-            </Panel>
-
-            <Panel className="p-0">
-              <div className="border-b border-[var(--color-border)] px-4 py-4">
-                <h3 className="text-base font-semibold text-[var(--color-text)]">Alertas de stock bajo</h3>
-                <p className="text-sm text-[var(--color-text-muted)]">Productos por debajo de mínimo operativo.</p>
-              </div>
-              <div className="p-0">
-                {lowStockRows.length === 0 ? (
-                  <div className="p-4">
-                    <EmptyState title="Sin alertas de stock" description="No existen productos bajo mínimo en este momento." />
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell as="th">Producto</TableCell>
-                        <TableCell as="th">Stock actual</TableCell>
-                        <TableCell as="th">Stock mínimo</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody emptyMessage="Sin productos críticos." emptyColSpan={3}>
-                      {lowStockPagination.pagedRows.map((row) => (
-                        <TableRow key={row.codigo}>
-                          <TableCell>{row.codigo} {row.producto}</TableCell>
-                          <TableCell>{row.stock_actual} {row.unidad}</TableCell>
-                          <TableCell>{row.stock_minimo} {row.unidad}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-                <div className="px-4 pb-4">
-                  <Paginador
-                    paginaActual={lowStockPagination.page}
-                    totalPaginas={lowStockPagination.totalPages}
-                    totalRegistros={lowStockPagination.totalRecords}
-                    mostrarSiempre
-                    onPageChange={lowStockPagination.setPage}
-                  />
-                </div>
-              </div>
-            </Panel>
-          </div>
-
-          <Panel className="p-0">
-            <div className="border-b border-[var(--color-border)] px-4 py-4">
-              <h3 className="text-base font-semibold text-[var(--color-text)]">Alertas operativas</h3>
-              <p className="text-sm text-[var(--color-text-muted)]">Señales de operación y control del negocio.</p>
+          {actividad.length === 0 ? (
+            <div className="p-4">
+              <EmptyState title="Sin actividad reciente" description="No se registran eventos recientes para mostrar." />
             </div>
-            {alerts.length === 0 ? (
-              <div className="p-4">
-                <EmptyState title="Sin alertas operativas" description="No se detectan alertas para el corte actual." />
-              </div>
-            ) : (
-              <div className="space-y-2 p-4">
-                {alerts.map((alert) => (
-                  <div key={alert.id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-[var(--color-text)]">{alert.title}</p>
-                      <StatusChip tone={alert.tone || 'warning'}>{alert.category || 'alerta'}</StatusChip>
-                    </div>
-                    <p className="mt-1 text-sm text-[var(--color-text-muted)]">{alert.description}</p>
+          ) : (
+            <div className="space-y-3 p-4">
+              {actividad.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-[var(--color-text)]">{item.titulo}</p>
+                    <span className="text-xs text-[var(--color-text-muted)]">{formatDateLabel(item.fecha)}</span>
                   </div>
-                ))}
-              </div>
-            )}
-          </Panel>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">{item.descripcion}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
 
-          {loading ? <LoadingState label="Actualizando resumen..." /> : null}
-        </>
-      ) : null}
+        <Panel className="p-0">
+          <div className="border-b border-[var(--color-border)] px-4 py-4">
+            <h3 className="text-base font-semibold text-[var(--color-text)]">Alertas críticas</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Solo excepciones operativas reales.</p>
+          </div>
+          {alertas.length === 0 ? (
+            <div className="p-4">
+              <EmptyState title="Sin alertas críticas" description="No hay alertas que requieran atención inmediata." />
+            </div>
+          ) : (
+            <div className="space-y-3 p-4">
+              {alertas.map((alerta) => (
+                <div key={alerta.id} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium text-[var(--color-text)]">{alerta.titulo}</p>
+                    <StatusChip tone={alerta.tone || 'warning'}>Alerta</StatusChip>
+                  </div>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">{alerta.descripcion}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      {loading ? <div className="text-sm text-[var(--color-text-muted)]">Actualizando resumen...</div> : null}
     </div>
   );
 }

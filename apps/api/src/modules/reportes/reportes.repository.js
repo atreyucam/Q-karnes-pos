@@ -49,6 +49,13 @@ function devolucionesPorDetalleSubquery(trx = db) {
     .as('ddv');
 }
 
+function resolveMetodoPagoFilter(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized === 'CREDITO') return 'CREDITO_CLIENTE';
+  return normalized;
+}
+
 async function dashboard(trx = db) {
   const devoluciones = devolucionesPorVentaSubquery(trx);
   const stockBalance = inventoryBalanceSubquery(trx);
@@ -364,6 +371,17 @@ async function comprasReporte(filters = {}, trx = db) {
       applyDateRange(qb, 'f.fecha', filters);
       if (filters.proveedor_id) qb.where('f.proveedor_id', Number(filters.proveedor_id));
       if (filters.metodo_pago) qb.whereRaw('UPPER(f.metodo_pago) = ?', [String(filters.metodo_pago).trim().toUpperCase()]);
+      if (filters.estado) {
+        qb.whereRaw(`
+          EXISTS (
+            SELECT 1
+            FROM compras_recepciones r
+            JOIN compras_ordenes o ON o.id = r.orden_id
+            WHERE r.factura_compra_id = f.id
+              AND UPPER(o.estado) = ?
+          )
+        `, [String(filters.estado).trim().toUpperCase()]);
+      }
     })
     .select(
       'f.id',
@@ -379,7 +397,15 @@ async function comprasReporte(filters = {}, trx = db) {
         WHERE r.factura_compra_id = f.id
         ORDER BY r.id DESC
         LIMIT 1
-      ) as orden_id`)
+      ) as orden_id`),
+      trx.raw(`(
+        SELECT o.estado
+        FROM compras_recepciones r
+        JOIN compras_ordenes o ON o.id = r.orden_id
+        WHERE r.factura_compra_id = f.id
+        ORDER BY r.id DESC
+        LIMIT 1
+      ) as estado_orden`)
     )
     .orderBy('f.fecha', 'desc')
     .orderBy('f.id', 'desc');
@@ -536,6 +562,7 @@ function saleNetLinesSubquery(bounds = {}, trx = db) {
       'vd.producto_id',
       'v.fecha',
       'v.usuario_id',
+      'v.metodo_pago_codigo',
       'p.codigo as producto_codigo',
       'p.nombre as producto_nombre',
       'p.unidad_medida',
@@ -591,7 +618,13 @@ function salesNetBySaleSubquery(bounds = {}, trx = db) {
   return trx('ventas as v')
     .leftJoin(netLines, 'sale_net_lines.venta_id', 'v.id')
     .whereNot('v.estado', 'ANULADA')
-    .modify((qb) => applyDateRange(qb, 'v.fecha', bounds))
+    .modify((qb) => {
+      applyDateRange(qb, 'v.fecha', bounds);
+      if (bounds.usuario_id) qb.where('v.usuario_id', Number(bounds.usuario_id));
+      if (bounds.metodo_pago) {
+        qb.whereRaw('UPPER(COALESCE(v.metodo_pago_codigo, ?)) = ?', ['EFECTIVO', resolveMetodoPagoFilter(bounds.metodo_pago)]);
+      }
+    })
     .groupBy(
       'v.id',
       'v.fecha',
@@ -641,6 +674,8 @@ async function listSalesNetByPeriod(bounds = {}, trx = db) {
 
   return trx.from(salesNet)
     .leftJoin('usuarios as u', 'u.id', 'sales_net_by_sale.usuario_id')
+    .leftJoin('ventas as v', 'v.id', 'sales_net_by_sale.venta_id')
+    .leftJoin('clientes as c', 'c.id', 'v.cliente_id')
     .select(
       'sales_net_by_sale.venta_id',
       'sales_net_by_sale.fecha',
@@ -650,6 +685,7 @@ async function listSalesNetByPeriod(bounds = {}, trx = db) {
       'sales_net_by_sale.turno_id',
       'sales_net_by_sale.metodo_pago_codigo',
       'u.nombre as usuario_nombre',
+      'c.nombre as cliente_nombre',
       'sales_net_by_sale.total_ventas_centavos',
       'sales_net_by_sale.total_costo_centavos',
       'sales_net_by_sale.utilidad_centavos'
@@ -674,6 +710,10 @@ async function listSalesProductBreakdown(bounds = {}, trx = db) {
     .modify((qb) => {
       if (bounds.producto_id) qb.where('sale_net_lines.producto_id', Number(bounds.producto_id));
       if (bounds.categoria_id) qb.where('p.categoria_id', Number(bounds.categoria_id));
+      if (bounds.usuario_id) qb.where('sale_net_lines.usuario_id', Number(bounds.usuario_id));
+      if (bounds.metodo_pago) {
+        qb.whereRaw('UPPER(COALESCE(sale_net_lines.metodo_pago_codigo, ?)) = ?', ['EFECTIVO', resolveMetodoPagoFilter(bounds.metodo_pago)]);
+      }
     })
     .groupBy(
       'sale_net_lines.producto_id',
@@ -812,6 +852,7 @@ async function getTransformacionesReport(bounds = {}, trx = db) {
     .modify((qb) => {
       applyDateRange(qb, 't.fecha', bounds);
       if (bounds.estado) qb.where('t.estado', bounds.estado);
+      if (bounds.producto_padre_id) qb.where('i.producto_id', Number(bounds.producto_padre_id));
     })
     .select(
       't.id',

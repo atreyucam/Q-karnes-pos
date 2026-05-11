@@ -15,7 +15,7 @@ function print(results) {
   const passed = sorted.filter((r) => r.ok).length;
   const failed = sorted.length - passed;
 
-  console.log('\n=== SIDEBAR FINAL TESTS (NAVEGACIÓN/ROLES) ===');
+  console.log('\n=== SIDEBAR FINAL TESTS ===');
   for (const row of sorted) {
     console.log(`${row.ok ? 'PASS' : 'FAIL'} [${row.id}] ${row.name}${row.detail ? ` -> ${row.detail}` : ''}`);
   }
@@ -26,93 +26,103 @@ function print(results) {
 function run() {
   const results = [];
   const add = (id, name, ok, detail = '') => results.push({ id, name, ok, detail });
+
   const sidebar = read('apps/desktop/src/app/layout/PosSidebar.jsx');
   const navigation = read('apps/desktop/src/app/layout/posNavigation.js');
   const routes = read('apps/desktop/src/router/routes.jsx');
+  const sidebarItem = read('apps/desktop/src/shared/ui/navigation/SidebarItem.jsx');
+  const sidebarSection = read('apps/desktop/src/shared/ui/navigation/SidebarSection.jsx');
+  const styles = read('apps/desktop/src/index.css');
 
   try {
     assert(navigation.includes("label: 'Inicio'"), 'No existe opción Inicio en sidebar');
-    add(1, 'Inicio visible en sidebar final', true);
+    assert(navigation.includes("label: 'Caja'"), 'No existe opción Caja en sidebar');
+    add(1, 'Links raíz visibles en sidebar final', true);
   } catch (error) {
-    add(1, 'Inicio visible en sidebar final', false, error.message);
+    add(1, 'Links raíz visibles en sidebar final', false, error.message);
   }
 
   try {
-    assert(navigation.includes("label: 'Despiece'"), 'No existe grupo Despiece');
-    assert(navigation.includes('Lotes de despiece') && navigation.includes('Nuevo despiece'), 'Subitems de Despiece incompletos');
-    assert(!navigation.includes("label: 'Transformaciones'"), 'Sigue visible el nombre Transformaciones en lugar de Despiece');
-    add(2, 'Despiece visible en lugar de Transformaciones', true);
+    assert(navigation.includes("label: 'Nueva venta'"), 'No existe link Nueva venta');
+    assert(navigation.includes("label: 'Ventas'"), 'No existe link Ventas');
+    assert(!/key:\s*'ventas'/.test(navigation), 'Ventas no debe seguir modelado como grupo');
+    add(2, 'Ventas permanece como links directos', true);
   } catch (error) {
-    add(2, 'Despiece visible en lugar de Transformaciones', false, error.message);
+    add(2, 'Ventas permanece como links directos', false, error.message);
   }
 
   try {
-    assert(navigation.includes("key: 'ventas'"), 'No existe grupo Ventas');
-    assert(navigation.includes("label: 'Nueva venta'"), 'No existe subitem Nueva venta');
-    assert(navigation.includes('Historial y devoluciones'), 'No existe subitem Historial y devoluciones');
-    add(3, 'Ventas agrupado correctamente', true);
-  } catch (error) {
-    add(3, 'Ventas agrupado correctamente', false, error.message);
-  }
-
-  try {
-    assert(navigation.includes("key: 'compras'"), 'No existe grupo Compras');
-    assert(navigation.includes("label: 'Órdenes'"), 'No existe subitem Órdenes');
+    assert(/key:\s*'compras'/.test(navigation), 'No existe grupo Compras');
     assert(navigation.includes("label: 'Nueva orden'"), 'No existe subitem Nueva orden');
-    add(4, 'Compras agrupado correctamente', true);
+    assert(navigation.includes("label: 'Órdenes'"), 'No existe subitem Órdenes');
+    add(3, 'Compras mantiene agrupación funcional', true);
   } catch (error) {
-    add(4, 'Compras agrupado correctamente', false, error.message);
+    add(3, 'Compras mantiene agrupación funcional', false, error.message);
   }
 
   try {
-    assert(navigation.includes("key: 'reportes'"), 'No existe grupo Reportes');
-    assert(
-      navigation.includes('Ventas por producto') &&
-      navigation.includes('Cuentas por cobrar') &&
-      navigation.includes('Cuentas por pagar'),
-      'Subitems de Reportes incompletos'
-    );
-    add(5, 'Reportes agrupado correctamente', true);
+    assert(/key:\s*'reportes'/.test(navigation), 'No existe grupo Reportes');
+    ['Resumen', 'Ventas', 'Caja', 'Inventario', 'Compras', 'Despiece'].forEach((label) => {
+      assert(navigation.includes(`label: '${label}'`), `Falta subitem ${label} en Reportes`);
+    });
+    add(4, 'Reportes refleja la estructura actual real', true);
   } catch (error) {
-    add(5, 'Reportes agrupado correctamente', false, error.message);
+    add(4, 'Reportes refleja la estructura actual real', false, error.message);
   }
 
   try {
-    assert(navigation.includes("label: 'Proveedores'"), 'Proveedores no está habilitado para ADMIN y CAJERO');
-    assert(navigation.includes("roles: ['ADMIN', 'CAJERO']"), 'No se detectaron roles operativos esperados');
-    add(6, 'ADMIN ve opciones esperadas en configuración', true);
+    assert(navigation.includes("label: 'Proveedores'"), 'No existe Proveedores');
+    assert(/roles:\s*\['ADMIN', 'CAJERO'\]/.test(navigation), 'No se detectó política compartida ADMIN/CAJERO');
+    add(5, 'Visibilidad por roles operativos intacta', true);
   } catch (error) {
-    add(6, 'ADMIN ve opciones esperadas en configuración', false, error.message);
+    add(5, 'Visibilidad por roles operativos intacta', false, error.message);
   }
 
   try {
-    assert(navigation.includes("roles: ['ADMIN', 'CAJERO']"), 'No se encontró política de visibilidad compartida');
-    assert(/key:\s*'compras'[\s\S]*roles:\s*\['ADMIN',\s*'CAJERO'\]/.test(navigation), 'CAJERO perdería acceso a grupo Compras');
-    add(7, 'CAJERO ve opciones esperadas en configuración', true);
+    assert(!sidebar.includes('selectedKey'), 'Sidebar todavía mezcla selección visual con expansión');
+    assert(sidebar.includes('const [openGroupKey, setOpenGroupKey] = useState(null);'), 'No existe estado explícito para grupos expandidos');
+    add(6, 'PosSidebar separa expansión de activación real', true);
   } catch (error) {
-    add(7, 'CAJERO ve opciones esperadas en configuración', false, error.message);
+    add(6, 'PosSidebar separa expansión de activación real', false, error.message);
   }
 
   try {
-    assert(navigation.includes("key: 'compras'") && navigation.includes("roles: ['ADMIN', 'CAJERO']"), 'Compras no quedó visible para ambos roles');
-    add(8, 'Compras visible para ADMIN y CAJERO', true);
+    assert(sidebarItem.includes('end={end}'), 'SidebarItem no usa NavLink con coincidencia exacta');
+    assert(sidebarItem.includes("isActive ? 'ui-sidebar-item-active' : 'ui-sidebar-item-idle'"), 'SidebarItem no usa clases de activo real vs idle');
+    assert(sidebarItem.includes('ui-sidebar-active-rail-visible'), 'SidebarItem activo no expone rail visual');
+    add(7, 'Leaf activo usa match exacto y rail discreto', true);
   } catch (error) {
-    add(8, 'Compras visible para ADMIN y CAJERO', false, error.message);
+    add(7, 'Leaf activo usa match exacto y rail discreto', false, error.message);
   }
 
   try {
-    assert(navigation.includes("label: 'Proveedores'") && navigation.includes("roles: ['ADMIN', 'CAJERO']"), 'Proveedores no quedó visible para ambos roles');
-    add(9, 'Proveedores visible para ADMIN y CAJERO', true);
+    assert(sidebarSection.includes('isExpanded = false'), 'SidebarSection no recibe isExpanded explícito');
+    assert(sidebarSection.includes('hasActiveDescendant = false'), 'SidebarSection no recibe hasActiveDescendant explícito');
+    assert(!sidebarSection.includes('forceActive'), 'SidebarSection todavía usa forceActive');
+    assert(sidebarSection.includes('ui-sidebar-item-ancestor'), 'SidebarSection no distingue ancestro activo');
+    assert(sidebarSection.includes('ui-sidebar-item-expanded'), 'SidebarSection no distingue grupo expandido sin activo');
+    add(8, 'SidebarSection separa ancestro activo de expandido', true);
   } catch (error) {
-    add(9, 'Proveedores visible para ADMIN y CAJERO', false, error.message);
+    add(8, 'SidebarSection separa ancestro activo de expandido', false, error.message);
+  }
+
+  try {
+    assert(styles.includes('.ui-sidebar-item-ancestor'), 'No existe estilo discreto para ancestro activo');
+    assert(styles.includes('.ui-sidebar-item-expanded'), 'No existe estilo para grupo expandido no activo');
+    assert(styles.includes('.ui-sidebar-caret-ancestor'), 'No existe estilo diferenciado para caret de ancestro');
+    assert(styles.includes('.ui-sidebar-active-rail-visible'), 'No existe rail visual para activo real');
+    assert(!/\.ui-sidebar-item-active[\s\S]*color:\s*(#dc2626|var\(--color-brand-hover\))/.test(styles), 'El item activo real sigue pintando texto/ícono en rojo');
+    add(9, 'Estilos del sidebar siguen el estándar neutro + rail rojo', true);
+  } catch (error) {
+    add(9, 'Estilos del sidebar siguen el estándar neutro + rail rojo', false, error.message);
   }
 
   try {
     assert(!sidebar.includes("label: 'Soporte'"), 'No debe mostrarse Soporte sin UI real');
     assert(!routes.includes('/soporte'), 'No existe UI/ruta de soporte, no debe agregarse al menú');
-    add(10, 'Soporte no aparece si no existe UI real', true);
+    add(10, 'No se agrega navegación sin UI real', true);
   } catch (error) {
-    add(10, 'Soporte no aparece si no existe UI real', false, error.message);
+    add(10, 'No se agrega navegación sin UI real', false, error.message);
   }
 
   print(results);

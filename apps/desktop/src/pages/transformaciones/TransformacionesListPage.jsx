@@ -293,7 +293,7 @@ export default function TransformacionesListPage() {
                       Ver
                     </TableActionButton>
                     {row.acciones?.puede_editar && (
-                      <TableActionButton variant="secondary" onClick={() => navigate(`/transformaciones/${row.id}/editar`)}>
+                      <TableActionButton variant="edit" onClick={() => navigate(`/transformaciones/${row.id}/editar`)}>
                         Editar
                       </TableActionButton>
                     )}

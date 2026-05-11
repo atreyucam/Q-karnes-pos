@@ -25,7 +25,8 @@
     "test:dashboard:v2": "node scripts/dashboard-v2-frontend-tests.cjs",
     "dist:win64": "npm run build && electron-builder --win nsis --x64",
     "dist:win32": "npm run build && electron-builder --win nsis --ia32",
-    "dist:win:all": "npm run build && electron-builder --win nsis --x64 --ia32"
+    "dist:win:all": "npm run build && electron-builder --win nsis --x64 --ia32",
+    "test:design-system": "node scripts/design-system-playwright.cjs"
   },
   "dependencies": {
     "apexcharts": "^5.4.0",
@@ -45,6 +46,7 @@
     "autoprefixer": "^10.4.20",
     "electron": "34.0.1",
     "electron-builder": "^26.8.1",
+    "playwright-core": "^1.59.1",
     "postcss": "^8.5.1",
     "tailwindcss": "^4.0.8",
     "vite": "^6.1.0"

@@ -1,6 +1,10 @@
 import apiClient, { normalizeResponse } from '../lib/apiClient';
 
 const REPORT_ENDPOINTS = {
+  resumenOperativo: '/api/reportes/resumen-operativo',
+  ventasPanel: '/api/reportes/ventas-panel',
+  cajaPanel: '/api/reportes/caja-panel',
+  inventarioPanel: '/api/reportes/inventario-panel',
   ventasDia: '/api/reportes/ventas-del-dia',
   ventasPeriodo: '/api/reportes/ventas-periodo',
   ventasPorProducto: '/api/reportes/ventas-por-producto',
@@ -27,10 +31,13 @@ export function sanitizeQueryParams(params = {}) {
   );
 }
 
-export async function fetchReporte(reportKey, params = {}) {
+export async function fetchReporte(reportKey, params = {}, options = {}) {
   const endpoint = REPORT_ENDPOINTS[reportKey];
   if (!endpoint) throw new Error(`Reporte no soportado: ${reportKey}`);
-  const response = await apiClient.get(endpoint, { params: sanitizeQueryParams(params) });
+  const response = await apiClient.get(endpoint, {
+    params: sanitizeQueryParams(params),
+    signal: options.signal
+  });
   return normalizeResponse(response.data);
 }
 

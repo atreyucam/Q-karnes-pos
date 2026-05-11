@@ -12,7 +12,6 @@ import {
   TablaCuerpo,
   TablaFila,
   TablaCelda,
-  TipoBadge,
   Textarea
 } from '../../ui';
 import { formatDateQuito } from '../../lib/formatDateQuito';
@@ -20,7 +19,7 @@ import { formatMoney } from '../../lib/formatMoney';
 import { formatQtyByUnit } from '../../lib/formatQty';
 import { useAuthStore } from '../../stores/authStore';
 import { useTransformacionesStore } from '../../stores/transformacionesStore';
-import { getTransformacionStatusHelp, getTransformacionStatusLabel } from './transformacionesUi';
+import { getTransformacionStatusLabel } from './transformacionesUi';
 
 function formatTimeQuito(value) {
   if (!value) return '--:--';
@@ -41,6 +40,20 @@ function DataItem({ label, value, tone = 'text-text' }) {
       <p className={`text-sm font-semibold ${tone}`}>{value}</p>
     </div>
   );
+}
+
+function getMovementLabel(tipo) {
+  if (tipo === 'TRANSFORMACION_CONSUMO' || tipo === 'TRANSFORMACION_REVERSION_CONSUMO') return 'Consumo de padre';
+  if (tipo === 'TRANSFORMACION_PRODUCCION' || tipo === 'TRANSFORMACION_REVERSION_PRODUCCION') return 'Produccion';
+  if (tipo === 'TRANSFORMACION_MERMA' || tipo === 'TRANSFORMACION_REVERSION_MERMA') return 'Merma';
+  return tipo || 'Movimiento';
+}
+
+function getMovementTone(tipo) {
+  if (tipo === 'TRANSFORMACION_CONSUMO' || tipo === 'TRANSFORMACION_REVERSION_CONSUMO') return 'warning';
+  if (tipo === 'TRANSFORMACION_PRODUCCION' || tipo === 'TRANSFORMACION_REVERSION_PRODUCCION') return 'success';
+  if (tipo === 'TRANSFORMACION_MERMA' || tipo === 'TRANSFORMACION_REVERSION_MERMA') return 'danger';
+  return 'neutral';
 }
 
 function CancelModal({ open, auth, setAuth, novedad, setNovedad, onClose, onConfirm, loading, requiresAuth }) {
@@ -153,13 +166,19 @@ export default function TransformacionDetallePage() {
   const diferenciaCosto = formatMoney(actual.metricas?.diferencia_costo || actual.resumen?.diferencia_costo);
   const balanceOk = Boolean(actual.balance?.en_rango) && Number(actual.balance?.diferencia_costo || 0) === 0;
   const responsable = actual.actor?.nombre || actual.autorizador?.nombre || '-';
+  const observacion = actual.observacion?.trim() ? actual.observacion.trim() : '-';
+  const referenciaLote = actual.referencia_lote?.trim() ? actual.referencia_lote.trim() : '-';
+  const resumenEstado = getTransformacionStatusLabel(actual.estado);
+  const descripcionEstado = actual.estado === 'APLICADA'
+    ? 'Transformacion aplicada con impacto real en inventario y costos.'
+    : `Transformacion en estado ${resumenEstado.toLowerCase()}.`;
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <BackButton to="/transformaciones">Volver</BackButton>
         <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={() => navigate('/reportes?tab=kardex')}>
+          <Button variant="neutral" onClick={() => navigate('/reportes/inventario?tab=kardex')}>
             Ver Kardex
           </Button>
           {actual.estado === 'APLICADA' ? (
@@ -178,50 +197,55 @@ export default function TransformacionDetallePage() {
 
       <section className="rounded-3xl border border-border bg-white p-6 shadow-sm">
         <div className="space-y-3 border-b border-border pb-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-text-muted">Transformación auditada</p>
           <h1 className="text-3xl font-black tracking-tight text-text">Transformación {actual.numero}</h1>
-          <div className="flex flex-wrap items-center gap-3">
-            <StatusBadge status={actual.estado}>
-              {getTransformacionStatusLabel(actual.estado)}
-            </StatusBadge>
-            <span className="text-sm text-text-muted">{actual.tipo_proceso}</span>
-            <span className="text-sm text-text-muted">{formatDateQuito(actual.fecha)}</span>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
+            <span>{resumenEstado}</span>
+            <span>·</span>
+            <span>{actual.tipo_proceso}</span>
+            <span>·</span>
+            <span>{formatDateQuito(actual.fecha)}</span>
           </div>
-          <p className="text-sm text-text-muted">{getTransformacionStatusHelp(actual.estado)}</p>
+          <p className="text-sm text-text-muted">{descripcionEstado}</p>
+          <p className="text-xs text-text-muted">
+            Responsable: {responsable} · Referencia lote: {referenciaLote} · Observación: {observacion}
+          </p>
         </div>
 
-        <div className="mt-5 grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
-          <DataItem label="Padre" value={`${actual.insumo?.producto_codigo || '-'} ${actual.insumo?.producto_nombre || ''}`.trim()} />
-          <DataItem label="Total del padre" value={totalDelPadre} />
-          <DataItem label="Consumido" value={totalConsumido} />
-          <DataItem label="Stock restante" value={stockRestante} tone="text-emerald-700" />
-          <DataItem label="Responsable" value={responsable} />
-          <DataItem label="Referencia lote" value={actual.referencia_lote || '-'} />
-          <DataItem label="Balance" value={balanceOk ? '✓ Correcto' : 'Revisar'} tone={balanceOk ? 'text-emerald-700' : 'text-amber-700'} />
-          <DataItem label="Costo consumido" value={costoConsumido} />
-        </div>
-
-        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="rounded-2xl border border-border bg-surface px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Observación operativa</p>
-            <p className="mt-2 text-sm text-text">{actual.observacion || '-'}</p>
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-border bg-surface px-4 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Resumen operativo</p>
+            <div className="mt-3 grid gap-3">
+              <DataItem label="Padre" value={actual.insumo?.producto_nombre || '-'} />
+              <DataItem label="Disponible inicial" value={totalDelPadre} />
+              <DataItem label="Consumido" value={totalConsumido} />
+              <DataItem label="Stock restante" value={stockRestante} tone="text-emerald-700" />
+            </div>
           </div>
-          <div className="rounded-2xl border border-border bg-surface px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Diferencia costo</p>
-            <p className={`mt-2 text-lg font-bold ${Number(actual.balance?.diferencia_costo || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{diferenciaCosto}</p>
+          <div className="rounded-2xl border border-border bg-surface px-4 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Costo y balance</p>
+            <div className="mt-3 grid gap-3">
+              <DataItem label="Costo consumido" value={costoConsumido} />
+              <DataItem label="Diferencia de costo" value={diferenciaCosto} tone={Number(actual.balance?.diferencia_costo || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'} />
+              <DataItem label="Balance" value={balanceOk ? 'Correcto' : 'Revisar'} tone={balanceOk ? 'text-emerald-700' : 'text-amber-700'} />
+              <div className="space-y-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Estado</p>
+                <StatusBadge status={actual.estado}>
+                  {resumenEstado}
+                </StatusBadge>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="rounded-3xl border border-border bg-white p-6 shadow-sm">
         <div className="mb-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-text-muted">Resultados generados</p>
-          <h2 className="mt-2 text-xl font-bold text-text">Salidas útiles del proceso</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-text-muted">Productos generados</p>
+          <h2 className="mt-2 text-xl font-bold text-text">Productos obtenidos en la transformacion</h2>
         </div>
         <Tabla>
           <TablaCabecera>
             <tr>
-              <TablaCelda as="th">Código</TablaCelda>
               <TablaCelda as="th">Producto</TablaCelda>
               <TablaCelda as="th">Cantidad</TablaCelda>
               <TablaCelda as="th">Costo total</TablaCelda>
@@ -231,9 +255,8 @@ export default function TransformacionDetallePage() {
           <TablaCuerpo>
             {(actual.resultados || []).map((row) => (
               <TablaFila key={row.id}>
-                <TablaCelda>{row.producto_codigo}</TablaCelda>
                 <TablaCelda>{row.producto_nombre}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.cantidad, row.unidad_medida, { fixedLB: true })}</TablaCelda>
+                <TablaCelda>{`${formatQtyByUnit(row.cantidad, row.unidad_medida, { fixedLB: true })} ${row.unidad_medida || unit}`}</TablaCelda>
                 <TablaCelda>{formatMoney(row.costo_asignado)}</TablaCelda>
                 <TablaCelda>{formatMoney(row.costo_unitario_resultante)}</TablaCelda>
               </TablaFila>
@@ -244,8 +267,8 @@ export default function TransformacionDetallePage() {
 
       <section className="rounded-3xl border border-border bg-white p-6 shadow-sm">
         <div className="mb-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-text-muted">Merma</p>
-          <h2 className="mt-2 text-xl font-bold text-text">Registro clasificatorio de merma</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-text-muted">Merma registrada</p>
+          <h2 className="mt-2 text-xl font-bold text-text">Detalle de perdida o recorte del proceso</h2>
         </div>
         <Tabla>
           <TablaCabecera>
@@ -256,11 +279,11 @@ export default function TransformacionDetallePage() {
               <TablaCelda as="th">Motivo</TablaCelda>
             </tr>
           </TablaCabecera>
-          <TablaCuerpo>
+          <TablaCuerpo emptyMessage="Sin merma registrada para esta transformacion." emptyColSpan={4}>
             {(actual.mermas || []).map((row) => (
               <TablaFila key={row.id}>
                 <TablaCelda>{row.tipo_merma}</TablaCelda>
-                <TablaCelda>{formatQtyByUnit(row.cantidad, row.unidad_medida, { fixedWeight: true })}</TablaCelda>
+                <TablaCelda>{`${formatQtyByUnit(row.cantidad, row.unidad_medida, { fixedWeight: true })} ${row.unidad_medida || unit}`}</TablaCelda>
                 <TablaCelda>{formatMoney(row.costo_total)}</TablaCelda>
                 <TablaCelda>{row.motivo || '-'}</TablaCelda>
               </TablaFila>
@@ -272,13 +295,13 @@ export default function TransformacionDetallePage() {
       <section className="rounded-3xl border border-border bg-white p-6 shadow-sm">
         <div className="mb-4">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-text-muted">Trazabilidad / movimientos</p>
-          <h2 className="mt-2 text-xl font-bold text-text">Auditoría operativa del documento</h2>
+          <h2 className="mt-2 text-xl font-bold text-text">Auditoria operativa del documento</h2>
         </div>
         <Tabla>
           <TablaCabecera>
             <tr>
               <TablaCelda as="th">Hora</TablaCelda>
-              <TablaCelda as="th">Tipo movimiento</TablaCelda>
+              <TablaCelda as="th">Movimiento</TablaCelda>
               <TablaCelda as="th">Producto</TablaCelda>
               <TablaCelda as="th">Cantidad</TablaCelda>
               <TablaCelda as="th">Referencia</TablaCelda>
@@ -288,11 +311,13 @@ export default function TransformacionDetallePage() {
             {(actual.movimientos || []).map((row) => (
               <TablaFila key={row.id}>
                 <TablaCelda>{formatTimeQuito(row.fecha)}</TablaCelda>
-                <TablaCelda><TipoBadge tipo={row.tipo} /></TablaCelda>
+                <TablaCelda>
+                  <StatusBadge tone={getMovementTone(row.tipo)}>{getMovementLabel(row.tipo)}</StatusBadge>
+                </TablaCelda>
                 <TablaCelda>
                   {row.tipo === 'TRANSFORMACION_MERMA' || row.tipo === 'TRANSFORMACION_REVERSION_MERMA'
-                    ? 'Registro clasificatorio de merma'
-                    : `${row.producto_codigo || '-'} - ${row.producto_nombre || '-'}`}
+                    ? 'Registro de merma'
+                    : (row.producto_nombre || '-')}
                 </TablaCelda>
                 <TablaCelda>{formatQtyByUnit(row.cantidad, row.unidad_medida || unit, { fixedWeight: true })}</TablaCelda>
                 <TablaCelda>{row.referencia}</TablaCelda>

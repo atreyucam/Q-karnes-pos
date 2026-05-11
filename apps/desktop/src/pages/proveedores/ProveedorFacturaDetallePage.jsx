@@ -134,7 +134,6 @@ export default function ProveedorFacturaDetallePage() {
           <Button
             type="button"
             size="sm"
-            className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
             onClick={() => setModalPagoOpen(true)}
             disabled={!factura || pendienteFactura <= 0}
           >

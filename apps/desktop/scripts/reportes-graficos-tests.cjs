@@ -15,7 +15,7 @@ function print(results) {
   const passed = sorted.filter((row) => row.ok).length;
   const failed = sorted.length - passed;
 
-  console.log('\n=== FRONTEND REPORTES HUB ===');
+  console.log('\n=== FRONTEND REPORTES HUB FINAL ===');
   for (const row of sorted) {
     console.log(`${row.ok ? 'PASS' : 'FAIL'} [${row.id}] ${row.name}${row.detail ? ` -> ${row.detail}` : ''}`);
   }
@@ -29,6 +29,7 @@ function run() {
 
   const page = read('apps/desktop/src/pages/reportes/ReportesPage.jsx');
   const sections = read('apps/desktop/src/pages/reportes/reportesSections.js');
+  const mainSectionsBlock = sections.split('export const INVENTORY_REPORT_TABS')[0];
   const charts = read('apps/desktop/src/pages/reportes/ReportesCharts.jsx');
   const service = read('apps/desktop/src/services/reportesService.js');
   const navigation = read('apps/desktop/src/app/layout/posNavigation.js');
@@ -36,66 +37,76 @@ function run() {
   const ventas = read('apps/desktop/src/pages/reportes/ReportesVentasSection.jsx');
   const caja = read('apps/desktop/src/pages/reportes/ReportesCajaSection.jsx');
   const inventario = read('apps/desktop/src/pages/reportes/ReportesInventarioSection.jsx');
-  const compras = read('apps/desktop/src/pages/reportes/ReportesComprasSection.jsx');
-  const despiece = read('apps/desktop/src/pages/reportes/ReportesDespieceSection.jsx');
+  const transformacionDetalle = read('apps/desktop/src/pages/transformaciones/TransformacionDetallePage.jsx');
+  const store = read('apps/desktop/src/stores/reportesStore.js');
 
   try {
-    assert(page.includes('SECTION_COMPONENTS'), 'No existe shell por secciones en ReportesPage');
-    assert(page.includes('navigate(`/reportes/${nextSection}`)'), 'La navegación interna no cambia por sección');
-    assert(page.includes('<Tabs'), 'No existe navegación interna tipo tabs');
-    add(1, 'ReportesPage usa shell con navegación interna por sección', true);
+    assert(page.includes('lazy(() => import('), 'ReportesPage no usa lazy loading');
+    assert(page.includes('resolveLegacyReportLocation'), 'ReportesPage no corrige rutas legacy');
+    assert(page.includes('navigate(`/reportes/${nextSection}`)'), 'La navegación principal no cambia por sección');
+    add(1, 'ReportesPage usa lazy loading y redirección legacy', true);
   } catch (error) {
-    add(1, 'ReportesPage usa shell con navegación interna por sección', false, error.message);
+    add(1, 'ReportesPage usa lazy loading y redirección legacy', false, error.message);
   }
 
   try {
-    const keys = ['resumen', 'ventas', 'caja', 'inventario', 'compras', 'despiece'];
-    for (const key of keys) {
-      assert(sections.includes(`key: '${key}'`), `Falta la sección ${key}`);
+    const requiredSections = ['resumen', 'ventas', 'caja', 'inventario'];
+    for (const key of requiredSections) {
+      assert(mainSectionsBlock.includes(`key: '${key}'`), `Falta la sección ${key}`);
     }
-    add(2, 'Catálogo de secciones de reportes completo', true);
+    assert(!mainSectionsBlock.includes("key: 'compras'"), 'Compras sigue como sección principal');
+    assert(!mainSectionsBlock.includes("key: 'despiece'"), 'Despiece sigue como sección principal');
+    assert(sections.includes("key: 'kardex'") && sections.includes("key: 'movimientos'"), 'Faltan tabs secundarias de inventario');
+    add(2, 'El hub quedó reducido a 4 secciones y tabs secundarias de inventario', true);
   } catch (error) {
-    add(2, 'Catálogo de secciones de reportes completo', false, error.message);
+    add(2, 'El hub quedó reducido a 4 secciones y tabs secundarias de inventario', false, error.message);
   }
 
   try {
     assert(charts.includes("from 'recharts'"), 'No se está usando Recharts');
-    assert(charts.includes('LineChart') && charts.includes('BarChart') && charts.includes('PieChart'), 'Faltan componentes base de gráficos');
-    add(3, 'Capa de gráficos implementada con Recharts', true);
+    assert(charts.includes('VerticalBarChart'), 'Falta gráfico de barras vertical');
+    assert(charts.includes('ComparisonBarChart'), 'Falta gráfico comparativo');
+    add(3, 'La capa de gráficos finales usa Recharts y cubre los tipos requeridos', true);
   } catch (error) {
-    add(3, 'Capa de gráficos implementada con Recharts', false, error.message);
+    add(3, 'La capa de gráficos finales usa Recharts y cubre los tipos requeridos', false, error.message);
   }
 
   try {
-    assert(service.includes('/api/reportes/dashboard'), 'Falta endpoint dashboard');
-    assert(service.includes('/api/reportes/caja'), 'Falta endpoint caja');
-    assert(service.includes('/api/reportes/inventario-movimientos'), 'Falta endpoint inventario movimientos');
-    assert(service.includes('/api/reportes/compras-productos'), 'Falta endpoint compras por producto');
-    assert(service.includes('/api/reportes/transformaciones-resumen'), 'Falta endpoint transformaciones resumen');
-    add(4, 'Servicios de reportes cubren endpoints del hub', true);
+    assert(service.includes('/api/reportes/resumen-operativo'), 'Falta endpoint de resumen operativo');
+    assert(service.includes('/api/reportes/ventas-panel'), 'Falta endpoint agregado de ventas');
+    assert(service.includes('/api/reportes/caja-panel'), 'Falta endpoint agregado de caja');
+    assert(service.includes('/api/reportes/inventario-panel'), 'Falta endpoint agregado de inventario');
+    add(4, 'Servicios de reportes usan endpoints agregados por pantalla', true);
   } catch (error) {
-    add(4, 'Servicios de reportes cubren endpoints del hub', false, error.message);
+    add(4, 'Servicios de reportes usan endpoints agregados por pantalla', false, error.message);
   }
 
   try {
-    assert(navigation.includes("key: 'reportes'"), 'No existe grupo Reportes en sidebar');
     assert(navigation.includes("to: '/reportes/resumen'"), 'Falta ruta Reportes/Resumen');
-    assert(navigation.includes("to: '/reportes/despiece'"), 'Falta ruta Reportes/Despiece');
-    add(5, 'Sidebar enlaza al nuevo módulo de reportes', true);
+    assert(navigation.includes("to: '/reportes/inventario'"), 'Falta ruta Reportes/Inventario');
+    assert(!navigation.includes("to: '/reportes/compras'"), 'Compras sigue en navegación principal');
+    assert(!navigation.includes("to: '/reportes/despiece'"), 'Despiece sigue en navegación principal');
+    add(5, 'Sidebar enlaza solo las 4 secciones principales del módulo final', true);
   } catch (error) {
-    add(5, 'Sidebar enlaza al nuevo módulo de reportes', false, error.message);
+    add(5, 'Sidebar enlaza solo las 4 secciones principales del módulo final', false, error.message);
   }
 
   try {
-    assert(resumen.includes('Ventas netas') && resumen.includes('Top productos') && resumen.includes('Métodos de pago'), 'Resumen no tiene KPIs + gráficos clave');
-    assert(ventas.includes('Comparar') && ventas.includes('Detalle de ventas del rango'), 'Ventas no tiene comparativa + detalle');
-    assert(caja.includes('Movimientos de caja (rango)') && caja.includes('Cobros por método de pago'), 'Caja no tiene tablas/gráficos operativos');
-    assert(inventario.includes('Kardex') && inventario.includes('Movimientos de inventario'), 'Inventario no incluye trazabilidad');
-    assert(compras.includes('Detalle compras') && compras.includes('Productos comprados'), 'Compras no incluye detalle y agregados');
-    assert(despiece.includes('Detalle transformaciones') && despiece.includes('Rendimiento por fecha'), 'Despiece no incluye control de rendimiento');
-    add(6, 'Secciones principales implementadas con estructura KPI/gráfico/tabla', true);
+    assert(resumen.includes('Resumen Operativo') && resumen.includes('Ventas últimos 7 días') && resumen.includes('Proveedores Pendientes'), 'Resumen no implementa la estructura final');
+    assert(ventas.includes('Top 15 productos más vendidos') && ventas.includes('Ventas por hora') && !ventas.includes('Actualizar ventas'), 'Ventas no implementa filtros automáticos y top 15');
+    assert(caja.includes('Ingresos por método comercial') && caja.includes('Comparativa de caja') && !caja.includes('Cobros por método de pago'), 'Caja no separa cobro comercial de saldo');
+    assert(inventario.includes('Secciones secundarias de inventario') && inventario.includes('Compras') && inventario.includes('Despiece') && inventario.includes('Kardex'), 'Inventario no integra tabs secundarias');
+    add(6, 'Las pantallas finales implementan la estructura funcional esperada', true);
   } catch (error) {
-    add(6, 'Secciones principales implementadas con estructura KPI/gráfico/tabla', false, error.message);
+    add(6, 'Las pantallas finales implementan la estructura funcional esperada', false, error.message);
+  }
+
+  try {
+    assert(transformacionDetalle.includes("/reportes/inventario?tab=kardex"), 'No se corrigió el deep-link legacy de kardex');
+    assert(store.includes('AbortController') && store.includes('ERR_CANCELED'), 'El store no maneja cancelación de solicitudes obsoletas');
+    add(7, 'Se corrigió el deep-link legacy y el store evita respuestas obsoletas', true);
+  } catch (error) {
+    add(7, 'Se corrigió el deep-link legacy y el store evita respuestas obsoletas', false, error.message);
   }
 
   print(results);

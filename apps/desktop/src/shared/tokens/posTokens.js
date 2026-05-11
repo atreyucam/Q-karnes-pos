@@ -13,9 +13,12 @@ export const posTokens = {
     grandTotal: '36px'
   },
   colors: {
-    brand: colors.primary.DEFAULT,
-    brandHover: colors.primary.hover,
-    brandSoft: colors.primary.soft,
+    brand: colors.brand.DEFAULT,
+    brandHover: colors.brand.hover,
+    brandSoft: colors.brand.soft,
+    primary: colors.primary.DEFAULT,
+    primaryHover: colors.primary.hover,
+    primarySoft: colors.primary.soft,
     cashier: colors.success.DEFAULT,
     cashierHover: colors.success.hover,
     cashierSoft: colors.success.soft,
@@ -60,5 +63,6 @@ export const posTokens = {
     sidebarExpanded: '240px',
     sidebarCollapsed: '72px',
     topbarHeight: '64px'
-  }
+  },
+  charts: chartPalette
 };

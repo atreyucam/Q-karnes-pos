@@ -341,8 +341,8 @@ export default function CompraNuevaPage() {
                           <div className="flex justify-end">
                             <Button
                               type="button"
-                              variant="iconDanger"
-                              size="sm"
+                              variant="danger"
+                              size="icon"
                               className="font-bold"
                               aria-label={`Quitar ${item.nombre}`}
                               title="Quitar"

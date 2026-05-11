@@ -3,6 +3,10 @@ const { asyncHandler } = require('../../helpers/asyncHandler');
 const { successResponse } = require('../../helpers/apiResponse');
 
 const dashboard = asyncHandler(async (req, res) => successResponse(res, await service.dashboard()));
+const resumenOperativo = asyncHandler(async (req, res) => successResponse(res, await service.resumenOperativo(req.query)));
+const ventasPanel = asyncHandler(async (req, res) => successResponse(res, await service.ventasPanel(req.query)));
+const cajaPanel = asyncHandler(async (req, res) => successResponse(res, await service.cajaPanel(req.query)));
+const inventarioPanel = asyncHandler(async (req, res) => successResponse(res, await service.inventarioPanel(req.query)));
 const ventas = asyncHandler(async (req, res) => successResponse(res, await service.ventas(req.query)));
 const ventasDiarias = asyncHandler(async (req, res) => successResponse(res, await service.ventasDiarias(req.query)));
 const ventasProducto = asyncHandler(async (req, res) => successResponse(res, await service.ventasProducto(req.query)));
@@ -25,6 +29,10 @@ const cajaDiaria = asyncHandler(async (req, res) => successResponse(res, await s
 
 module.exports = {
   dashboard,
+  resumenOperativo,
+  ventasPanel,
+  cajaPanel,
+  inventarioPanel,
   ventas,
   ventasDiarias,
   ventasProducto,

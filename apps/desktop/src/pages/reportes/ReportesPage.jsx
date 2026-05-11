@@ -1,28 +1,49 @@
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { PageHeader, Panel, Tabs } from '../../shared/ui';
-import ReportesCajaSection from './ReportesCajaSection';
-import ReportesComprasSection from './ReportesComprasSection';
-import ReportesDespieceSection from './ReportesDespieceSection';
-import ReportesInventarioSection from './ReportesInventarioSection';
-import ReportesResumenSection from './ReportesResumenSection';
-import { REPORT_SECTIONS, resolveReportSection } from './reportesSections';
-import ReportesVentasSection from './ReportesVentasSection';
+import { lazy, Suspense } from 'react';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { LoadingState, PageHeader, Panel, Tabs } from '../../shared/ui';
+import {
+  REPORT_SECTIONS,
+  resolveInventoryTab,
+  resolveLegacyReportLocation,
+  resolveReportSection
+} from './reportesSections';
+
+const ReportesResumenSection = lazy(() => import('./ReportesResumenSection'));
+const ReportesVentasSection = lazy(() => import('./ReportesVentasSection'));
+const ReportesCajaSection = lazy(() => import('./ReportesCajaSection'));
+const ReportesInventarioSection = lazy(() => import('./ReportesInventarioSection'));
 
 const SECTION_COMPONENTS = {
   resumen: ReportesResumenSection,
   ventas: ReportesVentasSection,
   caja: ReportesCajaSection,
-  inventario: ReportesInventarioSection,
-  compras: ReportesComprasSection,
-  despiece: ReportesDespieceSection
+  inventario: ReportesInventarioSection
 };
+
+function buildLegacyRedirect({ section, tab }) {
+  if (section === 'inventario' && tab) {
+    return `/reportes/inventario?tab=${resolveInventoryTab(tab)}`;
+  }
+  return `/reportes/${section}`;
+}
 
 export default function ReportesPage() {
   const params = useParams();
   const navigate = useNavigate();
-  const section = resolveReportSection(params.section);
+  const [searchParams] = useSearchParams();
+  const sectionParam = params.section;
+  const legacyLocation = resolveLegacyReportLocation(sectionParam, searchParams.get('tab'));
 
-  if (params.section !== section) {
+  if (legacyLocation) {
+    return <Navigate to={buildLegacyRedirect(legacyLocation)} replace />;
+  }
+
+  if (!sectionParam) {
+    return <Navigate to="/reportes/resumen" replace />;
+  }
+
+  const section = resolveReportSection(sectionParam);
+  if (sectionParam !== section) {
     return <Navigate to={`/reportes/${section}`} replace />;
   }
 
@@ -30,15 +51,16 @@ export default function ReportesPage() {
   const currentMeta = REPORT_SECTIONS.find((item) => item.key === section) || REPORT_SECTIONS[0];
 
   return (
-    <div className="space-y-6">
+    <div className="reportes-theme space-y-6">
       <PageHeader
         title="Reportes"
-        description="Hub operativo para control comercial, financiero e inventario del negocio."
+        description="Hub operativo simplificado para ventas, caja e inventario."
       />
 
       <Panel className="space-y-4 p-4">
         <Tabs
-          ariaLabel="Navegación interna de reportes"
+          className="reportes-tabs-primary"
+          ariaLabel="Navegación principal de reportes"
           items={REPORT_SECTIONS}
           value={section}
           onChange={(nextSection) => navigate(`/reportes/${nextSection}`)}
@@ -46,7 +68,9 @@ export default function ReportesPage() {
         <p className="text-sm text-[var(--color-text-muted)]">{currentMeta.description}</p>
       </Panel>
 
-      <ActiveSection />
+      <Suspense fallback={<LoadingState label="Cargando sección de reportes..." />}>
+        <ActiveSection />
+      </Suspense>
     </div>
   );
 }
