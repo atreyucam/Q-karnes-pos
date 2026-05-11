@@ -8,6 +8,10 @@ const router = express.Router();
 router.use(authenticate, authorizeRoles('ADMIN', 'CAJERO'));
 
 router.get('/dashboard', controller.dashboard);
+router.get('/resumen-operativo', controller.resumenOperativo);
+router.get('/ventas-panel', controller.ventasPanel);
+router.get('/caja-panel', controller.cajaPanel);
+router.get('/inventario-panel', controller.inventarioPanel);
 router.get('/ventas-del-dia', controller.ventasDelDia);
 router.get('/ventas-periodo', controller.ventasPeriodo);
 router.get('/ventas-por-producto', controller.ventasPorProducto);

@@ -241,7 +241,7 @@ export default function CompraDetallePage() {
                 const pendiente = Number(d.cantidad_pendiente ?? (Number(d.cantidad) - Number(d.cantidad_recibida)));
                 return (
                   <TablaFila key={d.id}>
-                    <TablaCelda>{d.producto_codigo} - {d.producto_nombre}</TablaCelda>
+                    <TablaCelda title={d.producto_codigo || ''}>{d.producto_nombre}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(d.cantidad, unidad, { fixedLB: true })}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(d.cantidad_recibida, unidad, { fixedLB: true })}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(pendiente, unidad, { fixedLB: true })}</TablaCelda>

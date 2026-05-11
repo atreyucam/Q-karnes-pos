@@ -5,23 +5,27 @@ export default function SidebarItem({
   to,
   label,
   Icon,
+  isActive = false,
   collapsed = false,
   onClick,
-  forceActive = false
+  end = true
 }) {
   return (
     <NavLink
       to={to}
+      end={end}
       title={label}
       onClick={onClick}
-      className={() =>
-        clsx(
-          'ui-sidebar-item',
-          forceActive ? 'ui-sidebar-item-active' : 'ui-sidebar-item-idle',
-          collapsed && 'justify-center px-0'
-        )
-      }
+      aria-current={isActive ? 'page' : undefined}
+      data-state={isActive ? 'active' : 'idle'}
+      className={clsx(
+        'ui-sidebar-item',
+        isActive ? 'ui-sidebar-item-active' : 'ui-sidebar-item-idle',
+        collapsed && 'justify-center px-0'
+      )}
     >
+      {!collapsed ? <span className={clsx('ui-sidebar-active-rail', isActive && 'ui-sidebar-active-rail-visible')} /> : null}
+
       {Icon ? (
         collapsed ? (
           <div className="ui-sidebar-icon-wrap">

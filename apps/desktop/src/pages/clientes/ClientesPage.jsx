@@ -14,6 +14,7 @@ import {
   PageHeader,
   Paginador,
   Select,
+  StatusBadge,
   Switch,
   TableActions,
   TableActionButton,
@@ -42,7 +43,8 @@ const emptyClienteForm = {
   telefono: '',
   direccion: '',
   observacion: '',
-  activo: true
+  activo: true,
+  saldo_credito: 0
 };
 
 function sanitizeCedulaInput(value) {
@@ -200,7 +202,8 @@ export default function ClientesPage() {
       telefono: cliente.telefono || '',
       direccion: cliente.direccion || '',
       observacion: cliente.observacion || '',
-      activo: Boolean(cliente.activo)
+      activo: Boolean(cliente.activo),
+      saldo_credito: Number(cliente.saldo_credito || 0)
     });
   };
 
@@ -230,16 +233,21 @@ export default function ClientesPage() {
     };
 
     try {
+      if (clienteModal.mode === 'edit' && !clienteForm.activo && Number(clienteForm.saldo_credito || 0) > 0) {
+        setStatusToastError('No se puede desactivar este cliente porque mantiene saldo pendiente.');
+        return;
+      }
       if (clienteModal.mode === 'edit' && clienteForm.id) {
         await actualizar(clienteForm.id, payload);
       } else {
         await crear(payload);
       }
 
+      setStatusToast('Cliente actualizado correctamente.');
       closeClienteModal();
       refreshList();
-    } catch (_) {
-      // store error already exposed in page alert
+    } catch (saveError) {
+      setStatusToastError('Error al actualizar cliente.');
     }
   };
 
@@ -436,31 +444,22 @@ export default function ClientesPage() {
                     <TablaCelda className="py-3">{c.telefono || '-'}</TablaCelda>
                     <TablaCelda className="py-3 text-right">
                       {sinSaldo ? (
-                        <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                          Sin deuda
-                        </span>
+                        <StatusBadge tone="neutral">Sin deuda</StatusBadge>
                       ) : (
-                        <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
-                          Pendiente {formatMoney(saldoCredito)}
-                        </span>
+                        <StatusBadge tone="warning">Pendiente {formatMoney(saldoCredito)}</StatusBadge>
                       )}
                     </TablaCelda>
                     <TablaCelda className="py-3">
                       {c.activo ? (
-                        <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
-                          Activo
-                        </span>
+                        <StatusBadge status="ACTIVO" />
                       ) : (
-                        <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                          Inactivo
-                        </span>
+                        <StatusBadge status="INACTIVO" />
                       )}
                     </TablaCelda>
                     <TablaCelda className="py-3">
                       <TableActions>
                         <TableActionButton
-                          variant="neutral"
-                          className="border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]"
+                          variant="view"
                           icon={<PiEye />}
                           aria-label="Ver cliente"
                           title="Ver cliente"
@@ -469,8 +468,7 @@ export default function ClientesPage() {
                           Ver
                         </TableActionButton>
                         <TableActionButton
-                          variant="success"
-                          className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
+                          variant="primary"
                           icon={<PiCurrencyDollar />}
                           aria-label="Registrar abono"
                           title={sinSaldo ? 'Sin saldo pendiente' : 'Registrar abono'}
@@ -480,8 +478,7 @@ export default function ClientesPage() {
                           Abonar
                         </TableActionButton>
                         <TableActionButton
-                          variant="secondary"
-                          className="border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                          variant="edit"
                           icon={<PiPencilSimple />}
                           aria-label="Editar cliente"
                           title="Editar cliente"
@@ -513,7 +510,7 @@ export default function ClientesPage() {
         <div className="ui-modal-header">
           <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">{clienteModal.mode === 'edit' ? 'Editar cliente' : 'Nuevo cliente'}</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Registra o actualiza clientes para ventas y crédito.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Actualiza datos comerciales y estado del cliente.</p>
           </div>
           <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeClienteModal}>
             X
@@ -567,14 +564,6 @@ export default function ClientesPage() {
               />
             </Field>
 
-            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-              <Switch
-                checked={clienteForm.activo}
-                onChange={(checked) => setClienteForm((state) => ({ ...state, activo: checked }))}
-                label="Cliente activo"
-                description="Si está inactivo no aparece como opción para nuevas ventas."
-              />
-            </div>
           </div>
 
           <div className="lg:col-span-2">
@@ -585,6 +574,18 @@ export default function ClientesPage() {
                 placeholder="Notas del cliente"
               />
             </Field>
+          </div>
+
+          <div className="lg:col-span-2 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Configuración comercial</p>
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+              <Switch
+                checked={clienteForm.activo}
+                onChange={(checked) => setClienteForm((state) => ({ ...state, activo: checked }))}
+                label="Cliente activo"
+                description="Si está inactivo no aparece como opción para nuevas ventas."
+              />
+            </div>
           </div>
         </div>
 
@@ -726,9 +727,9 @@ export default function ClientesPage() {
             Cancelar
           </Button>
           <Button
-            className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
             onClick={onRegistrarAbono}
             disabled={loadingAbonoMeta || Number(abonoModal?.saldo_credito || 0) <= 0}
+            loading={loadingAbonoMeta}
           >
             Registrar abono
           </Button>

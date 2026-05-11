@@ -61,7 +61,7 @@ export default function DashboardQuickActions() {
       <button
         type="button"
         onClick={() => navigate(primaryAction.to)}
-        className="mt-5 w-full rounded-[22px] bg-[#DC2626] p-5 text-left text-white shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg"
+        className="mt-5 w-full rounded-[22px] border border-[var(--color-primary)] bg-[var(--color-primary)] p-5 text-left text-white shadow-[var(--shadow-md)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] hover:shadow-lg"
       >
         <div className="flex items-center justify-between gap-3">
           <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">

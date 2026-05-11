@@ -25,10 +25,12 @@ import SistemaPage from '../pages/admin/SistemaPage';
 import TransformacionesListPage from '../pages/transformaciones/TransformacionesListPage';
 import TransformacionFormPage from '../pages/transformaciones/TransformacionFormPage';
 import TransformacionDetallePage from '../pages/transformaciones/TransformacionDetallePage';
+import DesignSystemPage from '../pages/dev/DesignSystemPage';
 
 export const appRoutes = [
   { path: '/', element: <RootRedirect /> },
   { path: '/login', element: <LoginPage /> },
+  ...(import.meta.env.DEV ? [{ path: '/dev/design-system', element: <DesignSystemPage /> }] : []),
   {
     element: <RequireAuth />,
     children: [
@@ -63,7 +65,7 @@ export const appRoutes = [
               { path: '/transformaciones/nueva', element: <TransformacionFormPage /> },
               { path: '/transformaciones/:id/editar', element: <TransformacionFormPage /> },
               { path: '/transformaciones/:id', element: <TransformacionDetallePage /> },
-              { path: '/reportes', element: <Navigate to="/reportes/resumen" replace /> },
+              { path: '/reportes', element: <ReportesPage /> },
               { path: '/reportes/:section', element: <ReportesPage /> }
             ]
           },

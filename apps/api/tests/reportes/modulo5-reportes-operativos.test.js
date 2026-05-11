@@ -363,6 +363,68 @@ async function runSuite(options = {}) {
     add(8, 'Compras y compras por producto exponen resumen operativo para reportes', false, error.message);
   }
 
+  try {
+    const fixture = await buildSalesFixture();
+    await createTransformacionAplicada(fixture.admin, fixture.cajero, 'M5-RESUMEN');
+
+    const reporte = await reportesService.resumenOperativo({ fecha: fixture.today });
+
+    assert(reporte.data.fecha_referencia === fixture.today, 'Resumen operativo no respeta fecha de referencia');
+    assert(reporte.data.ventas_ultimos_7_dias.length === 7, 'Resumen operativo no devuelve 7 días');
+    assert(Array.isArray(reporte.data.tablas.proveedores_pendientes), 'Resumen operativo no incluye proveedores pendientes');
+    assert(Array.isArray(reporte.data.actividad_reciente), 'Resumen operativo no incluye actividad reciente');
+    add(9, 'Resumen operativo agrega KPIs, ventas 7 días, tablas críticas y actividad', true);
+  } catch (error) {
+    add(9, 'Resumen operativo agrega KPIs, ventas 7 días, tablas críticas y actividad', false, error.message);
+  }
+
+  try {
+    const fixture = await buildSalesFixture();
+    const reporte = await reportesService.ventasPanel({
+      fecha_inicio: fixture.yesterday,
+      fecha_fin: fixture.today
+    });
+
+    assert(reporte.data.resumen.ventas_netas_centavos === 1950, `Ventas panel inválidas: ${reporte.data.resumen.ventas_netas_centavos}`);
+    assert(reporte.data.tablas.top_productos.length >= 2, 'Ventas panel no devuelve top productos');
+    assert(reporte.data.graficos.ventas_por_hora.length >= 1, 'Ventas panel no devuelve ventas por hora');
+    assert(reporte.data.graficos.metodos_pago.some((item) => item.codigo === 'EFECTIVO'), 'Ventas panel no devuelve método efectivo');
+    add(10, 'Ventas panel consolida resumen comercial, series y top productos', true);
+  } catch (error) {
+    add(10, 'Ventas panel consolida resumen comercial, series y top productos', false, error.message);
+  }
+
+  try {
+    const fixture = await buildSalesFixture();
+    const reporte = await reportesService.cajaPanel({
+      fecha: fixture.today,
+      comparar_con: fixture.yesterday
+    });
+
+    const metodoCredito = reporte.data.graficos.ingresos_por_metodo_comercial.find((item) => item.codigo === 'CREDITO');
+    assert(reporte.data.resumen.ingresos_centavos === 900, `Caja panel ingresos inválidos: ${reporte.data.resumen.ingresos_centavos}`);
+    assert(reporte.data.tablas.movimientos.length >= 1, 'Caja panel no devuelve movimientos que afectan saldo');
+    assert(metodoCredito && metodoCredito.total_centavos === 600, 'Caja panel no separa crédito comercial');
+    add(11, 'Caja panel separa ingresos comerciales, comparativa diaria y movimientos de saldo', true);
+  } catch (error) {
+    add(11, 'Caja panel separa ingresos comerciales, comparativa diaria y movimientos de saldo', false, error.message);
+  }
+
+  try {
+    await buildSalesFixture();
+    const reporte = await reportesService.inventarioPanel({
+      fecha_inicio: '2000-01-01',
+      fecha_fin: '2100-12-31'
+    });
+
+    assert(reporte.data.resumen.valorizacion_total_centavos > 0, 'Inventario panel no devuelve valorización');
+    assert(Array.isArray(reporte.data.graficos.estado_stock), 'Inventario panel no devuelve estado de stock');
+    assert(Array.isArray(reporte.data.tablas.movimientos_recientes), 'Inventario panel no devuelve movimientos recientes');
+    add(12, 'Inventario panel consolida valorización, criticidad y movimientos recientes', true);
+  } catch (error) {
+    add(12, 'Inventario panel consolida valorización, criticidad y movimientos recientes', false, error.message);
+  }
+
   const report = printSuiteReport('MODULO 5 - REPORTES OPERATIVOS', results);
   const summary = { total: report.total, passed: report.passed, failed: report.failed, results: report.sorted };
   if (destroyDb) await cleanupRuntime({ db });

@@ -88,7 +88,7 @@ export default function PosTopbar({ user, onToggleMenu }) {
         <div className="topbar-left">
           <IconButton
             type="button"
-            variant="icon"
+            variant="ghost"
             onClick={onToggleMenu}
             aria-label="Alternar menu lateral"
             className="topbar-menu-button text-[var(--color-text-muted)]"

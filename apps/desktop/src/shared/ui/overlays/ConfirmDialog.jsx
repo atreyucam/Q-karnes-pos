@@ -34,6 +34,7 @@ export default function ConfirmDialog({
             variant={confirmVariant}
             onClick={onConfirm}
             disabled={confirmDisabled || confirmLoading || cancelDisabled}
+            loading={confirmLoading}
           >
             {confirmLabel}
           </Button>

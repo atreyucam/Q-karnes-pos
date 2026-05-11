@@ -771,8 +771,7 @@ export default function InventarioPage() {
                     <TablaCelda>
                       <TableActions>
                         <TableActionButton
-                          variant="neutral"
-                          className="border-[#dfe3e8] bg-white hover:bg-[#f6f6f7]"
+                          variant="edit"
                           icon={<PiPencilSimple />}
                           aria-label={`Editar ${row.nombre}`}
                           title="Editar producto"
@@ -796,7 +795,7 @@ export default function InventarioPage() {
                 {tab === 'movimientos' && (
                   <>
                     <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
-                    <TablaCelda>{row.producto_codigo} - {row.producto_nombre}</TablaCelda>
+                    <TablaCelda> {row.producto_nombre}</TablaCelda>
                     <TablaCelda><TipoBadge tipo={row.tipo} /></TablaCelda>
                     <TablaCelda>{resolveOrigenLabel(row)}</TablaCelda>
                     <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
@@ -844,7 +843,7 @@ export default function InventarioPage() {
                 {tab === 'ajustes' && (
                   <>
                     <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
-                    <TablaCelda>{row.producto_codigo} - {row.producto_nombre}</TablaCelda>
+                    <TablaCelda> {row.producto_nombre}</TablaCelda>
                     <TablaCelda>{row.referencia || resolveOrigenLabel(row)}</TablaCelda>
                     <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
                       {formatInventoryQty(Number(row.cantidad || 0) * Number(row.signo || 1), row.unidad_medida, { appendUnit: true })}

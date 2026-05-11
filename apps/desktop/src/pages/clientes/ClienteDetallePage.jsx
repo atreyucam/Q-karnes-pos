@@ -76,7 +76,9 @@ export default function ClienteDetallePage() {
   const [deactivateLoading, setDeactivateLoading] = useState(false);
   const [blockedDeactivateOpen, setBlockedDeactivateOpen] = useState(false);
   const [statusToast, setStatusToast] = useState('');
+  const [statusToastError, setStatusToastError] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
+  const [errorToastVisible, setErrorToastVisible] = useState(false);
   const clienteFormErrors = useFormErrors();
   const abonoFormErrors = useFormErrors();
   const saldoCliente = Number(resumen?.saldo || 0);
@@ -104,6 +106,17 @@ export default function ClienteDetallePage() {
       window.clearTimeout(clearTimer);
     };
   }, [statusToast]);
+
+  useEffect(() => {
+    if (!statusToastError) return undefined;
+    setErrorToastVisible(true);
+    const hideTimer = window.setTimeout(() => setErrorToastVisible(false), 2400);
+    const clearTimer = window.setTimeout(() => setStatusToastError(''), 2580);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToastError]);
 
   const facturasDecoradas = useMemo(() => {
     const rows = facturas.map((row) => ({
@@ -223,6 +236,7 @@ export default function ClienteDetallePage() {
 
     if (quiereDesactivar && saldoPendiente > 0) {
       setBlockedDeactivateOpen(true);
+      setStatusToastError('No se puede desactivar este cliente porque mantiene saldo pendiente.');
       return;
     }
 
@@ -238,7 +252,7 @@ export default function ClienteDetallePage() {
     await actualizar(clienteId, payload);
     closeClienteModal();
     await loadData();
-    setStatusToast('Cliente actualizado.');
+    setStatusToast('Cliente actualizado correctamente.');
   };
 
   const onToggleCliente = async () => {
@@ -247,6 +261,7 @@ export default function ClienteDetallePage() {
     if (clienteDetalle.activo) {
       if (saldoCliente > 0) {
         setBlockedDeactivateOpen(true);
+        setStatusToastError('No se puede desactivar este cliente porque mantiene saldo pendiente.');
         return;
       }
       setConfirmDeactivateOpen(true);
@@ -258,7 +273,7 @@ export default function ClienteDetallePage() {
       await loadData();
       setStatusToast('Cliente ha sido activado.');
     } catch (_) {
-      // store error already exposed in page alert
+      setStatusToastError('Error al actualizar cliente.');
     }
   };
 
@@ -270,6 +285,7 @@ export default function ClienteDetallePage() {
       await loadData();
       setStatusToast('Cliente ha sido desactivado.');
     } catch (_) {
+      setStatusToastError('Error al actualizar cliente.');
       setConfirmDeactivateOpen(false);
     } finally {
       setDeactivateLoading(false);
@@ -281,6 +297,11 @@ export default function ClienteDetallePage() {
       {statusToast ? (
         <div className="fixed right-5 top-5 z-[1200]">
           <Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast>
+        </div>
+      ) : null}
+      {statusToastError ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast tone="danger" className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToastError}</Toast>
         </div>
       ) : null}
 
@@ -406,8 +427,7 @@ export default function ClienteDetallePage() {
                         Ver
                       </TableActionButton>
                       <TableActionButton
-                        variant="success"
-                        className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
+                        variant="primary"
                         icon={<PiCurrencyDollar />}
                         aria-label="Registrar abono"
                         title={sinPendiente ? 'Sin saldo pendiente' : 'Registrar abono'}
@@ -484,15 +504,6 @@ export default function ClienteDetallePage() {
                 placeholder="Sector / calle"
               />
             </Field>
-
-            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-              <Switch
-                checked={clienteForm.activo}
-                onChange={(checked) => setClienteForm((state) => ({ ...state, activo: checked }))}
-                label="Cliente activo"
-                description="Si está inactivo no aparece como opción para nuevas ventas."
-              />
-            </div>
           </div>
 
           <div className="lg:col-span-2">
@@ -503,6 +514,18 @@ export default function ClienteDetallePage() {
                 placeholder="Notas del cliente"
               />
             </Field>
+          </div>
+
+          <div className="lg:col-span-2 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Configuración comercial</p>
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+              <Switch
+                checked={clienteForm.activo}
+                onChange={(checked) => setClienteForm((state) => ({ ...state, activo: checked }))}
+                label="Cliente activo"
+                description="Si está inactivo no aparece como opción para nuevas ventas."
+              />
+            </div>
           </div>
         </div>
 
@@ -536,9 +559,9 @@ export default function ClienteDetallePage() {
           </div>
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Documento con deuda</p>
-            <div className="inline-flex rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+            <StatusBadge tone="warning">
               {`Venta #${modalAbono?.id || ''} • Pendiente ${formatMoney(saldoActualAbono)}`}
-            </div>
+            </StatusBadge>
             <p className="text-xs text-[var(--color-text-muted)]">{modalAbono?.referencia || 'Factura sin referencia'}</p>
           </div>
         </div>
@@ -638,9 +661,9 @@ export default function ClienteDetallePage() {
             Cancelar
           </Button>
           <Button
-            className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
             onClick={registrarAbono}
             disabled={saldoActualAbono <= 0}
+            loading={loading}
           >
             Registrar abono
           </Button>
@@ -653,7 +676,7 @@ export default function ClienteDetallePage() {
         entityType="cliente"
         entityName={clienteDetalle?.nombre || '-'}
         pendingAmountLabel={formatMoney(saldoCliente)}
-        blockedMessage="El cliente mantiene saldo pendiente de crédito."
+        blockedMessage="No se puede desactivar este cliente porque mantiene saldo pendiente."
         confirmLoading={deactivateLoading}
         onCloseConfirm={() => setConfirmDeactivateOpen(false)}
         onConfirm={onConfirmDeactivate}

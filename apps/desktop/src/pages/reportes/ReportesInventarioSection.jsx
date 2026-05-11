@@ -1,444 +1,566 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PiChartBar, PiPackage, PiWarningCircle } from 'react-icons/pi';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { PiArrowsClockwise, PiChartBar, PiPackage, PiWarningCircle } from 'react-icons/pi';
+import apiClient, { normalizeResponse } from '../../lib/apiClient';
 import {
   Alert,
   EmptyState,
   Field,
+  Input,
+  LoadingState,
   MetricTile,
-  Paginador,
+  PageHeader,
   Panel,
   Select,
+  StatusChip,
   Table,
   TableBody,
   TableCell,
   TableHead,
-  TableRow
+  TableRow,
+  Tabs
 } from '../../shared/ui';
-import { fetchCategorias, fetchProductosActivos } from '../../services/catalogoService';
+import { fetchProductosActivos } from '../../services/catalogoService';
 import { useReportesStore } from '../../stores/reportesStore';
-import ReportDateFilters from './ReportesFilters';
-import { ChartPanel, HorizontalBarChart, PaymentDonutChart } from './ReportesCharts';
-import { exportRowsToCsv } from './reportesExport';
+import { ChartPanel, PaymentDonutChart, VerticalBarChart } from './ReportesCharts';
+import ReportesComprasSection from './ReportesComprasSection';
+import ReportesDespieceSection from './ReportesDespieceSection';
+import KardexReport from './KardexReport';
 import {
-  createDefaultQuickFilters,
+  businessTodayString,
   formatCentavos,
   formatDateLabel,
   formatKardexQuantity,
   formatNumber,
   formatOrigin,
   formatQuantity,
-  sanitizeDateRange
+  shiftDate
 } from './reportesUtils';
-import { useReportTablePagination } from './useReportTablePagination';
+import { INVENTORY_REPORT_TABS, resolveInventoryTab } from './reportesSections';
+import { useDebouncedValue } from './useDebouncedValue';
 
-function normalizeMovementsData(rawData) {
-  if (Array.isArray(rawData)) return rawData;
-  if (rawData && Array.isArray(rawData.items)) return rawData.items;
-  return [];
+async function fetchProveedoresOptions() {
+  const response = await apiClient.get('/api/proveedores', { params: { activo: 1 } });
+  return normalizeResponse(response.data) || [];
+}
+
+function defaultRange(days = 7) {
+  const today = businessTodayString();
+  return {
+    fecha_inicio: shiftDate(today, -(days - 1)),
+    fecha_fin: today
+  };
+}
+
+function FilterPanel({ children }) {
+  return <Panel className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{children}</Panel>;
+}
+
+function StockTablePanel({ title, subtitle, rows, emptyTitle, emptyDescription, columns }) {
+  const safeRows = Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
+  return (
+    <Panel className="p-0">
+      <div className="border-b border-[var(--color-border)] px-4 py-4">
+        <h3 className="text-base font-semibold text-[var(--color-text)]">{title}</h3>
+        <p className="text-sm text-[var(--color-text-muted)]">{subtitle}</p>
+      </div>
+      {safeRows.length === 0 ? (
+        <div className="p-4">
+          <EmptyState title={emptyTitle} description={emptyDescription} />
+        </div>
+      ) : (
+        <Table>
+          <TableHead>
+            <TableRow>
+              {columns.map((column) => (
+                <TableCell key={column.key} as="th" className={column.className}>{column.label}</TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody emptyColSpan={columns.length} emptyMessage="Sin registros para esta vista.">
+            {safeRows.map((row, index) => (
+              <TableRow key={row?.id || row?.producto_id || `${title}-${index}`}>
+                {columns.map((column) => (
+                  <TableCell key={column.key} className={column.className}>
+                    {column.render ? column.render(row) : row[column.key]}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Panel>
+  );
+}
+
+function renderEstadoStock(estado) {
+  if (estado === 'SIN_STOCK') return <StatusChip tone="danger">Sin stock</StatusChip>;
+  return <StatusChip tone="warning">Bajo mínimo</StatusChip>;
+}
+
+function toneBySigned(value) {
+  const amount = Number(value || 0);
+  if (amount > 0) return 'text-emerald-600';
+  if (amount < 0) return 'text-red-600';
+  return 'text-slate-500';
+}
+
+function movementTone(tipo = '', signo = 0) {
+  const upper = String(tipo || '').toUpperCase();
+  if (upper.includes('AJUSTE')) return 'text-amber-600';
+  if (upper.includes('TRANSFORM')) return 'text-[var(--color-primary)]';
+  return Number(signo || 0) >= 0 ? 'text-emerald-600' : 'text-red-600';
+}
+
+function formatSignedInventoryQuantity(row) {
+  const qty = Number(row.cantidad || 0);
+  const sign = Number(row.signo || 0);
+  const absQty = Math.abs(qty);
+  const unit = row.unidad_medida || row.unidad || 'UND';
+  const baseValue = formatQuantity(absQty, unit, { fixedLB: true });
+  if (sign > 0) return `+${baseValue}`;
+  if (sign < 0) return `-${baseValue}`;
+  return baseValue;
+}
+
+function normalizeCompraEstado(estado = '') {
+  const normalized = String(estado || '').trim().toUpperCase();
+  if (normalized === 'CERRADA') return 'COMPLETA';
+  if (normalized === 'RECIBIDA') return 'PARCIAL';
+  return normalized || 'ABIERTA';
+}
+
+function compraEstadoTone(estado = '') {
+  const normalized = normalizeCompraEstado(estado);
+  if (normalized === 'COMPLETA') return 'success';
+  if (normalized === 'PARCIAL' || normalized === 'CERRADA_PARCIAL') return 'warning';
+  if (normalized === 'CANCELADA') return 'neutral';
+  return 'info';
+}
+
+function despieceEstadoTone(estado = '') {
+  const normalized = String(estado || '').toUpperCase();
+  if (normalized === 'APLICADA') return 'success';
+  if (normalized === 'ANULADA') return 'danger';
+  return 'warning';
 }
 
 export default function ReportesInventarioSection() {
   const cargarReporte = useReportesStore((state) => state.cargarReporte);
   const views = useReportesStore((state) => state.views);
-  const [filters, setFilters] = useState(() => ({
-    ...createDefaultQuickFilters('last7'),
-    categoria_id: '',
-    producto_id: '',
-    estado_stock: 'todos'
-  }));
-  const [categories, setCategories] = useState([]);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
+  const [proveedores, setProveedores] = useState([]);
+  const rawTab = String(searchParams.get('tab') || 'stock').trim().toLowerCase();
+  const currentTab = resolveInventoryTab(rawTab);
 
   useEffect(() => {
-    fetchCategorias().then((rows) => setCategories(Array.isArray(rows) ? rows : []));
-    fetchProductosActivos().then((rows) => setProducts(Array.isArray(rows) ? rows : []));
+    if (rawTab !== currentTab) {
+      setSearchParams({ tab: currentTab }, { replace: true });
+    }
+  }, [currentTab, rawTab, setSearchParams]);
+
+  const [movimientosFilters, setMovimientosFilters] = useState(() => ({
+    fecha_inicio: '',
+    fecha_fin: '',
+    tipo: '',
+    producto_id: ''
+  }));
+  const [comprasFilters, setComprasFilters] = useState(() => ({
+    fecha_inicio: '',
+    fecha_fin: '',
+    proveedor_id: '',
+    estado: ''
+  }));
+  const [despieceFilters, setDespieceFilters] = useState(() => ({
+    fecha_inicio: '',
+    fecha_fin: '',
+    estado: '',
+    producto_padre_id: ''
+  }));
+  const [kardexFilters, setKardexFilters] = useState(() => ({
+    ...defaultRange(30),
+    producto_id: ''
+  }));
+
+  const debouncedMovimientos = useDebouncedValue(movimientosFilters, 280);
+  const debouncedCompras = useDebouncedValue(comprasFilters, 280);
+  const debouncedDespiece = useDebouncedValue(despieceFilters, 280);
+  const debouncedKardex = useDebouncedValue(kardexFilters, 280);
+
+  useEffect(() => {
+    fetchProductosActivos()
+      .then((rows) => setProducts(Array.isArray(rows) ? rows : []))
+      .catch(() => setProducts([]));
+    fetchProveedoresOptions()
+      .then((rows) => setProveedores(Array.isArray(rows) ? rows : []))
+      .catch(() => setProveedores([]));
   }, []);
 
-  const loadSection = useCallback(async (currentFilters) => {
-    const range = sanitizeDateRange(currentFilters);
-    await Promise.all([
-      cargarReporte('inventarioActual', {}, true),
-      cargarReporte('inventario', {}, true),
-      cargarReporte('inventarioMovimientos', {
-        ...range,
-        categoria_id: currentFilters.categoria_id,
-        producto_id: currentFilters.producto_id
-      }, true),
-      currentFilters.producto_id
-        ? cargarReporte('kardex', {
-          ...range,
-          producto_id: currentFilters.producto_id
-        }, true)
-        : Promise.resolve(null)
-    ]);
-  }, [cargarReporte]);
-
   useEffect(() => {
-    loadSection(filters);
-  }, [filters, loadSection]);
+    if (currentTab === 'stock') {
+      cargarReporte('inventarioPanel', defaultRange(30));
+    }
+    if (currentTab === 'movimientos') {
+      cargarReporte('inventarioMovimientos', debouncedMovimientos);
+    }
+    if (currentTab === 'compras') {
+      cargarReporte('compras', debouncedCompras);
+      cargarReporte('comprasProductos', debouncedCompras);
+    }
+    if (currentTab === 'despiece') {
+      cargarReporte('transformaciones', debouncedDespiece);
+      cargarReporte('transformacionesResumen', debouncedDespiece);
+    }
+    if (currentTab === 'kardex' && debouncedKardex.producto_id) {
+      cargarReporte('kardex', debouncedKardex);
+    }
+  }, [cargarReporte, currentTab, debouncedCompras, debouncedDespiece, debouncedKardex, debouncedMovimientos]);
 
-  const loading = views.inventarioActual.loading || views.inventario.loading || views.inventarioMovimientos.loading || views.kardex.loading;
-  const error = views.inventarioActual.error || views.inventario.error || views.inventarioMovimientos.error || views.kardex.error;
-  const hasData = Boolean(views.inventarioActual.data || views.inventario.data || views.inventarioMovimientos.data);
+  const activeLoading = {
+    stock: views.inventarioPanel.loading,
+    movimientos: views.inventarioMovimientos.loading,
+    compras: views.compras.loading || views.comprasProductos.loading,
+    despiece: views.transformaciones.loading || views.transformacionesResumen.loading,
+    kardex: views.kardex.loading
+  }[currentTab];
 
-  const inventorySummary = views.inventarioActual.data?.resumen || {};
-  const inventoryRows = views.inventario.data?.items || [];
-  const movementRows = normalizeMovementsData(views.inventarioMovimientos.data);
-  const kardexRows = filters.producto_id ? (views.kardex.data?.items || []) : [];
+  const activeError = {
+    stock: views.inventarioPanel.error,
+    movimientos: views.inventarioMovimientos.error,
+    compras: views.compras.error || views.comprasProductos.error,
+    despiece: views.transformaciones.error || views.transformacionesResumen.error,
+    kardex: views.kardex.error
+  }[currentTab];
 
-  const filteredInventoryRows = useMemo(() => {
-    return inventoryRows
-      .filter((row) => {
-        if (filters.categoria_id && Number(row.categoria_id || 0) !== Number(filters.categoria_id)) return false;
-        if (filters.producto_id && Number(row.id || 0) !== Number(filters.producto_id)) return false;
-        if (filters.estado_stock === 'bajo' && !row.bajo_minimo) return false;
-        if (filters.estado_stock === 'sin' && Number(row.stock_actual || 0) > 0) return false;
-        return true;
-      })
-      .sort((left, right) => {
-        if (Boolean(left.bajo_minimo) !== Boolean(right.bajo_minimo)) return left.bajo_minimo ? -1 : 1;
-        return String(left.producto || '').localeCompare(String(right.producto || ''));
-      });
-  }, [inventoryRows, filters.categoria_id, filters.producto_id, filters.estado_stock]);
+  const stockData = views.inventarioPanel.data;
+  const movementsData = Array.isArray(views.inventarioMovimientos.data?.items)
+    ? views.inventarioMovimientos.data.items.filter((row) => row && typeof row === 'object')
+    : [];
+  const comprasData = views.compras.data;
+  const comprasProductosData = views.comprasProductos.data;
+  const despieceData = views.transformaciones.data;
+  const despieceResumen = Array.isArray(views.transformacionesResumen.data)
+    ? views.transformacionesResumen.data.filter((row) => row && typeof row === 'object')
+    : [];
+  const kardexData = Array.isArray(views.kardex.data?.items)
+    ? views.kardex.data.items.filter((row) => row && typeof row === 'object')
+    : [];
 
-  const criticalRows = useMemo(
-    () => filteredInventoryRows.filter((row) => row.bajo_minimo),
-    [filteredInventoryRows]
-  );
+  const stockResumen = stockData?.resumen || {};
+  const stockGraficos = stockData?.graficos || {};
+  const stockTablas = stockData?.tablas || {};
 
-  const outOfStockRows = useMemo(
-    () => filteredInventoryRows.filter((row) => Number(row.stock_actual || 0) <= 0),
-    [filteredInventoryRows]
-  );
+  const stockKpis = [
+    { label: 'Valorización total', value: formatCentavos(stockResumen.valorizacion_total_centavos), icon: PiPackage },
+    { label: 'Productos bajo mínimo', value: formatNumber(stockResumen.productos_bajo_minimo), icon: PiWarningCircle, toneClass: Number(stockResumen.productos_bajo_minimo || 0) > 0 ? 'text-amber-600' : 'text-slate-500' },
+    { label: 'Inconsistencias de stock', value: formatNumber(stockResumen.inconsistencias_stock), icon: PiWarningCircle, toneClass: Number(stockResumen.inconsistencias_stock || 0) > 0 ? 'text-red-600' : 'text-slate-500' },
+    { label: 'Sin movimiento 30 días', value: formatNumber(stockResumen.productos_sin_movimiento_30_dias), icon: PiArrowsClockwise, toneClass: Number(stockResumen.productos_sin_movimiento_30_dias || 0) > 0 ? 'text-amber-600' : 'text-slate-500' }
+  ];
 
-  const filteredMovementRows = useMemo(() => {
-    return movementRows.filter((row) => {
-      if (filters.producto_id && Number(row.producto_id || 0) !== Number(filters.producto_id)) return false;
-      if (filters.categoria_id && Number(row.categoria_id || 0) !== Number(filters.categoria_id)) return false;
-      return true;
-    });
-  }, [movementRows, filters.producto_id, filters.categoria_id]);
+  const stockStateData = useMemo(() => (
+    (stockGraficos.estado_stock || []).map((row) => ({ label: row.estado, value: row.cantidad }))
+  ), [stockGraficos.estado_stock]);
 
-  const movementByType = useMemo(() => {
+  const valuationCategoryData = useMemo(() => (
+    (stockGraficos.valorizacion_por_categoria || []).map((row) => ({
+      label: row.categoria,
+      value: Number(row.total_centavos || 0)
+    }))
+  ), [stockGraficos.valorizacion_por_categoria]);
+
+  const comprasResumen = comprasData?.resumen || {};
+  const comprasRows = Array.isArray(comprasData?.items)
+    ? comprasData.items.filter((row) => row && typeof row === 'object')
+    : [];
+  const comprasProductosRows = Array.isArray(comprasProductosData?.items)
+    ? comprasProductosData.items.filter((row) => row && typeof row === 'object')
+    : [];
+  const comprasByProveedorChart = useMemo(() => {
     const grouped = new Map();
-    for (const row of filteredMovementRows) {
-      const key = String(row.tipo || 'SIN_TIPO');
-      grouped.set(key, Number(grouped.get(key) || 0) + 1);
+    for (const row of comprasRows) {
+      grouped.set(row.proveedor, Number(grouped.get(row.proveedor) || 0) + Math.round(Number(row.total_compra || 0) * 100));
     }
     return Array.from(grouped.entries())
       .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
-  }, [filteredMovementRows]);
+      .sort((left, right) => right.value - left.value)
+      .slice(0, 8);
+  }, [comprasRows]);
 
-  const stockDistribution = useMemo(() => {
-    const sinStock = outOfStockRows.length;
-    const bajo = criticalRows.length;
-    const normal = Math.max(filteredInventoryRows.length - sinStock - bajo, 0);
+  const despieceRows = Array.isArray(despieceData?.items)
+    ? despieceData.items.filter((row) => row && typeof row === 'object')
+    : [];
+  const movimientosKpis = useMemo(() => {
+    const entradas = movementsData.reduce((acc, row) => (Number(row.signo || 0) > 0 ? acc + Math.abs(Number(row.cantidad || 0)) : acc), 0);
+    const salidas = movementsData.reduce((acc, row) => (Number(row.signo || 0) < 0 ? acc + Math.abs(Number(row.cantidad || 0)) : acc), 0);
+    const ajustes = movementsData.filter((row) => String(row.tipo || '').toUpperCase().includes('AJUSTE')).length;
     return [
-      { label: 'Sin stock', value: sinStock },
-      { label: 'Bajo minimo', value: bajo },
-      { label: 'Stock saludable', value: normal }
-    ].filter((item) => item.value > 0);
-  }, [criticalRows.length, filteredInventoryRows.length, outOfStockRows.length]);
+      { label: 'Entradas del período', value: formatNumber(entradas), toneClass: 'text-emerald-600', icon: PiPackage },
+      { label: 'Salidas del período', value: formatNumber(salidas), toneClass: 'text-red-600', icon: PiWarningCircle },
+      { label: 'Ajustes', value: formatNumber(ajustes), toneClass: ajustes > 0 ? 'text-amber-600' : 'text-slate-500', icon: PiArrowsClockwise },
+      { label: 'Movimientos totales', value: formatNumber(movementsData.length), icon: PiChartBar }
+    ];
+  }, [movementsData]);
 
-  const kpis = [
-    {
-      label: 'Valor inventario',
-      value: formatCentavos(inventorySummary.valor_total_inventario_centavos),
-      icon: PiPackage
-    },
-    {
-      label: 'Productos criticos',
-      value: formatNumber(criticalRows.length),
-      icon: PiWarningCircle
-    },
-    {
-      label: 'Sin stock',
-      value: formatNumber(outOfStockRows.length),
-      icon: PiWarningCircle
-    },
-    {
-      label: 'Movimientos',
-      value: formatNumber(filteredMovementRows.length),
-      icon: PiChartBar
-    }
-  ];
+  const comprasDecoradas = useMemo(() => (
+    comprasRows.map((row) => {
+      const estado = normalizeCompraEstado(row.estado);
+      const totalCentavos = Math.round(Number(row.total_compra || 0) * 100);
+      const pendienteCentavos = ['ABIERTA', 'PARCIAL', 'CERRADA_PARCIAL'].includes(estado) ? totalCentavos : 0;
+      return {
+        ...row,
+        estado_normalizado: estado,
+        total_centavos: totalCentavos,
+        pendiente_centavos: pendienteCentavos
+      };
+    })
+  ), [comprasRows]);
 
-  const stockPagination = useReportTablePagination(filteredInventoryRows, 12);
-  const criticalPagination = useReportTablePagination(criticalRows, 10);
-  const movementPagination = useReportTablePagination(filteredMovementRows, 12);
-  const kardexPagination = useReportTablePagination(kardexRows, 12);
+  const comprasKpis = useMemo(() => {
+    const facturasPendientes = comprasDecoradas.filter((row) => row.pendiente_centavos > 0).length;
+    const proveedoresPendientes = new Set(comprasDecoradas.filter((row) => row.pendiente_centavos > 0).map((row) => row.proveedor_id).filter(Boolean)).size;
+    const productosRecibidos = comprasProductosRows.reduce((acc, row) => acc + Number(row.cantidad_comprada || 0), 0);
+    return [
+      { label: 'Total comprado', value: formatCentavos(Math.round(Number(comprasResumen.total_compras || 0) * 100)), icon: PiPackage },
+      { label: 'Facturas pendientes', value: formatNumber(facturasPendientes), icon: PiChartBar, toneClass: facturasPendientes > 0 ? 'text-amber-600' : 'text-slate-500' },
+      { label: 'Proveedores pendientes', value: formatNumber(proveedoresPendientes), icon: PiPackage, toneClass: proveedoresPendientes > 0 ? 'text-amber-600' : 'text-slate-500' },
+      { label: 'Productos recibidos', value: formatNumber(productosRecibidos), icon: PiArrowsClockwise, toneClass: productosRecibidos > 0 ? 'text-emerald-600' : 'text-slate-500' }
+    ];
+  }, [comprasDecoradas, comprasProductosRows, comprasResumen.total_compras]);
+
+  const despieceKpis = useMemo(() => {
+    const aplicadas = despieceRows.filter((row) => String(row.estado || '').toUpperCase() === 'APLICADA');
+    const kgProcesados = aplicadas.reduce((acc, row) => acc + Number(row.producto_padre?.cantidad || 0), 0);
+    const mermaTotal = despieceRows.reduce((acc, row) => acc + Number(row.merma_total || 0), 0);
+    const valorGeneradoCentavos = aplicadas.reduce((acc, row) => acc + Number(row.costo_total_distribuido_centavos || 0), 0);
+    return [
+      { label: 'Transformaciones aplicadas', value: formatNumber(aplicadas.length), icon: PiPackage, toneClass: aplicadas.length > 0 ? 'text-emerald-600' : 'text-slate-500' },
+      { label: 'KG procesados', value: `${formatNumber(kgProcesados)} KG`, icon: PiArrowsClockwise },
+      { label: 'Merma total', value: `${formatNumber(mermaTotal)} LB`, icon: PiWarningCircle, toneClass: mermaTotal > 0 ? 'text-amber-600' : 'text-slate-500' },
+      { label: 'Valor generado', value: formatCentavos(valorGeneradoCentavos), icon: PiChartBar, toneClass: valorGeneradoCentavos > 0 ? 'text-emerald-600' : 'text-slate-500' }
+    ];
+  }, [despieceRows]);
+
+  const despieceSeries = useMemo(() => (
+    despieceResumen.map((row) => ({
+      label: row.fecha,
+      value: Number(row.rendimiento_promedio || row.rendimiento || 0)
+    }))
+  ), [despieceResumen]);
+
+  const kardexKpis = useMemo(() => {
+    if (!kardexFilters.producto_id) return [];
+    const entradas = kardexData.reduce((acc, row) => (Number(row.signo || 0) > 0 ? acc + Math.abs(Number(row.cantidad || 0)) : acc), 0);
+    const salidas = kardexData.reduce((acc, row) => (Number(row.signo || 0) < 0 ? acc + Math.abs(Number(row.cantidad || 0)) : acc), 0);
+    const last = kardexData[kardexData.length - 1];
+    const saldoActual = last ? formatQuantity(last.saldo_resultante, last.unidad_medida, { fixedLB: true }) : '-';
+
+    const weighted = kardexData.reduce((acc, row) => {
+      if (Number(row.signo || 0) <= 0) return acc;
+      const qty = Math.abs(Number(row.cantidad || 0));
+      const totalCentavos = Number(row.costo_total_centavos || 0);
+      return {
+        qty: acc.qty + qty,
+        total: acc.total + totalCentavos
+      };
+    }, { qty: 0, total: 0 });
+    const costoPromedioCentavos = weighted.qty > 0 ? Math.round(weighted.total / weighted.qty) : 0;
+
+    return [
+      { label: 'Entradas', value: formatNumber(entradas), icon: PiPackage, toneClass: entradas > 0 ? 'text-emerald-600' : 'text-slate-500' },
+      { label: 'Salidas', value: formatNumber(salidas), icon: PiWarningCircle, toneClass: salidas > 0 ? 'text-red-600' : 'text-slate-500' },
+      { label: 'Saldo actual', value: saldoActual, icon: PiArrowsClockwise },
+      { label: 'Costo promedio', value: formatCentavos(costoPromedioCentavos), icon: PiChartBar }
+    ];
+  }, [kardexData, kardexFilters.producto_id]);
+
+  if (activeLoading && currentTab === 'stock' && !stockData) {
+    return <LoadingState label="Construyendo reporte de inventario..." />;
+  }
 
   return (
     <div className="space-y-5">
-      <ReportDateFilters
-        filters={filters}
-        setFilters={setFilters}
-        loading={loading}
-        submitLabel="Actualizar inventario"
-        showExport
-        onSubmit={(next) => loadSection(next)}
-        onExport={() => {
-          const rows = filteredMovementRows.map((row) => ({
-            fecha: formatDateLabel(row.fecha),
-            producto: `${row.producto_codigo || ''} ${row.producto_nombre || ''}`.trim(),
-            tipo: row.tipo,
-            cantidad: formatQuantity(row.cantidad, row.unidad_medida || row.unidad || 'UND', { fixedLB: true }),
-            referencia: row.referencia || '-'
-          }));
-          exportRowsToCsv('reportes-inventario-movimientos.csv', [
-            { key: 'fecha', label: 'Fecha' },
-            { key: 'producto', label: 'Producto' },
-            { key: 'tipo', label: 'Tipo' },
-            { key: 'cantidad', label: 'Cantidad' },
-            { key: 'referencia', label: 'Referencia' }
-          ], rows);
-        }}
-        extraFields={(
-          <>
-            <Field label="Categoria">
-              <Select
-                value={filters.categoria_id}
-                onChange={(event) => setFilters((prev) => ({ ...prev, categoria_id: event.target.value }))}
-              >
-                <option value="">Todas</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.nombre}</option>
-                ))}
+      <PageHeader
+        title="Inventario"
+        description="Stock, valorización y movimientos"
+      />
+
+      <Panel className="space-y-4 p-4">
+        <Tabs
+          className="reportes-tabs-secondary"
+          ariaLabel="Secciones secundarias de inventario"
+          items={INVENTORY_REPORT_TABS}
+          value={currentTab}
+          onChange={(nextTab) => setSearchParams({ tab: nextTab })}
+        />
+      </Panel>
+
+      {activeError ? <Alert tone="error">{activeError}</Alert> : null}
+
+      {(() => {
+        switch (currentTab) {
+          case 'stock':
+            return (
+              <>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {stockKpis.map((kpi) => (
+              <div key={kpi.label} className="rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+                <MetricTile icon={kpi.icon} value={kpi.value} label={kpi.label} tone="primary" className="border-0 bg-transparent px-0 py-0" />
+                {kpi.toneClass ? <p className={`mt-2 text-sm font-semibold ${kpi.toneClass}`}>{kpi.value}</p> : null}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <ChartPanel title="Estado de stock" subtitle="Lectura compacta del estado operativo actual.">
+              <PaymentDonutChart data={stockStateData} valueType="count" />
+            </ChartPanel>
+            <ChartPanel title="Valorización por categoría" subtitle="Solo las categorías con mayor peso actual.">
+              <VerticalBarChart data={valuationCategoryData} label="Valorización" />
+            </ChartPanel>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <StockTablePanel
+              title="Productos críticos"
+              subtitle="Productos bajo mínimo o sin stock."
+              rows={stockTablas.productos_criticos || []}
+              emptyTitle="Sin productos críticos"
+              emptyDescription="No hay productos bajo mínimo en este momento."
+              columns={[
+                { key: 'producto', label: 'Producto', render: (row) => `${row.codigo} ${row.producto}` },
+                { key: 'stock_actual', label: 'Stock', render: (row) => `${formatNumber(row.stock_actual)} ${row.unidad_medida}` },
+                { key: 'stock_minimo', label: 'Mínimo', render: (row) => `${formatNumber(row.stock_minimo)} ${row.unidad_medida}` },
+                { key: 'estado', label: 'Estado', render: (row) => renderEstadoStock(row.estado) }
+              ]}
+            />
+
+            <StockTablePanel
+              title="Inconsistencias de stock"
+              subtitle="Diferencias entre esperado y registrado."
+              rows={stockTablas.inconsistencias_stock || []}
+              emptyTitle="Sin inconsistencias"
+              emptyDescription="No hay diferencias detectadas en stock."
+              columns={[
+                { key: 'producto', label: 'Producto', render: (row) => `${row.codigo} ${row.producto}` },
+                { key: 'stock_esperado', label: 'Esperado', render: (row) => `${formatNumber(row.stock_esperado)} ${row.unidad_medida}` },
+                { key: 'stock_registrado', label: 'Registrado', render: (row) => `${formatNumber(row.stock_registrado)} ${row.unidad_medida}` },
+                { key: 'diferencia', label: 'Diferencia', render: (row) => `${formatNumber(row.diferencia)} ${row.unidad_medida}` }
+              ]}
+            />
+          </div>
+
+          <StockTablePanel
+            title="Movimientos recientes"
+            subtitle="Últimos movimientos útiles para revisar el estado actual."
+            rows={stockTablas.movimientos_recientes || []}
+            emptyTitle="Sin movimientos recientes"
+            emptyDescription="No hubo movimientos recientes para mostrar."
+            columns={[
+              { key: 'fecha', label: 'Fecha', render: (row) => formatDateLabel(row.fecha) },
+              { key: 'producto', label: 'Producto', render: (row) => `${row.codigo} ${row.producto}` },
+              { key: 'tipo', label: 'Tipo' },
+              { key: 'cantidad', label: 'Cantidad', render: (row) => `${formatNumber(row.cantidad)} ${row.unidad_medida}` }
+            ]}
+          />
+              </>
+            );
+          case 'movimientos':
+            return (
+              <>
+          <FilterPanel>
+            <Field label="Fecha inicio">
+              <Input type="date" value={movimientosFilters.fecha_inicio} onChange={(event) => setMovimientosFilters((prev) => ({ ...prev, fecha_inicio: event.target.value }))} />
+            </Field>
+            <Field label="Fecha fin">
+              <Input type="date" value={movimientosFilters.fecha_fin} onChange={(event) => setMovimientosFilters((prev) => ({ ...prev, fecha_fin: event.target.value }))} />
+            </Field>
+            <Field label="Tipo">
+              <Select value={movimientosFilters.tipo} onChange={(event) => setMovimientosFilters((prev) => ({ ...prev, tipo: event.target.value }))}>
+                <option value="">Todos</option>
+                <option value="AJUSTE">Ajuste</option>
+                <option value="VENTA">Venta</option>
+                <option value="COMPRA">Compra</option>
+                <option value="TRANSFORMACION">Transformación</option>
               </Select>
             </Field>
-
             <Field label="Producto">
-              <Select
-                value={filters.producto_id}
-                onChange={(event) => setFilters((prev) => ({ ...prev, producto_id: event.target.value }))}
-              >
+              <Select value={movimientosFilters.producto_id} onChange={(event) => setMovimientosFilters((prev) => ({ ...prev, producto_id: event.target.value }))}>
                 <option value="">Todos</option>
                 {products.map((product) => (
                   <option key={product.id} value={product.id}>{product.codigo} {product.nombre}</option>
                 ))}
               </Select>
             </Field>
+          </FilterPanel>
 
-            <Field label="Estado stock">
-              <Select
-                value={filters.estado_stock}
-                onChange={(event) => setFilters((prev) => ({ ...prev, estado_stock: event.target.value }))}
-              >
-                <option value="todos">Todos</option>
-                <option value="bajo">Solo bajo minimo</option>
-                <option value="sin">Solo sin stock</option>
-              </Select>
-            </Field>
-          </>
-        )}
-      />
-
-      {error ? <Alert tone="error">{error}</Alert> : null}
-
-      {hasData ? (
-        <>
+          <StockTablePanel
+            title="Movimientos"
+            subtitle="Fecha, producto, tipo, cantidad, referencia y usuario."
+            rows={movementsData}
+            emptyTitle="No hay movimientos de inventario en este período."
+            emptyDescription="Ajusta el rango o el tipo de movimiento para ampliar resultados."
+            columns={[
+              { key: 'fecha', label: 'Fecha', render: (row) => formatDateLabel(row.fecha) },
+              { key: 'producto', label: 'Producto', render: (row) => `${row.producto_codigo} ${row.producto_nombre}` },
+              { key: 'tipo', label: 'Tipo', render: (row) => <span className={movementTone(row.tipo, row.signo)}>{row.tipo}</span> },
+              {
+                key: 'cantidad',
+                label: 'Cantidad',
+                render: (row) => <span className={`font-semibold ${movementTone(row.tipo, row.signo)}`}>{formatSignedInventoryQuantity(row)}</span>
+              },
+              { key: 'unidad', label: 'Unidad', render: (row) => (row.unidad_medida || row.unidad || 'UND') },
+              {
+                key: 'referencia',
+                label: 'Referencia',
+                render: (row) => {
+                  if (!row.referencia) return '-';
+                  if (!row.origen_id) return row.referencia;
+                  const upper = String(row.tipo || '').toUpperCase();
+                  const href = upper.includes('VENTA')
+                    ? `/ventas/${row.origen_id}`
+                    : upper.includes('COMPRA')
+                      ? `/compras/ordenes/${row.origen_id}`
+                      : upper.includes('TRANSFORM')
+                        ? `/transformaciones/${row.origen_id}`
+                        : null;
+                  if (!href) return row.referencia;
+                  return <Link className="text-[var(--color-primary)] underline decoration-[1.5px]" to={href}>{row.referencia}</Link>;
+                }
+              },
+              { key: 'usuario_id', label: 'Usuario', render: (row) => row.usuario_nombre || row.usuario || '-' }
+            ]}
+          />
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {kpis.map((kpi) => (
-              <MetricTile key={kpi.label} icon={kpi.icon} value={kpi.value} label={kpi.label} tone="primary" />
+            {movimientosKpis.map((kpi) => (
+              <div key={kpi.label} className="rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+                <MetricTile icon={kpi.icon} value={kpi.value} label={kpi.label} tone="primary" className="border-0 bg-transparent px-0 py-0" />
+                {kpi.toneClass ? <p className={`mt-2 text-sm font-semibold ${kpi.toneClass}`}>{kpi.value}</p> : null}
+              </div>
             ))}
           </div>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <ChartPanel title="Movimientos por tipo" subtitle="Distribucion operativa por tipo de movimiento.">
-              <HorizontalBarChart data={movementByType} xType="count" label="Movimientos" />
-            </ChartPanel>
-            <ChartPanel title="Estado de stock" subtitle="Lectura rapida de criticidad del inventario actual.">
-              <PaymentDonutChart data={stockDistribution} valueType="count" />
-            </ChartPanel>
-          </div>
-
-          <Panel className="p-0">
-            <div className="border-b border-[var(--color-border)] px-4 py-4">
-              <h3 className="text-base font-semibold text-[var(--color-text)]">Stock actual</h3>
-              <p className="text-sm text-[var(--color-text-muted)]">Inventario visible por producto con costo y umbral minimo.</p>
-            </div>
-            {filteredInventoryRows.length === 0 ? (
-              <div className="p-4">
-                <EmptyState title="Sin stock para este filtro" description="No se encontraron productos para los criterios seleccionados." />
-              </div>
-            ) : (
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell as="th">Producto</TableCell>
-                    <TableCell as="th">Categoria</TableCell>
-                    <TableCell as="th">Stock actual</TableCell>
-                    <TableCell as="th">Stock minimo</TableCell>
-                    <TableCell as="th">Costo promedio</TableCell>
-                    <TableCell as="th">Estado</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody emptyColSpan={6} emptyMessage="Sin inventario para filtros actuales.">
-                  {stockPagination.pagedRows.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>{row.codigo} {row.producto}</TableCell>
-                      <TableCell>{row.categoria || '-'}</TableCell>
-                      <TableCell>{formatQuantity(row.stock_actual, row.unidad_medida, { fixedLB: true })}</TableCell>
-                      <TableCell>{formatQuantity(row.stock_minimo, row.unidad_medida, { fixedLB: true })}</TableCell>
-                      <TableCell>{formatCentavos(Math.round(Number(row.costo_promedio || 0) * 100))}</TableCell>
-                      <TableCell>{row.bajo_minimo ? 'Bajo minimo' : 'Normal'}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            <div className="px-4 pb-4">
-              <Paginador
-                paginaActual={stockPagination.page}
-                totalPaginas={stockPagination.totalPages}
-                totalRegistros={stockPagination.totalRecords}
-                mostrarSiempre
-                onPageChange={stockPagination.setPage}
-              />
-            </div>
-          </Panel>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Panel className="p-0">
-              <div className="border-b border-[var(--color-border)] px-4 py-4">
-                <h3 className="text-base font-semibold text-[var(--color-text)]">Productos con stock bajo</h3>
-              </div>
-              {criticalRows.length === 0 ? (
-                <div className="p-4">
-                  <EmptyState title="No existen productos con stock bajo" description="No hay alertas criticas para el corte actual." />
-                </div>
-              ) : (
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell as="th">Producto</TableCell>
-                      <TableCell as="th">Stock</TableCell>
-                      <TableCell as="th">Minimo</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody emptyColSpan={3} emptyMessage="Sin productos criticos.">
-                    {criticalPagination.pagedRows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell>{row.codigo} {row.producto}</TableCell>
-                        <TableCell>{formatQuantity(row.stock_actual, row.unidad_medida, { fixedLB: true })}</TableCell>
-                        <TableCell>{formatQuantity(row.stock_minimo, row.unidad_medida, { fixedLB: true })}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                  </Table>
-                )}
-                <div className="px-4 pb-4">
-                  <Paginador
-                    paginaActual={criticalPagination.page}
-                    totalPaginas={criticalPagination.totalPages}
-                    totalRegistros={criticalPagination.totalRecords}
-                    mostrarSiempre
-                    onPageChange={criticalPagination.setPage}
-                  />
-                </div>
-              </Panel>
-
-            <Panel className="p-0">
-              <div className="border-b border-[var(--color-border)] px-4 py-4">
-                <h3 className="text-base font-semibold text-[var(--color-text)]">Movimientos de inventario</h3>
-              </div>
-              {filteredMovementRows.length === 0 ? (
-                <div className="p-4">
-                  <EmptyState title="Sin movimientos en el rango" description="No se registraron movimientos para este periodo." />
-                </div>
-              ) : (
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell as="th">Fecha</TableCell>
-                      <TableCell as="th">Producto</TableCell>
-                      <TableCell as="th">Tipo</TableCell>
-                      <TableCell as="th">Cantidad</TableCell>
-                      <TableCell as="th">Referencia</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody emptyColSpan={5} emptyMessage="Sin movimientos para filtros actuales.">
-                    {movementPagination.pagedRows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell>{formatDateLabel(row.fecha)}</TableCell>
-                        <TableCell>{row.producto_codigo} {row.producto_nombre}</TableCell>
-                        <TableCell>{row.tipo}</TableCell>
-                        <TableCell>{formatQuantity(row.cantidad, row.unidad_medida || row.unidad || 'UND', { fixedLB: true })}</TableCell>
-                        <TableCell>{row.referencia || '-'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                  </Table>
-                )}
-                <div className="px-4 pb-4">
-                  <Paginador
-                    paginaActual={movementPagination.page}
-                    totalPaginas={movementPagination.totalPages}
-                    totalRegistros={movementPagination.totalRecords}
-                    mostrarSiempre
-                    onPageChange={movementPagination.setPage}
-                  />
-                </div>
-              </Panel>
-          </div>
-
-          <Panel className="p-0">
-            <div className="border-b border-[var(--color-border)] px-4 py-4">
-              <h3 className="text-base font-semibold text-[var(--color-text)]">Kardex</h3>
-              <p className="text-sm text-[var(--color-text-muted)]">Trazabilidad de entradas y salidas por producto.</p>
-            </div>
-            {!filters.producto_id ? (
-              <div className="p-4">
-                <EmptyState title="Selecciona un producto para ver kardex" description="El kardex se habilita cuando eliges un producto especifico." />
-              </div>
-            ) : kardexRows.length === 0 ? (
-              <div className="p-4">
-                <EmptyState title="Sin kardex en el periodo" description="No hubo movimientos kardex para ese producto en el rango." />
-              </div>
-            ) : (
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell as="th">Fecha</TableCell>
-                    <TableCell as="th">Tipo</TableCell>
-                    <TableCell as="th">Origen</TableCell>
-                    <TableCell as="th">Cantidad</TableCell>
-                    <TableCell as="th">Saldo</TableCell>
-                    <TableCell as="th">Costo unitario</TableCell>
-                    <TableCell as="th">Costo total</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody emptyColSpan={7} emptyMessage="Sin movimientos kardex para filtros actuales.">
-                  {kardexPagination.pagedRows.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>{formatDateLabel(row.fecha)}</TableCell>
-                      <TableCell>{row.tipo_movimiento}</TableCell>
-                      <TableCell>{formatOrigin(row.origen)}</TableCell>
-                      <TableCell>{formatKardexQuantity(row)}</TableCell>
-                      <TableCell>{formatQuantity(row.saldo_resultante, row.unidad_medida, { fixedLB: true })}</TableCell>
-                      <TableCell>{formatCentavos(Math.round(Number(row.costo_unitario || 0) * 100))}</TableCell>
-                      <TableCell>{formatCentavos(row.costo_total_centavos)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            {filters.producto_id ? (
-              <div className="px-4 pb-4">
-                <Paginador
-                  paginaActual={kardexPagination.page}
-                  totalPaginas={kardexPagination.totalPages}
-                  totalRegistros={kardexPagination.totalRecords}
-                  mostrarSiempre
-                  onPageChange={kardexPagination.setPage}
+              </>
+            );
+          case 'compras':
+            return <ReportesComprasSection />;
+          case 'despiece':
+            return <ReportesDespieceSection />;
+          case 'kardex':
+            return <KardexReport />;
+          default:
+            return (
+              <Panel>
+                <EmptyState
+                  title="Tab de inventario no disponible"
+                  description="Selecciona una sección válida para continuar."
                 />
-              </div>
-            ) : null}
-          </Panel>
-        </>
-      ) : null}
+              </Panel>
+            );
+        }
+      })()}
+
+      {activeLoading ? <div className="text-sm text-[var(--color-text-muted)]">Actualizando {currentTab}...</div> : null}
     </div>
   );
 }

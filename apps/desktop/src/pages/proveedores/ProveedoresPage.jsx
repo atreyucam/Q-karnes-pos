@@ -14,6 +14,7 @@ import {
   PageHeader,
   Paginador,
   Select,
+  StatusBadge,
   Switch,
   TableActions,
   TableActionButton,
@@ -22,7 +23,8 @@ import {
   TablaCuerpo,
   TablaFila,
   TablaCelda,
-  Textarea
+  Textarea,
+  Toast
 } from '../../shared/ui';
 import { useProveedoresStore } from '../../stores/proveedoresStore';
 import { formatMoney } from '../../lib/formatMoney';
@@ -54,7 +56,7 @@ const toNumber = (value) => {
 };
 
 export default function ProveedoresPage() {
-  const { proveedores, error, loading, listar, crear, actualizar } = useProveedoresStore();
+  const { proveedores, error, loading, listar, crear, actualizar, cargarFacturas, cargarResumenCxp } = useProveedoresStore();
   const navigate = useNavigate();
 
   const [pagina, setPagina] = useState(1);
@@ -62,6 +64,11 @@ export default function ProveedoresPage() {
   const [proveedorModal, setProveedorModal] = useState({ open: false, mode: 'create' });
   const [proveedorForm, setProveedorForm] = useState(emptyProveedorForm);
   const [blockedDeactivateProveedor, setBlockedDeactivateProveedor] = useState(null);
+  const [statusToast, setStatusToast] = useState('');
+  const [statusToastError, setStatusToastError] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const [errorToastVisible, setErrorToastVisible] = useState(false);
+  const [modalDebtInfo, setModalDebtInfo] = useState({ saldo: 0, facturasPendientes: 0 });
   const proveedorFormErrors = useFormErrors();
 
   const refreshList = () => {
@@ -110,7 +117,45 @@ export default function ProveedoresPage() {
     proveedorFormErrors.resetErrors();
   };
 
-  const openEditModal = (proveedor) => {
+  useEffect(() => {
+    if (!statusToast) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setStatusToast(''), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToast]);
+
+  useEffect(() => {
+    if (!statusToastError) return undefined;
+    setErrorToastVisible(true);
+    const hideTimer = window.setTimeout(() => setErrorToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setStatusToastError(''), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToastError]);
+
+  const openEditModal = async (proveedor) => {
+    let saldoPendiente = Number(proveedor?.saldo_pendiente || 0);
+    let facturasPendientes = 0;
+    try {
+      const [resumen, facturasProveedor] = await Promise.all([
+        cargarResumenCxp(proveedor.id),
+        cargarFacturas(proveedor.id)
+      ]);
+      saldoPendiente = Number(resumen?.saldo || saldoPendiente || 0);
+      facturasPendientes = (facturasProveedor || []).filter((factura) => Number(factura.pendiente || 0) > 0).length;
+    } catch (_) {
+      // fallback with list data
+    }
+    setModalDebtInfo({
+      saldo: saldoPendiente,
+      facturasPendientes
+    });
     setProveedorModal({ open: true, mode: 'edit' });
     proveedorFormErrors.resetErrors();
     setProveedorForm({
@@ -128,6 +173,7 @@ export default function ProveedoresPage() {
   const closeProveedorModal = () => {
     setProveedorModal({ open: false, mode: 'create' });
     setProveedorForm({ ...emptyProveedorForm });
+    setModalDebtInfo({ saldo: 0, facturasPendientes: 0 });
     proveedorFormErrors.resetErrors();
   };
 
@@ -152,6 +198,7 @@ export default function ProveedoresPage() {
 
       if (quiereDesactivar && saldoPendiente > 0) {
         setBlockedDeactivateProveedor(proveedorActual || { ...proveedorForm, saldo_pendiente: saldoPendiente });
+        setStatusToastError('No se puede desactivar este proveedor porque mantiene deuda pendiente.');
         return;
       }
     }
@@ -169,19 +216,54 @@ export default function ProveedoresPage() {
     try {
       if (proveedorModal.mode === 'edit' && proveedorForm.id) {
         await actualizar(proveedorForm.id, payload);
+        setStatusToast('Proveedor actualizado correctamente.');
+        if (
+          proveedorForm.tiene_credito !== Boolean(proveedores.find((item) => Number(item.id) === Number(proveedorForm.id))?.tiene_credito)
+        ) {
+          setStatusToast('Crédito del proveedor actualizado correctamente.');
+        }
       } else {
         await crear(payload);
+        setStatusToast('Proveedor actualizado correctamente.');
       }
 
       closeProveedorModal();
       refreshList();
     } catch (_) {
-      // store error already exposed in page alert
+      setStatusToastError('Error al actualizar proveedor.');
     }
   };
 
   return (
     <div className="space-y-5">
+      {statusToast ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone="success"
+            title="Operacion completada"
+            description={statusToast}
+            onClose={() => {
+              setToastVisible(false);
+              setStatusToast('');
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
+      {statusToastError ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone="danger"
+            title="No se pudo completar"
+            description={statusToastError}
+            onClose={() => {
+              setErrorToastVisible(false);
+              setStatusToastError('');
+            }}
+            className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
       <PageHeader
         title="Proveedores"
         description="Catálogo, estado y créditos por proveedor."
@@ -286,41 +368,31 @@ export default function ProveedoresPage() {
                       <TablaCelda className="py-3">{proveedor.telefono || '-'}</TablaCelda>
                       <TablaCelda className="py-3">
                         {proveedor.tiene_credito ? (
-                          <span className="rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
-                            Crédito
-                          </span>
+                          <StatusBadge tone="warning">Crédito</StatusBadge>
                         ) : (
-                          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                            Sin crédito
-                          </span>
+                          <StatusBadge tone="neutral">Sin crédito</StatusBadge>
                         )}
                       </TablaCelda>
                       <TablaCelda className="py-3">{pagoCadaText}</TablaCelda>
                       <TablaCelda className="py-3 text-right">
-                        <span className={tieneDeuda
-                          ? 'rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]'
-                          : 'rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]'}
-                        >
-                          {tieneDeuda ? `Pendiente ${formatMoney(saldoPendiente)}` : 'Sin deuda'}
-                        </span>
+                        {tieneDeuda ? (
+                          <StatusBadge tone="warning">Pendiente {formatMoney(saldoPendiente)}</StatusBadge>
+                        ) : (
+                          <StatusBadge tone="neutral">Sin deuda</StatusBadge>
+                        )}
                       </TablaCelda>
                       <TablaCelda className="py-3">
                         {proveedor.activo ? (
-                          <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
-                            Activo
-                          </span>
+                          <StatusBadge status="ACTIVO" />
                         ) : (
-                          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-muted)]">
-                            Inactivo
-                          </span>
+                          <StatusBadge status="INACTIVO" />
                         )}
                       </TablaCelda>
                       <TablaCelda className="py-3">
                         <div className="flex justify-end">
                           <TableActions>
                           <TableActionButton
-                            variant="neutral"
-                            className="border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]"
+                            variant="view"
                             icon={<PiEye />}
                             aria-label="Ver proveedor"
                             title="Ver proveedor"
@@ -329,8 +401,7 @@ export default function ProveedoresPage() {
                             Ver
                           </TableActionButton>
                           <TableActionButton
-                            variant="secondary"
-                            className="border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            variant="edit"
                             icon={<PiPencilSimple />}
                             aria-label="Editar proveedor"
                             title="Editar proveedor"
@@ -358,15 +429,15 @@ export default function ProveedoresPage() {
             </div>
           </>
         )}
-      </Card>
+  </Card>
 
       {loading && <LoadingState label="Cargando proveedores..." />}
 
-      <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
+      <Modal open={proveedorModal.open} onClose={closeProveedorModal} maxWidthClass="max-w-4xl" panelClassName="p-5">
         <div className="ui-modal-header">
           <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">{proveedorModal.mode === 'edit' ? 'Editar proveedor' : 'Nuevo proveedor'}</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, crédito y estado.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Configura datos comerciales, crédito y estado del proveedor.</p>
           </div>
           <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeProveedorModal}>
             X
@@ -408,12 +479,7 @@ export default function ProveedoresPage() {
             />
           </Field>
 
-          <Field
-            label="Días de pago"
-            hint="Solo aplica cuando el proveedor trabaja a crédito."
-            error={proveedorFormErrors.errors.dias_pago}
-            className="md:col-span-2"
-          >
+          <Field label="Días de pago" hint="Solo aplica cuando compras a crédito está activo." error={proveedorFormErrors.errors.dias_pago}>
             <Input
               className={
                 !proveedorForm.tiene_credito
@@ -441,22 +507,33 @@ export default function ProveedoresPage() {
             />
           </Field>
 
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-            <Switch
-              checked={proveedorForm.tiene_credito}
-              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, tiene_credito: checked }))}
-              label="Tiene crédito"
-              description="Habilita compras a crédito y saldo pendiente."
-            />
-          </div>
-
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
-            <Switch
-              checked={proveedorForm.activo}
-              onChange={(checked) => setProveedorForm((prev) => ({ ...prev, activo: checked }))}
-              label="Proveedor activo"
-              description="Si está inactivo no aparece para nuevas órdenes."
-            />
+          <div className="md:col-span-2 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Configuración comercial</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+                <Switch
+                  checked={proveedorForm.activo}
+                  onChange={(checked) => setProveedorForm((prev) => ({ ...prev, activo: checked }))}
+                  label="Proveedor activo"
+                  description="Si está inactivo no aparece como opción para nuevas compras."
+                />
+              </div>
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+                <Switch
+                  checked={proveedorForm.tiene_credito}
+                  onChange={(checked) => setProveedorForm((prev) => ({ ...prev, tiene_credito: checked }))}
+                  label="Compras a crédito"
+                  description="Permite registrar nuevas compras con saldo pendiente."
+                />
+              </div>
+            </div>
+            {Number(modalDebtInfo.saldo || 0) > 0 || Number(modalDebtInfo.facturasPendientes || 0) > 0 ? (
+              <div className="rounded-xl border border-[#F5D08A] bg-[#FFF7E6] p-3 text-sm text-[#9A6700]">
+                <p>Deuda pendiente actual: ${Number(modalDebtInfo.saldo || 0).toFixed(2)}</p>
+                <p>Facturas pendientes: {Number(modalDebtInfo.facturasPendientes || 0)}</p>
+                <p>Desactivar esta opción solo impedirá nuevas compras a crédito. Las cuentas pendientes seguirán activas.</p>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -470,26 +547,11 @@ export default function ProveedoresPage() {
         </div>
       </Modal>
 
-      <Modal
-        open={Boolean(blockedDeactivateProveedor)}
-        onClose={() => setBlockedDeactivateProveedor(null)}
-        maxWidthClass="max-w-lg"
-        panelClassName="p-5"
-      >
+      <Modal open={Boolean(blockedDeactivateProveedor)} onClose={() => setBlockedDeactivateProveedor(null)} maxWidthClass="max-w-lg" panelClassName="p-5">
         <div className="space-y-4">
-          <div className="ui-modal-header">
-            <div className="ui-modal-header-copy">
-              <h3 className="ui-panel-title">No se puede desactivar</h3>
-              <p className="ui-panel-description">
-                {blockedDeactivateProveedor
-                  ? `No puedes desactivar a ${blockedDeactivateProveedor.nombre} porque tiene saldo pendiente.`
-                  : ''}
-              </p>
-            </div>
-          </div>
+          <p className="text-sm text-[var(--color-text)]">No se puede desactivar este proveedor porque mantiene deuda pendiente.</p>
           <div className="rounded-lg border border-[var(--color-danger-soft)] bg-[color-mix(in_oklab,var(--color-danger-soft)_82%,white_18%)] p-3 text-sm text-[var(--color-text)]">
-            Saldo pendiente actual:{' '}
-            <strong className="text-[var(--color-danger)]">{formatMoney(blockedDeactivateProveedor?.saldo_pendiente || 0)}</strong>
+            Saldo pendiente actual: <strong className="text-[var(--color-danger)]">{formatMoney(blockedDeactivateProveedor?.saldo_pendiente || 0)}</strong>
           </div>
           <div className="flex justify-end">
             <Button type="button" variant="danger" onClick={() => setBlockedDeactivateProveedor(null)}>

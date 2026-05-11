@@ -66,6 +66,34 @@ export function SalesLineChart({
   );
 }
 
+export function VerticalBarChart({
+  data = [],
+  xKey = 'label',
+  yKey = 'value',
+  label = 'Total',
+  yType = 'money',
+  emptyTitle = 'Sin serie'
+}) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return <EmptyState title={emptyTitle} description="Ajusta filtros para visualizar este bloque." />;
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis dataKey={xKey} tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
+        <YAxis
+          tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
+          tickFormatter={(value) => valueFormatterByType(value, yType)}
+        />
+        <Tooltip formatter={(value) => valueFormatterByType(value, yType)} />
+        <Bar dataKey={yKey} name={label} radius={[10, 10, 0, 0]} fill="#0f766e" />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 export function HorizontalBarChart({
   data = [],
   xKey = 'value',
@@ -121,6 +149,42 @@ export function PaymentDonutChart({
         <Tooltip formatter={(value) => valueFormatterByType(value, valueType)} />
         <Legend />
       </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function ComparisonBarChart({
+  data = [],
+  xKey = 'label',
+  bars = [],
+  yType = 'money',
+  emptyTitle = 'Sin comparativa'
+}) {
+  if (!Array.isArray(data) || data.length === 0 || !Array.isArray(bars) || bars.length === 0) {
+    return <EmptyState title={emptyTitle} description="No hay datos suficientes para comparar." />;
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis dataKey={xKey} tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
+        <YAxis
+          tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
+          tickFormatter={(value) => valueFormatterByType(value, yType)}
+        />
+        <Tooltip formatter={(value) => valueFormatterByType(value, yType)} />
+        <Legend />
+        {bars.map((bar, index) => (
+          <Bar
+            key={bar.key}
+            dataKey={bar.key}
+            name={bar.label || bar.key}
+            fill={bar.color || CHART_COLORS[index % CHART_COLORS.length]}
+            radius={[8, 8, 0, 0]}
+          />
+        ))}
+      </BarChart>
     </ResponsiveContainer>
   );
 }

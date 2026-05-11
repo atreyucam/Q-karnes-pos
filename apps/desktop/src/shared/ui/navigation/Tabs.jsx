@@ -23,6 +23,7 @@ export default function Tabs({
               aria-controls={item.panelId}
               id={item.tabId}
               disabled={item.disabled}
+              data-state={isActive ? 'active' : 'inactive'}
               className={clsx('ui-tab', isActive && 'ui-tab-active')}
               onClick={() => onChange?.(item.key, item)}
             >

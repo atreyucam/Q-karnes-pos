@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { PiArrowRight, PiEye, PiEyeClosed, PiLockKey, PiUser } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import logoEmpresa from '../../public/logoFrigo.png';
-import { Alert, Button, IconButton, Input } from '../../ui';
+import { Alert, Button, Input } from '../../ui';
 import { useAuthStore } from '../../stores/authStore';
 import useFormErrors from '../../shared/hooks/useFormErrors';
 
@@ -41,7 +41,8 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-[100dvh] bg-background">
-<div className="mx-auto flex min-h-[100dvh] w-full max-w-[1720px] items-center justify-center overflow-hidden px-6 py-10 sm:px-8 lg:px-12">        <div className="w-full max-w-[320px]">
+      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[1720px] items-center justify-center overflow-hidden px-6 py-10 sm:px-8 lg:px-12">
+        <div className="w-full max-w-[320px]">
           <div className="flex justify-center">
             <BrandMark />
           </div>
@@ -62,7 +63,9 @@ export default function LoginPage() {
               </span>
 
               <div className="relative">
-                <PiUser className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-text-subtle" />
+                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+                  <PiUser className="text-[18px] text-text-subtle" />
+                </span>
                 <Input
                   error={Boolean(formErrors.errors.usuario)}
                   className="h-[50px] rounded-[14px] border border-border bg-surface-alt pl-12 pr-4 text-[15px] shadow-none focus:border-primary focus:bg-surface focus:ring-0"
@@ -87,7 +90,9 @@ export default function LoginPage() {
               </span>
 
               <div className="relative">
-                <PiLockKey className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[18px] text-text-subtle" />
+                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+                  <PiLockKey className="text-[18px] text-text-subtle" />
+                </span>
                 <Input
                   type={showPassword ? 'text' : 'password'}
                   error={Boolean(formErrors.errors.password)}
@@ -100,16 +105,14 @@ export default function LoginPage() {
                   placeholder="Ingresa tu clave"
                   autoComplete="current-password"
                 />
-                <IconButton
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
                   aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                   onClick={() => setShowPassword((value) => !value)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 border-0 bg-transparent text-text-subtle hover:bg-transparent hover:text-text-muted"
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-text-subtle hover:text-text-muted focus:outline-none"
                 >
                   {showPassword ? <PiEyeClosed className="text-[18px]" /> : <PiEye className="text-[18px]" />}
-                </IconButton>
+                </button>
               </div>
 
               {formErrors.errors.password ? (

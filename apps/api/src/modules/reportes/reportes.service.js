@@ -81,7 +81,8 @@ function parseTransformacionesFilters(query = {}) {
   const bounds = parseDateRange(query);
   return {
     ...bounds,
-    estado: query.estado ? String(query.estado).trim().toUpperCase() : undefined
+    estado: query.estado ? String(query.estado).trim().toUpperCase() : undefined,
+    producto_padre_id: parsePositiveInteger(query.producto_padre_id, 'producto_padre_id')
   };
 }
 
@@ -90,7 +91,8 @@ function parseComprasFilters(query = {}) {
   return {
     ...bounds,
     proveedor_id: parsePositiveInteger(query.proveedor_id, 'proveedor_id'),
-    metodo_pago: parseOptionalUppercase(query.metodo_pago)
+    metodo_pago: parseOptionalUppercase(query.metodo_pago),
+    estado: parseOptionalUppercase(query.estado)
   };
 }
 
@@ -101,6 +103,70 @@ function parseInventarioMovimientosFilters(query = {}) {
     producto_id: parsePositiveInteger(query.producto_id, 'producto_id'),
     categoria_id: parsePositiveInteger(query.categoria_id, 'categoria_id'),
     tipo: parseOptionalUppercase(query.tipo)
+  };
+}
+
+function parseSalesPanelFilters(query = {}) {
+  const bounds = parseDateRange(query);
+  return {
+    ...bounds,
+    usuario_id: parsePositiveInteger(query.usuario_id, 'usuario_id'),
+    metodo_pago: parseOptionalUppercase(query.metodo_pago),
+    producto_id: parsePositiveInteger(query.producto_id, 'producto_id'),
+    categoria_id: parsePositiveInteger(query.categoria_id, 'categoria_id')
+  };
+}
+
+function parseCajaPanelFilters(query = {}) {
+  const today = currentBusinessDate();
+  const periodo = String(query.periodo || query.quick || 'today').trim().toLowerCase();
+  const fechaInicioRaw = query.fecha_inicio || query.desde || null;
+  const fechaFinRaw = query.fecha_fin || query.hasta || null;
+  const fechaBase = parseBusinessDate(query.fecha || today, 'fecha');
+  const compareMode = String(query.comparar || query.compare_mode || 'none').trim().toLowerCase();
+  const compareDate = query.comparar_con || query.compare_date || null;
+
+  let fechaInicio = fechaBase;
+  let fechaFin = fechaBase;
+
+  if (periodo === 'yesterday') {
+    fechaInicio = shiftDate(today, -1);
+    fechaFin = fechaInicio;
+  } else if (periodo === 'last7') {
+    fechaInicio = shiftDate(today, -6);
+    fechaFin = today;
+  } else if (periodo === 'last30') {
+    fechaInicio = shiftDate(today, -29);
+    fechaFin = today;
+  } else if (periodo === 'custom') {
+    const parsedStart = parseBusinessDate(fechaInicioRaw || today, 'fecha_inicio');
+    const parsedEnd = parseBusinessDate(fechaFinRaw || parsedStart, 'fecha_fin');
+    fechaInicio = parsedStart <= parsedEnd ? parsedStart : parsedEnd;
+    fechaFin = parsedStart <= parsedEnd ? parsedEnd : parsedStart;
+  }
+
+  const isRange = fechaInicio !== fechaFin;
+  let compararCon = null;
+  if (compareMode === 'specific' && compareDate) {
+    compararCon = parseBusinessDate(compareDate, 'comparar_con');
+  } else if (compareMode === 'day_previous') {
+    compararCon = shiftDate(fechaInicio, -1);
+  } else if (compareMode === 'week_previous') {
+    compararCon = shiftDate(fechaInicio, -7);
+  } else if (compareMode === 'previous_period' || compareMode === 'equivalent_previous') {
+    const span = inclusiveDaySpan(fechaInicio, fechaFin);
+    compararCon = shiftDate(fechaInicio, -span);
+  }
+
+  return {
+    periodo,
+    fecha_inicio: fechaInicio,
+    fecha_fin: fechaFin,
+    is_range: isRange,
+    comparar_modo: compareMode,
+    comparar_con: compararCon,
+    startAt: `${fechaInicio} 00:00:00`,
+    endAt: `${fechaFin} 23:59:59`
   };
 }
 
@@ -221,6 +287,20 @@ function normalizeMetodoPagoLabel(code) {
   return normalized;
 }
 
+function normalizeCommercialMethod(code) {
+  const normalized = normalizeMetodoPagoLabel(code);
+  if (normalized === 'TRANSFERENCIA') return 'TRANSFERENCIA';
+  if (normalized === 'CREDITO_CLIENTE' || normalized === 'CREDITO') return 'CREDITO';
+  return 'EFECTIVO';
+}
+
+function methodDisplayLabel(code) {
+  const normalized = normalizeCommercialMethod(code);
+  if (normalized === 'TRANSFERENCIA') return 'Transferencia';
+  if (normalized === 'CREDITO') return 'Crédito';
+  return 'Efectivo';
+}
+
 function parseJsonArray(value) {
   if (!value) return [];
   try {
@@ -240,6 +320,123 @@ function calculatePercentVariation(current, previous) {
 
 function calculateDelta(current, previous) {
   return signedRound(Number(current || 0) - Number(previous || 0));
+}
+
+function inclusiveDaySpan(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+}
+
+function previousRange(bounds) {
+  const end = bounds.fecha_inicio ? shiftDate(bounds.fecha_inicio, -1) : shiftDate(currentBusinessDate(), -1);
+  const span = inclusiveDaySpan(bounds.fecha_inicio || end, bounds.fecha_fin || end);
+  const start = shiftDate(end, -(span - 1));
+  return {
+    fecha_inicio: start,
+    fecha_fin: end,
+    startAt: `${start} 00:00:00`,
+    endAt: `${end} 23:59:59`
+  };
+}
+
+function toCentavos(value) {
+  return Math.round(Number(value || 0) * 100);
+}
+
+function centsToMoney(value) {
+  return moneyRound(Number(value || 0) / 100);
+}
+
+function groupRowsByKey(rows = [], keySelector, initialFactory) {
+  const grouped = new Map();
+
+  for (const row of rows) {
+    const key = keySelector(row);
+    if (!grouped.has(key)) grouped.set(key, initialFactory(row, key));
+  }
+
+  return grouped;
+}
+
+function buildDateSeries(bounds, totalsByDate = new Map()) {
+  const days = inclusiveDaySpan(bounds.fecha_inicio, bounds.fecha_fin);
+  return Array.from({ length: days }, (_, index) => {
+    const fecha = shiftDate(bounds.fecha_inicio, index);
+    return {
+      fecha,
+      total_ventas_centavos: Number(totalsByDate.get(fecha) || 0)
+    };
+  });
+}
+
+function aggregateSalesByDate(rows = []) {
+  const totals = new Map();
+  for (const row of rows) {
+    const fecha = String(row.fecha || '').slice(0, 10);
+    totals.set(fecha, Number(totals.get(fecha) || 0) + Number(row.total_ventas_centavos || 0));
+  }
+  return totals;
+}
+
+function aggregateSalesByHour(rows = []) {
+  const totals = new Map();
+  for (const row of rows) {
+    const hour = String(row.fecha || '').slice(11, 13) || '00';
+    totals.set(hour, Number(totals.get(hour) || 0) + Number(row.total_ventas_centavos || 0));
+  }
+
+  return Array.from({ length: 24 }, (_, index) => {
+    const hour = String(index).padStart(2, '0');
+    return {
+      hora: `${hour}:00`,
+      total_ventas_centavos: Number(totals.get(hour) || 0)
+    };
+  }).filter((row) => row.total_ventas_centavos > 0);
+}
+
+function aggregateCommercialMethods(rows = []) {
+  const grouped = new Map([
+    ['EFECTIVO', { total: 0, cantidad: 0 }],
+    ['TRANSFERENCIA', { total: 0, cantidad: 0 }],
+    ['CREDITO', { total: 0, cantidad: 0 }]
+  ]);
+
+  for (const row of rows) {
+    const method = normalizeCommercialMethod(row.metodo_pago_codigo || row.metodo_pago);
+    const current = grouped.get(method) || { total: 0, cantidad: 0 };
+    current.total += Number(row.total_ventas_centavos || row.monto_centavos || 0);
+    current.cantidad += Number(row.cantidad || 1);
+    grouped.set(method, current);
+  }
+
+  return Array.from(grouped.entries())
+    .map(([codigo, summary]) => ({
+      codigo,
+      metodo: methodDisplayLabel(codigo),
+      total_centavos: Number(summary.total || 0),
+      cantidad: Number(summary.cantidad || 0)
+    }))
+    .filter((row) => row.total_centavos > 0);
+}
+
+function buildTopProducts(items = [], limit = 15) {
+  return [...items]
+    .sort((left, right) => {
+      const qtyDiff = Number(right.cantidad_vendida || 0) - Number(left.cantidad_vendida || 0);
+      if (Math.abs(qtyDiff) > 0.0001) return qtyDiff;
+      return Number(right.ingreso_total_centavos || 0) - Number(left.ingreso_total_centavos || 0);
+    })
+    .slice(0, limit)
+    .map((row, index) => ({
+      ranking: index + 1,
+      producto_id: row.producto_id,
+      codigo: row.codigo,
+      nombre: row.nombre,
+      unidad_medida: row.unidad_medida,
+      cantidad_vendida: Number(row.cantidad_vendida || 0),
+      total_vendido_centavos: Number(row.ingreso_total_centavos || 0)
+    }));
 }
 
 function buildHourlySeries(rows = []) {
@@ -482,6 +679,509 @@ async function dashboard() {
   data.alertas = data.alertas_operativas;
 
   return { ok: true, data };
+}
+
+async function resumenOperativo(query = {}) {
+  const fechaReferencia = parseBusinessDate(query.fecha || query.fecha_referencia, 'fecha');
+  const range7 = {
+    fecha_inicio: shiftDate(fechaReferencia, -6),
+    fecha_fin: fechaReferencia,
+    startAt: `${shiftDate(fechaReferencia, -6)} 00:00:00`,
+    endAt: `${fechaReferencia} 23:59:59`
+  };
+
+  const [
+    resumenDiaResponse,
+    ventas7Response,
+    inventarioResponse,
+    inventarioActualResponse,
+    cajaResponse,
+    cxcResponse,
+    cxpResponse,
+    dashboardResponse
+  ] = await Promise.all([
+    ventasDelDia({ fecha: fechaReferencia }),
+    ventasDiarias(range7),
+    inventario(),
+    inventarioActual(),
+    cajaDiaria({ fecha: fechaReferencia }),
+    cxc(),
+    cxp(),
+    dashboard()
+  ]);
+
+  const resumenDia = resumenDiaResponse.data?.resumen || {};
+  const comparativaAyer = resumenDiaResponse.data?.comparativa?.vs_ayer?.metricas || {};
+  const inventarioItems = inventarioResponse.data?.items || [];
+  const valorizacion = inventarioActualResponse.data?.resumen || {};
+  const cajaResumen = cajaResponse.data?.resumen || {};
+  const clientesDeuda = cxcResponse.data?.items || [];
+  const proveedoresPendientes = cxpResponse.data?.items || [];
+  const dashboardData = dashboardResponse.data || {};
+  const inconsistencias = inventarioItems.filter((row) => Math.abs(Number(row.diferencia_stock || 0)) > 0.0001);
+  const ventas7Map = new Map((ventas7Response.data || []).map((row) => [row.fecha, toCentavos(row.total || 0)]));
+  const productosCriticos = [...inventarioItems]
+    .filter((row) => Boolean(row.bajo_minimo) || Number(row.stock_actual || 0) <= 0)
+    .sort((left, right) => Number(left.stock_actual || 0) - Number(right.stock_actual || 0))
+    .slice(0, 5);
+
+  const alertas = [];
+  if (inconsistencias.length > 0) {
+    alertas.push({
+      id: 'stock-inconsistente',
+      tone: 'warning',
+      titulo: `${inconsistencias.length} inconsistencia(s) de stock`,
+      descripcion: 'El stock esperado y el registrado no cuadran para todos los productos.',
+      href: '/reportes/inventario?tab=stock'
+    });
+  }
+  if (productosCriticos.some((row) => Number(row.stock_actual || 0) <= 0)) {
+    alertas.push({
+      id: 'sin-stock',
+      tone: 'warning',
+      titulo: 'Hay productos sin stock',
+      descripcion: 'Existen productos críticos que ya no tienen disponibilidad.',
+      href: '/reportes/inventario?tab=stock'
+    });
+  }
+  const turnoAbierto = (cajaResponse.data?.turnos || []).find((row) => row.estado !== 'CERRADO');
+  if (turnoAbierto) {
+    alertas.push({
+      id: 'caja-pendiente',
+      tone: 'info',
+      titulo: 'Caja pendiente de cierre',
+      descripcion: `El turno ${turnoAbierto.turno_id} sigue abierto para ${turnoAbierto.usuario}.`,
+      href: '/reportes/caja'
+    });
+  }
+
+  return {
+    ok: true,
+    data: {
+      fecha_referencia: fechaReferencia,
+      resumen: {
+        ventas_hoy_centavos: Number(resumenDia.total_ventas_centavos || 0),
+        ticket_promedio_centavos: Number(resumenDia.ticket_promedio_centavos || 0),
+        numero_ventas: Number(resumenDia.numero_ventas || 0),
+        variacion_ventas_vs_ayer_porcentaje: Number(comparativaAyer.total_ventas?.variacion_porcentaje || 0),
+        caja_actual_centavos: Number(cajaResumen.saldo_real_centavos || 0),
+        caja_diferencia_centavos: Number(cajaResumen.diferencia_centavos || 0),
+        stock_critico: productosCriticos.length,
+        inconsistencias_stock: inconsistencias.length,
+        clientes_con_deuda: Number(cxcResponse.data?.resumen?.clientes_con_deuda || 0),
+        deuda_clientes_centavos: toCentavos(cxcResponse.data?.resumen?.saldo_total_pendiente || 0),
+        proveedores_pendientes: Number(cxpResponse.data?.resumen?.proveedores_con_deuda || 0),
+        saldo_proveedores_centavos: toCentavos(cxpResponse.data?.resumen?.saldo_total_pendiente || 0),
+        valorizacion_total_inventario_centavos: Number(valorizacion.valor_total_inventario_centavos || 0)
+      },
+      ventas_ultimos_7_dias: buildDateSeries(range7, ventas7Map),
+      tablas: {
+        productos_criticos: productosCriticos.map((row) => ({
+          producto_id: row.id,
+          codigo: row.codigo,
+          producto: row.producto,
+          stock_actual: Number(row.stock_actual || 0),
+          stock_minimo: Number(row.stock_minimo || 0),
+          unidad_medida: row.unidad_medida,
+          estado: Number(row.stock_actual || 0) <= 0 ? 'SIN_STOCK' : 'BAJO_MINIMO'
+        })),
+        clientes_con_deuda: clientesDeuda.slice(0, 5).map((row) => ({
+          cliente_id: row.cliente_id,
+          cliente: row.cliente,
+          saldo_pendiente_centavos: toCentavos(row.saldo_pendiente || 0)
+        })),
+        proveedores_pendientes: proveedoresPendientes.slice(0, 5).map((row) => ({
+          proveedor_id: row.proveedor_id,
+          proveedor: row.proveedor,
+          saldo_pendiente_centavos: toCentavos(row.saldo_pendiente || 0)
+        }))
+      },
+      actividad_reciente: (dashboardData.actividad_reciente || []).slice(0, 5),
+      alertas
+    }
+  };
+}
+
+async function ventasPanel(query = {}) {
+  const filters = parseSalesPanelFilters(query);
+  const previousBounds = previousRange(filters);
+
+  const [currentRows, previousRows, productRowsRaw] = await Promise.all([
+    repository.listSalesNetByPeriod(filters),
+    repository.listSalesNetByPeriod(previousBounds),
+    repository.listSalesProductBreakdown(filters)
+  ]);
+
+  const currentRowsNormalized = currentRows.map((row) => ({
+    venta_id: Number(row.venta_id),
+    fecha: row.fecha,
+    referencia: row.referencia || `VENTA:${row.venta_id}`,
+    cliente: row.cliente_nombre || 'Consumidor final',
+    usuario_id: row.usuario_id ? Number(row.usuario_id) : null,
+    usuario: row.usuario_nombre || 'Sin usuario',
+    metodo_pago_codigo: normalizeCommercialMethod(row.metodo_pago_codigo),
+    total_ventas_centavos: Number(row.total_ventas_centavos || 0),
+    total_costo_centavos: Number(row.total_costo_centavos || 0),
+    utilidad_centavos: Number(row.utilidad_centavos || 0),
+    margen_porcentaje: safePercent(row.utilidad_centavos, row.total_ventas_centavos)
+  }));
+
+  const previousRowsNormalized = previousRows.map((row) => ({
+    total_ventas_centavos: Number(row.total_ventas_centavos || 0),
+    total_costo_centavos: Number(row.total_costo_centavos || 0),
+    utilidad_centavos: Number(row.utilidad_centavos || 0)
+  }));
+
+  const resumenActual = {
+    ventas_netas_centavos: currentRowsNormalized.reduce((acc, row) => acc + Number(row.total_ventas_centavos || 0), 0),
+    utilidad_centavos: currentRowsNormalized.reduce((acc, row) => acc + Number(row.utilidad_centavos || 0), 0),
+    numero_ventas: currentRowsNormalized.length
+  };
+  resumenActual.ticket_promedio_centavos = resumenActual.numero_ventas > 0
+    ? Math.round(resumenActual.ventas_netas_centavos / resumenActual.numero_ventas)
+    : 0;
+  resumenActual.margen_porcentaje = safePercent(resumenActual.utilidad_centavos, resumenActual.ventas_netas_centavos);
+
+  const ventasPrevias = previousRowsNormalized.reduce((acc, row) => acc + Number(row.total_ventas_centavos || 0), 0);
+  const variacionVsPrevio = safePercent(resumenActual.ventas_netas_centavos - ventasPrevias, ventasPrevias);
+
+  const currentByDate = aggregateSalesByDate(currentRowsNormalized);
+  const previousByDate = aggregateSalesByDate(previousRows);
+  const previousSeriesDates = buildDateSeries(previousBounds, previousByDate).map((row, index) => {
+    const targetDate = shiftDate(filters.fecha_inicio, index);
+    return [targetDate, Number(row.total_ventas_centavos || 0)];
+  });
+  const previousSeriesMap = new Map(previousSeriesDates);
+
+  const products = productRowsRaw.map((row) => ({
+    producto_id: Number(row.producto_id),
+    codigo: row.producto_codigo,
+    nombre: row.producto_nombre,
+    unidad_medida: row.unidad_medida || row.unidad || 'UND',
+    cantidad_vendida: Number(row.cantidad_vendida || 0),
+    ingreso_total_centavos: Number(row.ingreso_total_centavos || 0),
+    costo_total_centavos: Number(row.costo_total_centavos || 0),
+    utilidad_centavos: Number(row.utilidad_centavos || 0),
+    margen_porcentaje: safePercent(row.utilidad_centavos, row.ingreso_total_centavos)
+  }));
+
+  const salesSeries = buildDateSeries(filters, currentByDate).map((row) => ({
+    ...row,
+    total_periodo_anterior_centavos: Number(previousSeriesMap.get(row.fecha) || 0)
+  }));
+
+  const userOptions = Array.from(
+    new Map(
+      currentRowsNormalized
+        .filter((row) => row.usuario_id)
+        .map((row) => [row.usuario_id, row.usuario])
+    ).entries()
+  ).map(([id, nombre]) => ({ usuario_id: Number(id), usuario: nombre }));
+
+  return {
+    ok: true,
+    data: {
+      filtros: {
+        fecha_inicio: filters.fecha_inicio,
+        fecha_fin: filters.fecha_fin,
+        metodo_pago: filters.metodo_pago || null,
+        usuario_id: filters.usuario_id,
+        producto_id: filters.producto_id,
+        categoria_id: filters.categoria_id
+      },
+      resumen: {
+        ...resumenActual,
+        variacion_vs_periodo_anterior_porcentaje: variacionVsPrevio
+      },
+      graficos: {
+        ventas_por_dia: salesSeries,
+        ventas_por_hora: aggregateSalesByHour(currentRowsNormalized),
+        metodos_pago: aggregateCommercialMethods(currentRowsNormalized)
+      },
+      tablas: {
+        ultimas_ventas: [...currentRowsNormalized]
+          .sort((left, right) => String(right.fecha).localeCompare(String(left.fecha)))
+          .slice(0, 12)
+          .map((row) => ({
+            venta_id: row.venta_id,
+            factura: row.referencia,
+            cliente: row.cliente,
+            metodo_pago: row.metodo_pago_codigo,
+            total_ventas_centavos: row.total_ventas_centavos,
+            usuario: row.usuario
+          })),
+        top_productos: buildTopProducts(products, 15)
+      },
+      opciones: {
+        usuarios: userOptions
+      }
+    }
+  };
+}
+
+async function cajaPanel(query = {}) {
+  const filters = parseCajaPanelFilters(query);
+  const [movimientosRange, ventasRange] = await Promise.all([
+    caja({ fecha_inicio: filters.fecha_inicio, fecha_fin: filters.fecha_fin }),
+    repository.listSalesNetByPeriod(filters)
+  ]);
+
+  const uniqueDays = Array.from(
+    new Set(
+      (movimientosRange.data?.items || [])
+        .map((row) => String(row.fecha || '').slice(0, 10))
+        .filter(Boolean)
+    )
+  ).sort();
+  if (uniqueDays.length === 0) {
+    uniqueDays.push(filters.fecha_inicio);
+  }
+
+  const dailySummaries = await Promise.all(uniqueDays.map((date) => cajaDiaria({ fecha: date })));
+  const resumenDiarioRows = dailySummaries.map((snapshot, index) => ({
+    fecha: uniqueDays[index],
+    resumen: snapshot.data?.resumen || {},
+    turnos: snapshot.data?.turnos || [],
+    movimientos: snapshot.data?.movimientos_afectan_saldo || []
+  }));
+
+  const turnos = resumenDiarioRows.flatMap((day) => day.turnos.map((turno) => ({
+    ...turno,
+    fecha: day.fecha
+  })));
+  const movimientosSaldo = resumenDiarioRows.flatMap((day) => day.movimientos.map((mov) => ({
+    ...mov,
+    fecha_dia: day.fecha
+  })));
+
+  const ingresosAcumulados = resumenDiarioRows.reduce((acc, day) => acc + Number(day.resumen.ingresos_efectivo_centavos || 0), 0);
+  const egresosAcumulados = resumenDiarioRows.reduce((acc, day) => acc + Number(day.resumen.egresos_centavos || 0), 0);
+  const esperadoAcumulado = resumenDiarioRows.reduce((acc, day) => acc + Number(day.resumen.saldo_esperado_centavos || 0), 0);
+  const contadoAcumulado = resumenDiarioRows.reduce((acc, day) => acc + Number(day.resumen.saldo_real_centavos || 0), 0);
+  const diferenciaAcumulada = resumenDiarioRows.reduce((acc, day) => acc + Number(day.resumen.diferencia_centavos || 0), 0);
+
+  const pagosComerciales = aggregateCommercialMethods(
+    (ventasRange || []).map((row) => ({
+      metodo_pago_codigo: row.metodo_pago_codigo,
+      total_ventas_centavos: Number(row.total_ventas_centavos || 0),
+      cantidad: 1
+    }))
+  );
+
+  let comparativa = [];
+  if (filters.comparar_con) {
+    const compareStart = filters.is_range
+      ? filters.comparar_con
+      : filters.comparar_con;
+    const compareEnd = filters.is_range
+      ? shiftDate(compareStart, inclusiveDaySpan(filters.fecha_inicio, filters.fecha_fin) - 1)
+      : compareStart;
+    const compareDays = buildDateSeries({
+      fecha_inicio: compareStart,
+      fecha_fin: compareEnd
+    }).map((row) => row.fecha);
+    const compareSnapshots = await Promise.all(compareDays.map((date) => cajaDiaria({ fecha: date })));
+    const compareSummary = compareSnapshots.reduce((acc, snapshot) => {
+      const resumen = snapshot.data?.resumen || {};
+      acc.ingresos += Number(resumen.ingresos_efectivo_centavos || 0);
+      acc.egresos += Number(resumen.egresos_centavos || 0);
+      acc.diferencia += Number(resumen.diferencia_centavos || 0);
+      return acc;
+    }, { ingresos: 0, egresos: 0, diferencia: 0 });
+
+    comparativa = [
+      {
+        etiqueta: `${filters.fecha_inicio}${filters.is_range ? ` a ${filters.fecha_fin}` : ''}`,
+        ingresos_centavos: ingresosAcumulados,
+        egresos_centavos: egresosAcumulados,
+        diferencia_centavos: diferenciaAcumulada
+      },
+      {
+        etiqueta: `${compareStart}${filters.is_range ? ` a ${compareEnd}` : ''}`,
+        ingresos_centavos: compareSummary.ingresos,
+        egresos_centavos: compareSummary.egresos,
+        diferencia_centavos: compareSummary.diferencia
+      }
+    ];
+  }
+
+  const alertas = [];
+  const turnosConDiferencia = turnos.filter((row) => Number(row.diferencia_centavos || 0) !== 0);
+  if (turnosConDiferencia.length > 0) {
+    alertas.push({
+      id: 'turnos-diferencia',
+      tone: 'warning',
+      titulo: `${turnosConDiferencia.length} turno(s) con diferencia`,
+      descripcion: 'Existen diferencias entre el esperado y el contado en la fecha seleccionada.'
+    });
+  }
+  if (turnos.some((row) => row.estado !== 'CERRADO')) {
+    alertas.push({
+      id: 'caja-abierta',
+      tone: 'info',
+      titulo: 'Caja pendiente de cierre',
+      descripcion: 'Todavía hay turnos abiertos para el día seleccionado.'
+    });
+  }
+  if (Number(diferenciaAcumulada || 0) !== 0) {
+    alertas.push({
+      id: 'diferencia-caja',
+      tone: 'warning',
+      titulo: 'La caja no cuadra',
+      descripcion: 'La diferencia del día no es cero y requiere revisión.'
+    });
+  }
+
+  return {
+    ok: true,
+    data: {
+      filtros: filters,
+      resumen: filters.is_range ? {
+        ingresos_acumulados_centavos: ingresosAcumulados,
+        egresos_acumulados_centavos: egresosAcumulados,
+        diferencia_acumulada_centavos: diferenciaAcumulada,
+        turnos_cerrados: turnos.filter((row) => row.estado === 'CERRADO').length,
+        turnos_con_diferencia: turnosConDiferencia.length,
+        total_contado_centavos: contadoAcumulado
+      } : {
+        apertura_centavos: Number(resumenDiarioRows[0]?.resumen?.saldo_inicial_centavos || 0),
+        ingresos_centavos: ingresosAcumulados,
+        egresos_centavos: egresosAcumulados,
+        esperado_centavos: esperadoAcumulado,
+        contado_centavos: contadoAcumulado,
+        diferencia_centavos: diferenciaAcumulada
+      },
+      graficos: {
+        ingresos_por_metodo_comercial: pagosComerciales,
+        comparativa,
+        ingresos_vs_egresos_por_dia: resumenDiarioRows.map((day) => ({
+          fecha: day.fecha,
+          ingresos_centavos: Number(day.resumen.ingresos_efectivo_centavos || 0),
+          egresos_centavos: Number(day.resumen.egresos_centavos || 0),
+          diferencia_centavos: Number(day.resumen.diferencia_centavos || 0)
+        }))
+      },
+      tablas: {
+        movimientos: movimientosSaldo.map((row) => ({
+          movimiento_id: row.movimiento_id,
+          hora: String(row.fecha || '').slice(11, 16),
+          fecha: row.fecha_dia || String(row.fecha || '').slice(0, 10),
+          tipo: row.tipo,
+          descripcion: row.descripcion,
+          monto_centavos: Number(row.monto_centavos || 0),
+          sentido: row.sentido
+        })),
+        turnos: turnos.map((row) => ({
+          fecha: row.fecha,
+          turno_id: row.turno_id,
+          usuario: row.usuario,
+          apertura_centavos: Number(row.fondo_inicial_centavos || 0),
+          cierre_centavos: row.efectivo_contado_centavos !== null ? Number(row.efectivo_contado_centavos || 0) : null,
+          diferencia_centavos: row.diferencia_centavos !== null ? Number(row.diferencia_centavos || 0) : null,
+          estado: row.estado,
+          fecha_apertura: row.fecha_apertura,
+          fecha_cierre: row.fecha_cierre
+        }))
+      },
+      alertas
+    }
+  };
+}
+
+async function inventarioPanel(query = {}) {
+  const range = parseDateRange({
+    fecha_inicio: query.fecha_inicio || shiftDate(currentBusinessDate(), -29),
+    fecha_fin: query.fecha_fin || currentBusinessDate()
+  });
+
+  const [inventarioResponse, inventarioActualResponse, movimientosResponse, dashboardSnapshot] = await Promise.all([
+    inventario(),
+    inventarioActual(),
+    inventarioMovimientos({ ...range }),
+    repository.dashboard()
+  ]);
+
+  const inventarioItems = inventarioResponse.data?.items || [];
+  const inventarioActualItems = inventarioActualResponse.data?.items || [];
+  const movimientos = movimientosResponse.data?.items || [];
+  const inconsistencias = inventarioItems
+    .filter((row) => Math.abs(Number(row.diferencia_stock || 0)) > 0.0001)
+    .sort((left, right) => Math.abs(Number(right.diferencia_stock || 0)) - Math.abs(Number(left.diferencia_stock || 0)));
+  const criticos = inventarioItems
+    .filter((row) => Boolean(row.bajo_minimo) || Number(row.stock_actual || 0) <= 0)
+    .sort((left, right) => Number(left.stock_actual || 0) - Number(right.stock_actual || 0));
+  const sinMovimiento = Array.isArray(dashboardSnapshot.productos_sin_movimiento) ? dashboardSnapshot.productos_sin_movimiento : [];
+  const stockNormal = inventarioItems.filter((row) => !row.bajo_minimo && Number(row.stock_actual || 0) > 0).length;
+  const sinStock = inventarioItems.filter((row) => Number(row.stock_actual || 0) <= 0).length;
+  const bajos = inventarioItems.filter((row) => Boolean(row.bajo_minimo) && Number(row.stock_actual || 0) > 0).length;
+  const valorizacionPorCategoria = Array.from(
+    inventarioActualItems.reduce((map, row) => {
+      const key = row.categoria || 'Sin categoría';
+      map.set(key, Number(map.get(key) || 0) + Number(row.valor_total_inventario_centavos || 0));
+      return map;
+    }, new Map())
+  ).map(([categoria, total_centavos]) => ({ categoria, total_centavos }))
+    .sort((left, right) => Number(right.total_centavos || 0) - Number(left.total_centavos || 0))
+    .slice(0, 8);
+
+  return {
+    ok: true,
+    data: {
+      filtros: {
+        fecha_inicio: range.fecha_inicio,
+        fecha_fin: range.fecha_fin
+      },
+      resumen: {
+        valorizacion_total_centavos: Number(inventarioActualResponse.data?.resumen?.valor_total_inventario_centavos || 0),
+        productos_bajo_minimo: criticos.length,
+        inconsistencias_stock: inconsistencias.length,
+        productos_sin_movimiento_30_dias: sinMovimiento.length
+      },
+      graficos: {
+        estado_stock: [
+          { estado: 'Normal', cantidad: stockNormal },
+          { estado: 'Bajo mínimo', cantidad: bajos },
+          { estado: 'Sin stock', cantidad: sinStock }
+        ].filter((row) => row.cantidad > 0),
+        valorizacion_por_categoria: valorizacionPorCategoria
+      },
+      tablas: {
+        productos_criticos: criticos.slice(0, 12).map((row) => ({
+          producto_id: row.id,
+          codigo: row.codigo,
+          producto: row.producto,
+          stock_actual: Number(row.stock_actual || 0),
+          stock_minimo: Number(row.stock_minimo || 0),
+          unidad_medida: row.unidad_medida,
+          estado: Number(row.stock_actual || 0) <= 0 ? 'SIN_STOCK' : 'BAJO_MINIMO'
+        })),
+        inconsistencias_stock: inconsistencias.slice(0, 12).map((row) => ({
+          producto_id: row.id,
+          codigo: row.codigo,
+          producto: row.producto,
+          stock_esperado: Number(row.stock_actual || 0),
+          stock_registrado: Number(row.stock_registrado || 0),
+          diferencia: Number(row.diferencia_stock || 0),
+          unidad_medida: row.unidad_medida
+        })),
+        movimientos_recientes: movimientos.slice(0, 12).map((row) => ({
+          id: Number(row.id),
+          fecha: row.fecha,
+          producto_id: Number(row.producto_id),
+          producto: row.producto_nombre,
+          codigo: row.producto_codigo,
+          tipo: row.tipo,
+          cantidad: Number(row.cantidad || 0),
+          unidad_medida: row.unidad_medida || row.unidad || 'UND'
+        })),
+        productos_sin_movimiento: sinMovimiento.map((row) => ({
+          producto_id: Number(row.id),
+          codigo: row.codigo,
+          producto: row.nombre
+        }))
+      }
+    }
+  };
 }
 
 async function ventas(query = {}) {
@@ -786,7 +1486,8 @@ async function compras(query = {}) {
     fecha: row.fecha,
     total_compra: moneyRound(row.total),
     metodo_pago: String(row.metodo_pago || '').toUpperCase() || 'CONTADO',
-    orden_id: row.orden_id || null
+    orden_id: row.orden_id || null,
+    estado: row.estado_orden || 'RECIBIDA'
   }));
 
   const topProveedor = items.reduce((acc, item) => {
@@ -802,7 +1503,8 @@ async function compras(query = {}) {
         fecha_inicio: filters.fecha_inicio,
         fecha_fin: filters.fecha_fin,
         proveedor_id: filters.proveedor_id,
-        metodo_pago: filters.metodo_pago || null
+        metodo_pago: filters.metodo_pago || null,
+        estado: filters.estado || null
       },
       resumen: {
         total_compras: summarizeMoney(items, 'total_compra'),
@@ -1131,7 +1833,8 @@ async function transformaciones(query = {}) {
       filtros: {
         fecha_inicio: filters.fecha_inicio,
         fecha_fin: filters.fecha_fin,
-        estado: filters.estado || null
+        estado: filters.estado || null,
+        producto_padre_id: filters.producto_padre_id || null
       },
       items: rows.map((row) => {
         const parentBase = Number(row.cantidad_padre_base || row.cantidad_padre_base_detalle || 0);
@@ -1223,6 +1926,10 @@ async function cajaDiaria(query = {}) {
 
 module.exports = {
   dashboard,
+  resumenOperativo,
+  ventasPanel,
+  cajaPanel,
+  inventarioPanel,
   ventas,
   ventasDiarias,
   ventasProducto,

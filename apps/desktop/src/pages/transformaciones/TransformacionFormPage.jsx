@@ -9,6 +9,7 @@ import {
   Modal,
   Paginador,
   Select,
+  Toast,
   Table,
   TableBody,
   TableCell,
@@ -24,7 +25,8 @@ import { useTransformacionesStore } from '../../stores/transformacionesStore';
 import { getTransformacionStatusHelp, getTransformacionStatusLabel } from './transformacionesUi';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
-const MODAL_PAGE_SIZE = GLOBAL_PAGE_SIZE;
+const BASE_MODAL_PAGE_SIZE = GLOBAL_PAGE_SIZE;
+const CHILD_MODAL_PAGE_SIZE = 15;
 const WEIGHT_UNITS = new Set(['KG', 'LB']);
 const UNIT_TO_BASE_PER_MILLI = { KG: 100_000_000, LB: 45_359_237 };
 const UNIT_TO_BASE_PER_UNIT = { KG: 100_000_000_000, LB: 45_359_237_000 };
@@ -35,6 +37,8 @@ const WIZARD_STEPS = [
   { id: 4, label: '4 Distribución de costo', title: 'Distribución de costo' },
   { id: 5, label: '5 Confirmar', title: 'Confirmar' }
 ];
+const PRIMARY_BTN_CLASS = '';
+const SECONDARY_BTN_CLASS = '';
 
 function nowLocalDateInput() {
   const now = new Date();
@@ -232,7 +236,7 @@ function SecondarySlot({ children }) {
   return <div className="min-h-[3.25rem] pt-2 text-xs">{children}</div>;
 }
 
-function ProductSearchModal({ open, title, search, onSearchChange, filters, rows, page, totalPages, totalRecords, onPageChange, onClose, onSelect, getStockLabel, getCutTypeLabel = null }) {
+function ProductSearchModal({ open, title, search, onSearchChange, filters, rows, page, totalPages, totalRecords, onPageChange, onClose, onSelect, getStockLabel, getCategoryLabel = null }) {
   if (!open) return null;
   return (
     <Modal open={open} onClose={onClose} maxWidthClass="max-w-5xl" panelClassName="p-0">
@@ -242,7 +246,7 @@ function ProductSearchModal({ open, title, search, onSearchChange, filters, rows
             <h3 className="text-lg font-semibold text-text">{title}</h3>
             <p className="text-sm text-text-muted">Busca y selecciona un producto activo.</p>
           </div>
-          <IconButton type="button" variant="icon" size="sm" aria-label="Cerrar modal" onClick={onClose}>×</IconButton>
+          <IconButton type="button" variant="ghost" size="sm" ariaLabel="Cerrar modal" onClick={onClose}>×</IconButton>
         </div>
       </div>
       <div className="space-y-4 px-6 py-5">
@@ -258,7 +262,7 @@ function ProductSearchModal({ open, title, search, onSearchChange, filters, rows
             <TableHead>
               <TableRow>
                 <TableCell>Producto</TableCell>
-                {getCutTypeLabel && <TableCell>Tipo Corte</TableCell>}
+                {getCategoryLabel && <TableCell>Categoría</TableCell>}
                 <TableCell>Unidad</TableCell>
                 <TableCell>Stock</TableCell>
                 <TableCell>Acción</TableCell>
@@ -268,18 +272,15 @@ function ProductSearchModal({ open, title, search, onSearchChange, filters, rows
               {rows.length ? rows.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>
-                    <div className="space-y-1">
-                      <p className="font-semibold text-text">{row.nombre}</p>
-                      <p className="text-xs text-text-muted">{row.codigo || `#${row.id}`}</p>
-                    </div>
+                    <p className="font-semibold text-text">{row.nombre}</p>
                   </TableCell>
-                  {getCutTypeLabel && <TableCell>{getCutTypeLabel(row)}</TableCell>}
+                  {getCategoryLabel && <TableCell>{getCategoryLabel(row)}</TableCell>}
                   <TableCell>{normalizeUnit(row.unidad_medida || row.unidad)}</TableCell>
                   <TableCell>{getStockLabel(row)}</TableCell>
                   <TableCell><Button variant="secondary" size="sm" onClick={() => onSelect(row)}>Seleccionar</Button></TableCell>
                 </TableRow>
               )) : (
-                <TableRow><TableCell className="py-6 text-text-muted" colSpan={getCutTypeLabel ? 5 : 4}>No hay productos disponibles con esos filtros.</TableCell></TableRow>
+                <TableRow><TableCell className="py-6 text-text-muted" colSpan={getCategoryLabel ? 5 : 4}>No hay productos disponibles con esos filtros.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -302,10 +303,10 @@ function WizardStepper({ currentStep, onStepChange, canReachStep, invalidSteps =
           const displayLabel = invalid ? '⚠ Resultados' : step.label;
           const displayTitle = invalid ? 'Corrige el exceso' : step.title;
           const classes = active
-            ? 'border-primary bg-primary text-white'
+            ? 'border-[#181818] bg-[#F3F4F6] text-[#181818]'
             : completed
               ? 'border-success bg-success-soft text-success'
-              : 'border-border bg-background text-text';
+              : 'border-[#E5E7EB] bg-[#F9FAFB] text-text';
           const resolvedClasses = invalid && !active
             ? 'border-danger bg-danger-soft text-danger'
             : classes;
@@ -315,7 +316,7 @@ function WizardStepper({ currentStep, onStepChange, canReachStep, invalidSteps =
               type="button"
               onClick={() => enabled && onStepChange(step.id)}
               disabled={!enabled}
-              className={`rounded-2xl border px-4 py-3 text-left transition ${resolvedClasses} ${!enabled ? 'cursor-not-allowed opacity-60' : 'hover:border-primary'}`}
+              className={`rounded-2xl border px-4 py-3 text-left transition-all duration-150 ease-out ${resolvedClasses} ${!enabled ? 'cursor-not-allowed opacity-60' : 'hover:border-[#181818]'}`}
             >
               <p className="text-xs font-semibold uppercase tracking-[0.18em]">{displayLabel}</p>
               <p className="mt-1 text-sm font-medium">{displayTitle}</p>
@@ -329,7 +330,7 @@ function WizardStepper({ currentStep, onStepChange, canReachStep, invalidSteps =
 
 function SummaryPanel({ parentProduct, parentUnit, parentAvailableStock, totalChildren, totalMerma, totalConsumed, remainingStock, remainingStockBase, parentCostCents, distribution, currentStep }) {
   return (
-    <div className="space-y-4 lg:sticky lg:top-28">
+    <div className="space-y-4 lg:sticky lg:top-4">
       <div className="rounded-[24px] border border-border bg-white p-5 shadow-sm">
         <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-text-muted">Resumen dinámico</h3>
         <div className="mt-4 space-y-3 text-sm">
@@ -371,7 +372,7 @@ function ApplyConfirmModal({ open, auth, setAuth, onClose, onConfirm, loading, n
             <h3 className="text-lg font-semibold text-text">Confirmar aplicación</h3>
             <p className="text-sm text-text-muted">Esta transformación ya está completa y lista para aplicar. Al confirmar se registrarán movimientos reales de inventario y costo.</p>
           </div>
-          <IconButton type="button" variant="icon" size="sm" aria-label="Cerrar modal" onClick={onClose}>×</IconButton>
+          <IconButton type="button" variant="ghost" size="sm" ariaLabel="Cerrar modal" onClick={onClose}>×</IconButton>
         </div>
       </div>
       <div className="space-y-4 px-6 py-5">
@@ -395,6 +396,23 @@ function ApplyConfirmModal({ open, auth, setAuth, onClose, onConfirm, loading, n
         <div className="flex justify-end gap-3 border-t border-border pt-4">
           <Button variant="neutral" onClick={onClose} disabled={loading}>Cancelar</Button>
           <Button onClick={onConfirm} disabled={loading}>{loading ? 'Aplicando...' : 'Confirmar y aplicar'}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ValidationNoticeModal({ open, message, onClose }) {
+  if (!open) return null;
+  return (
+    <Modal open={open} onClose={onClose} maxWidthClass="max-w-md" panelClassName="p-0">
+      <div className="border-b border-border px-5 py-4">
+        <h3 className="text-base font-semibold text-text">No se puede continuar</h3>
+      </div>
+      <div className="space-y-4 px-5 py-4">
+        <p className="text-sm text-text-muted">{message}</p>
+        <div className="flex justify-end">
+          <Button onClick={onClose}>Entendido</Button>
         </div>
       </div>
     </Modal>
@@ -431,6 +449,45 @@ export default function TransformacionFormPage() {
   const [childSearch, setChildSearch] = useState('');
   const [childCategory, setChildCategory] = useState('ALL');
   const [childPage, setChildPage] = useState(1);
+  const [statusToast, setStatusToast] = useState('');
+  const [statusToastError, setStatusToastError] = useState('');
+  const [statusToastWarning, setStatusToastWarning] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const [errorToastVisible, setErrorToastVisible] = useState(false);
+  const [validationModalMessage, setValidationModalMessage] = useState('');
+
+  useEffect(() => {
+    if (!statusToast) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 2600);
+    const clearTimer = window.setTimeout(() => setStatusToast(''), 3000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToast]);
+
+  useEffect(() => {
+    if (!statusToastError) return undefined;
+    setErrorToastVisible(true);
+    const hideTimer = window.setTimeout(() => setErrorToastVisible(false), 2600);
+    const clearTimer = window.setTimeout(() => setStatusToastError(''), 3000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToastError]);
+
+  useEffect(() => {
+    if (!statusToastWarning) return undefined;
+    setErrorToastVisible(true);
+    const hideTimer = window.setTimeout(() => setErrorToastVisible(false), 2600);
+    const clearTimer = window.setTimeout(() => setStatusToastWarning(''), 3000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [statusToastWarning]);
 
   useEffect(() => {
     Promise.all([fetchProductosActivos(), fetchCategorias()])
@@ -553,13 +610,15 @@ export default function TransformacionFormPage() {
     });
   }, [childCategory, childSearch, children, parent.producto_id, parentUnit, productos]);
 
-  const baseTotalPages = Math.max(1, Math.ceil(baseCandidates.length / MODAL_PAGE_SIZE));
-  const childTotalPages = Math.max(1, Math.ceil(childCandidates.length / MODAL_PAGE_SIZE));
-  const pagedBaseRows = baseCandidates.slice((basePage - 1) * MODAL_PAGE_SIZE, basePage * MODAL_PAGE_SIZE);
-  const pagedChildRows = childCandidates.slice((childPage - 1) * MODAL_PAGE_SIZE, childPage * MODAL_PAGE_SIZE);
+  const baseTotalPages = Math.max(1, Math.ceil(baseCandidates.length / BASE_MODAL_PAGE_SIZE));
+  const childTotalPages = Math.max(1, Math.ceil(childCandidates.length / CHILD_MODAL_PAGE_SIZE));
+  const pagedBaseRows = baseCandidates.slice((basePage - 1) * BASE_MODAL_PAGE_SIZE, basePage * BASE_MODAL_PAGE_SIZE);
+  const pagedChildRows = childCandidates.slice((childPage - 1) * CHILD_MODAL_PAGE_SIZE, childPage * CHILD_MODAL_PAGE_SIZE);
 
   useEffect(() => setBasePage(1), [baseSearch, baseStockFilter]);
   useEffect(() => setChildPage(1), [childCategory, childSearch]);
+  useEffect(() => { if (basePage > baseTotalPages) setBasePage(baseTotalPages); }, [basePage, baseTotalPages]);
+  useEffect(() => { if (childPage > childTotalPages) setChildPage(childTotalPages); }, [childPage, childTotalPages]);
 
   function switchCostMode(nextMode) {
     if (nextMode === costMode) return;
@@ -665,6 +724,14 @@ export default function TransformacionFormPage() {
     }
     const validation = validateStep(nextStep - 1);
     if (validation) {
+      if (validation === 'La distribución de costo no cuadra.') {
+        setStatusToastWarning('El costo distribuido no coincide con el costo consumido.');
+      }
+      if (currentStep === 2 && nextStep === 3 && !resolvedChildren.length) {
+        setValidationModalMessage('No hay productos hijos registrados.');
+      } else if (currentStep === 3 && nextStep === 4 && !resolvedMermas.length) {
+        setValidationModalMessage('No hay merma registrada.');
+      }
       const inlineHandled = currentStep === 2 || currentStep === 3;
       setLocalError(inlineHandled ? '' : validation);
       return;
@@ -678,9 +745,11 @@ export default function TransformacionFormPage() {
     setLocalError('');
     try {
       const saved = await saveCurrentDraft();
+      setStatusToast('Transformación guardada correctamente.');
       if (!isEdit) navigate(`/transformaciones/${saved.id}/editar`);
     } catch (requestError) {
       setLocalError(requestError.message);
+      setStatusToastError('No se pudo guardar la transformación.');
     }
   }
 
@@ -707,9 +776,11 @@ export default function TransformacionFormPage() {
       const targetId = isEdit ? editId : savedInfo?.id;
       const applied = await aplicar(targetId, isAdminUser ? {} : { autorizacion: { usuario: auth.usuario.trim(), password: auth.password } });
       setShowApplyModal(false);
+      setStatusToast('Transformación aplicada correctamente.');
       navigate(`/transformaciones/${applied.id}`);
     } catch (requestError) {
       setLocalError(requestError.message);
+      setStatusToastError('No se pudo aplicar la transformación.');
     }
   }
 
@@ -735,16 +806,17 @@ export default function TransformacionFormPage() {
     const rowIndex = rowsWithCost.children.findIndex((item) => item.id === row.id);
     const rowError = childValidationErrors[rowIndex];
     return (
-      <div key={row.id} className="grid min-h-[96px] items-center gap-4 border-t border-border px-4 py-4 md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)_minmax(0,2fr)]">
-        <div className="space-y-2">
+      <div key={row.id} className="grid min-h-[64px] items-center gap-3 border-t border-border px-4 py-2.5 transition-all duration-150 ease-out hover:bg-[var(--color-background)] md:grid-cols-[minmax(0,6fr)_minmax(0,3fr)_minmax(0,3fr)]">
+        <div className="space-y-1">
           <p className="font-semibold text-text">{row.product?.nombre || 'Sin producto'}</p>
-          <p className="text-xs text-text-muted">{row.product?.codigo || '-'}</p>
           <p className="text-xs font-medium text-text-muted">{formatMoney(row.resolvedCost)}</p>
           <FieldCallout message={rowError?.field === 'producto' ? rowError.message : ''} />
         </div>
         <div className="self-center">
-          <div className="w-full"><Input value={row.cantidadInput} onChange={(e) => setChildren((current) => current.map((item) => (item.id === row.id ? { ...item, cantidadInput: sanitizeQtyInput(e.target.value, row.unit) } : item)))} disabled={!isEditableDraft} placeholder={row.unit === 'UND' ? '0' : '0.000'} /></div>
-          <p className="mt-1 text-xs text-text-muted">{row.unit === 'UND' ? 'UND solo admite cantidades enteras.' : `Unidad ${row.unit}`}</p>
+          <div className="flex items-center gap-2">
+            <div className="w-full max-w-[150px]"><Input className="h-9" value={row.cantidadInput} onChange={(e) => setChildren((current) => current.map((item) => (item.id === row.id ? { ...item, cantidadInput: sanitizeQtyInput(e.target.value, row.unit) } : item)))} disabled={!isEditableDraft} placeholder={row.unit === 'UND' ? '0' : '0.000'} /></div>
+            <span className="text-xs font-semibold text-text-muted">{row.unit}</span>
+          </div>
           <FieldCallout message={rowError?.field === 'cantidad' ? rowError.message : ''} />
         </div>
         <div className="flex items-center justify-center md:justify-end">
@@ -764,10 +836,10 @@ export default function TransformacionFormPage() {
             <Input value={row.tipoMerma || ''} onChange={(e) => setMermas((current) => current.map((item) => (item.id === row.id ? { ...item, tipoMerma: e.target.value } : item)))} disabled={!isEditableDraft} placeholder="Recorte, hueso, grasa, etc." />
           </div>
           <div>
-            <Input value={row.cantidadInput} onChange={(e) => setMermas((current) => current.map((item) => (item.id === row.id ? { ...item, cantidadInput: sanitizeQtyInput(e.target.value, parentUnit) } : item)))} disabled={!isEditableDraft} placeholder={parentUnit === 'UND' ? '0' : '0.000'} />
+            <Input className="h-9" value={row.cantidadInput} onChange={(e) => setMermas((current) => current.map((item) => (item.id === row.id ? { ...item, cantidadInput: sanitizeQtyInput(e.target.value, parentUnit) } : item)))} disabled={!isEditableDraft} placeholder={parentUnit === 'UND' ? '0' : '0.000'} />
           </div>
           <div>
-            <Input value={row.motivo || ''} onChange={(e) => setMermas((current) => current.map((item) => (item.id === row.id ? { ...item, motivo: e.target.value } : item)))} disabled={!isEditableDraft} placeholder="Motivo de merma" />
+            <Input className="h-9" value={row.motivo || ''} onChange={(e) => setMermas((current) => current.map((item) => (item.id === row.id ? { ...item, motivo: e.target.value } : item)))} disabled={!isEditableDraft} placeholder="Motivo de merma" />
           </div>
           <div className="flex h-full items-center justify-center md:justify-end">
             <Button variant="danger" size="sm" onClick={() => setMermas((current) => current.filter((item) => item.id !== row.id))} disabled={!isEditableDraft}>Quitar</Button>
@@ -814,6 +886,9 @@ export default function TransformacionFormPage() {
 
   return (
     <div className="space-y-5">
+      {statusToast ? <div className="fixed right-5 top-5 z-[1200]"><Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast></div> : null}
+      {statusToastError ? <div className="fixed right-5 top-5 z-[1200]"><Toast tone="danger" className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToastError}</Toast></div> : null}
+      {statusToastWarning ? <div className="fixed right-5 top-5 z-[1200]"><Toast tone="warning" className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToastWarning}</Toast></div> : null}
       <BackButton to="/transformaciones">Volver a transformaciones</BackButton>
       <div className="space-y-1">
         <h1 className="text-[2rem] font-bold tracking-[-0.02em] text-[var(--color-text)]">{isEdit ? `Editar transformación ${actual?.numero || `#${editId}`}` : 'Nueva transformación guiada'}</h1>
@@ -835,10 +910,10 @@ export default function TransformacionFormPage() {
               <div className="rounded-[24px] border border-border bg-white p-6 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div><h2 className="text-xl font-semibold text-text">Paso 1. Padre</h2><p className="mt-1 text-sm text-text-muted">Selecciona el producto padre y revisa cuánto hay de stock disponible del padre.</p></div>
-                  <Button type="button" onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft}>Seleccionar padre</Button>
+                  <Button type="button" className={PRIMARY_BTN_CLASS} onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft}>Seleccionar padre</Button>
                 </div>
                 <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                  <div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Producto transformable</label><Input readOnly value={parentProduct ? `${parentProduct.codigo || `#${parentProduct.id}`} - ${parentProduct.nombre}` : ''} placeholder="Selecciona un producto transformable" onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft} /></div>
+                  <div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Producto transformable</label><Input readOnly value={parentProduct ? parentProduct.nombre : ''} placeholder="Selecciona un producto transformable" onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft} /></div>
                   <div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Unidad base</label><Input readOnly value={parentUnit} /></div>
                   <div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Fecha</label><Input type="date" value={header.fecha} onChange={(e) => setHeader((current) => ({ ...current, fecha: e.target.value }))} disabled={!isEditableDraft} /></div>
                   <div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Referencia lote</label><Input value={header.referencia_lote} onChange={(e) => setHeader((current) => ({ ...current, referencia_lote: e.target.value }))} disabled={!isEditableDraft} placeholder="Opcional" /></div>
@@ -859,7 +934,7 @@ export default function TransformacionFormPage() {
             <div className="rounded-[24px] border border-border bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><h2 className="text-xl font-semibold text-text">Paso 2. Resultados</h2><p className="mt-1 text-sm text-text-muted">Agrega productos hijo. Cada cantidad consume parte del stock disponible del padre.</p></div>
-                <Button onClick={() => setShowChildModal(true)} disabled={!isEditableDraft || !parent.producto_id}>+ Agregar producto hijo</Button>
+                <Button className={PRIMARY_BTN_CLASS} onClick={() => setShowChildModal(true)} disabled={!isEditableDraft || !parent.producto_id}>+ Agregar producto hijo</Button>
               </div>
               <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-text-muted">Stock disponible del padre</span><strong className="text-text">{formatSummaryValue(parentAvailableStock, parentUnit)}</strong></div><div className="mt-2 flex flex-wrap items-center justify-between gap-3"><span className="text-text-muted">Saldo sin transformar</span><strong className={childRemaining < 0 ? 'text-danger' : 'text-success'}>{formatSummaryValue(Math.max(childRemaining, 0), parentUnit)}</strong></div>{hasConsumptionOverflow && <div className="mt-4 rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm font-medium text-danger">No puedes continuar: el consumo excede el disponible del padre.</div>}</div>
                 <div className="mt-5 overflow-hidden rounded-2xl border border-border bg-white">
@@ -876,12 +951,12 @@ export default function TransformacionFormPage() {
             <div className="rounded-[24px] border border-border bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><h2 className="text-xl font-semibold text-text">Paso 3. Merma</h2><p className="mt-1 text-sm text-text-muted">Registra la merma del proceso. Cada merma también descuenta del stock disponible del padre.</p></div>
-                <Button variant="secondary" onClick={handleAddMerma} disabled={!isEditableDraft || !parent.producto_id}>+ Agregar merma</Button>
+                <Button onClick={handleAddMerma} disabled={!isEditableDraft || !parent.producto_id}>+ Agregar merma</Button>
               </div>
               <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-text-muted">Stock disponible del padre</span><strong className="text-text">{formatSummaryValue(parentAvailableStock, parentUnit)}</strong></div><div className="mt-2 flex flex-wrap items-center justify-between gap-3"><span className="text-text-muted">Saldo sin transformar</span><strong className={remainingStockBase < 0 ? 'text-danger' : 'text-success'}>{formatSummaryValue(Math.max(remainingStock, 0), parentUnit)}</strong></div>{remainingStockBase === 0 && <div className="mt-4 inline-flex rounded-full border border-success bg-success-soft px-3 py-1 text-sm font-semibold text-success">✅ Consumo completo del padre</div>}</div>
               <div className="mt-5 overflow-hidden rounded-2xl border border-border bg-white">
                 <div className="hidden border-b border-border bg-background px-4 py-3 text-center text-xs font-semibold uppercase tracking-[0.16em] text-text-muted md:grid md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)_minmax(0,4fr)_minmax(0,1fr)] md:items-center md:gap-4">
-                  <span className="text-left">Clasificación de merma</span>
+                  <span className="text-left">Tipo de merma</span>
                   <span>Cantidad</span>
                   <span className="text-left">Motivo</span>
                   <span className="text-center md:text-right">Acción</span>
@@ -894,14 +969,14 @@ export default function TransformacionFormPage() {
             <div className="rounded-[24px] border border-border bg-white p-6 shadow-sm">
               <div><h2 className="text-xl font-semibold text-text">Paso 4. Distribución de costo</h2><p className="mt-1 text-sm text-text-muted">El costo se distribuye solo sobre lo realmente consumido: hijos más merma.</p></div>
               <div className="mt-5 rounded-2xl border border-border bg-background p-5">
-                <div className="flex flex-wrap gap-3"><Button type="button" variant={costMode === 'AUTOMATICA' ? 'primary' : 'secondary'} onClick={() => switchCostMode('AUTOMATICA')} disabled={!isEditableDraft}>Automática</Button><Button type="button" variant={costMode === 'MANUAL' ? 'primary' : 'secondary'} onClick={() => switchCostMode('MANUAL')} disabled={!isEditableDraft}>Manual</Button></div>
+                <div className="flex flex-wrap gap-3"><Button type="button" variant={costMode === 'AUTOMATICA' ? 'primary' : 'secondary'} className={costMode === 'AUTOMATICA' ? PRIMARY_BTN_CLASS : SECONDARY_BTN_CLASS} onClick={() => switchCostMode('AUTOMATICA')} disabled={!isEditableDraft}>Automática</Button><Button type="button" variant={costMode === 'MANUAL' ? 'primary' : 'secondary'} className={costMode === 'MANUAL' ? PRIMARY_BTN_CLASS : SECONDARY_BTN_CLASS} onClick={() => switchCostMode('MANUAL')} disabled={!isEditableDraft}>Manual</Button></div>
                 <div className="mt-5 grid gap-4 md:grid-cols-[1.4fr_1fr_1fr]">
                   <div className="rounded-2xl border border-primary/25 bg-white p-5 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">Costo total consumido</p><p className="mt-3 text-4xl font-bold tracking-[-0.03em] text-text">{formatMoney(centsToMoney(parentCostCents))}</p></div>
                   <div className="rounded-2xl border border-border bg-white p-4"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">Cálculo</p><p className="mt-2 text-sm font-semibold text-text">{`${formatQtyByUnit(totalConsumed, parentUnit, { fixedWeight: true })} ${parentUnit} × ${formatMoney(parentCurrentUnitCost)} = ${formatMoney(centsToMoney(parentCostCents))}`}</p></div>
                   <div className="rounded-2xl border border-border bg-white p-4"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">Saldo sin transformar</p><p className="mt-2 text-2xl font-semibold text-success">{formatSummaryValue(Math.max(remainingStock, 0), parentUnit)}</p></div>
                 </div>
               </div>
-              <div className="mt-5 overflow-hidden rounded-2xl border border-border bg-white"><Table><TableHead><TableRow><TableCell>Destino</TableCell><TableCell>Cantidad</TableCell><TableCell>Costo total</TableCell><TableCell>Costo unitario</TableCell></TableRow></TableHead><TableBody>{costRows.map((row) => <TableRow key={row.key}><TableCell>{row.destino}</TableCell><TableCell>{row.cantidad}</TableCell><TableCell>{costMode === 'AUTOMATICA' ? <span className="font-semibold text-text">{formatMoney(row.resolvedCost)}</span> : <div className="w-40"><Input value={row.costValue} onChange={(e) => row.update(e.target.value)} disabled={!isEditableDraft} placeholder="$0.00" /></div>}</TableCell><TableCell>{row.unitCost}</TableCell></TableRow>)}</TableBody></Table></div>
+              <div className="mt-5 overflow-hidden rounded-2xl border border-border bg-white"><Table><TableHead><TableRow><TableCell>Destino</TableCell><TableCell>Cantidad</TableCell><TableCell>Costo total</TableCell><TableCell>Costo unitario</TableCell></TableRow></TableHead><TableBody>{costRows.map((row, index) => <TableRow key={row.key} className={`transition-all duration-150 ease-out hover:bg-[var(--color-background)] ${index % 2 ? 'bg-[rgba(17,24,39,0.015)]' : ''}`}><TableCell>{row.destino}</TableCell><TableCell>{row.cantidad}</TableCell><TableCell>{costMode === 'AUTOMATICA' ? <span className="font-semibold text-text">{formatMoney(row.resolvedCost)}</span> : <div className="w-36"><Input className="h-9" value={row.costValue} onChange={(e) => row.update(e.target.value)} onBlur={(e) => row.update((Number(e.target.value || 0)).toFixed(2))} disabled={!isEditableDraft} placeholder="$0.00" /></div>}</TableCell><TableCell>{row.unitCost}</TableCell></TableRow>)}</TableBody></Table></div>
               <div className="mt-5 rounded-2xl border border-border bg-background p-4 text-sm"><div className="flex items-center justify-between"><span className="text-text-muted">Costo distribuido</span><strong className="text-text">{formatMoney(centsToMoney(distribution.distributedCents))}</strong></div><div className="mt-2 flex items-center justify-between"><span className="text-text-muted">Diferencia de costo</span><strong className={distribution.costOk ? 'text-success' : 'text-danger'}>{formatMoney(centsToMoney(distribution.diffCents))}</strong></div></div>
             </div>
           )}
@@ -915,24 +990,25 @@ export default function TransformacionFormPage() {
                 <div className="rounded-2xl border border-border bg-background p-4"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">Costo consumido</p><p className="mt-2 text-lg font-semibold text-text">{formatMoney(centsToMoney(parentCostCents))}</p></div>
               </div>
               <div className="mt-5 grid gap-5 lg:grid-cols-2">
-                <div className="rounded-2xl border border-border bg-background p-4"><h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-text-muted">Padre</h3><div className="mt-3 space-y-2 text-sm"><p><strong>{parentProduct?.codigo || '-'}</strong> {parentProduct?.nombre || 'Sin seleccionar'}</p><p className="text-text-muted">Referencia lote: <strong>{header.referencia_lote || '-'}</strong></p><p className="text-text-muted">Estado operativo: <strong>{isEdit && actual?.estado ? getTransformacionStatusLabel(actual.estado) : 'Lista para aplicar'}</strong></p></div></div>
+                <div className="rounded-2xl border border-border bg-background p-4"><h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-text-muted">Padre</h3><div className="mt-3 space-y-2 text-sm"><p>{parentProduct?.nombre || 'Sin seleccionar'}</p><p className="text-text-muted">Referencia lote: <strong>{header.referencia_lote || '-'}</strong></p><p className="text-text-muted">Estado operativo: <strong>{isEdit && actual?.estado ? getTransformacionStatusLabel(actual.estado) : 'Lista para aplicar'}</strong></p></div></div>
                 <div className="rounded-2xl border border-border bg-background p-4"><h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-text-muted">Balance</h3><div className="mt-3 space-y-2 text-sm"><p className="text-text-muted">Total hijos: <strong>{formatSummaryValue(totalChildren, parentUnit)}</strong></p><p className="text-text-muted">Total merma: <strong>{formatSummaryValue(totalMerma, parentUnit)}</strong></p><p className="text-text-muted">Costo OK: <strong className={distribution.costOk ? 'text-success' : 'text-danger'}>{distribution.costOk ? 'Sí' : 'No'}</strong></p></div></div>
               </div>
               <div className="mt-5 rounded-2xl border border-border bg-white"><div className="border-b border-border px-4 py-3"><h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-text-muted">Resultados y merma</h3></div><div className="grid gap-5 p-4 lg:grid-cols-2"><div><p className="mb-3 text-sm font-semibold text-text">Resultados</p><div className="space-y-2">{rowsWithCost.children.map((row) => <div key={`confirm-child-${row.id}`} className="rounded-xl border border-border bg-background p-4 text-sm"><div className="flex items-start justify-between gap-3"><p className="font-semibold text-text">{row.product?.nombre || 'Producto hijo'}</p><p className="text-right text-sm font-bold text-text">{formatSummaryValue(row.cantidad || 0, row.unit)}</p></div><p className="mt-2 text-xs font-medium text-text-muted">{formatMoney(row.resolvedCost)}</p></div>)}</div></div><div><p className="mb-3 text-sm font-semibold text-text">Merma</p><div className="space-y-2">{rowsWithCost.mermas.map((row) => <div key={`confirm-merma-${row.id}`} className="rounded-xl border border-border bg-background p-4 text-sm"><div className="flex items-start justify-between gap-3"><p className="font-semibold text-text">{row.tipoMerma || 'Merma'}</p><p className="text-right text-sm font-bold text-text">{formatSummaryValue(row.cantidad || 0, row.unit)}</p></div><p className="mt-2 text-xs font-medium text-text-muted">{formatMoney(row.resolvedCost)}</p><p className="mt-2 text-text-muted">{row.motivo || '-'}</p></div>)}</div></div></div></div>
               <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-text-muted"><p>Guardar lista para aplicar no mueve inventario.</p><p className="mt-2">Aplicar transformación sí impacta inventario y costo del padre e hijos.</p></div>
+              <div className="mt-4 rounded-2xl border border-[#D1D5DB] bg-[#F9FAFB] p-4 text-sm text-[#374151]">Esta transformación actualizará inventario y costos promedio de productos relacionados.</div>
             </div>
           )}
           <div className="rounded-[24px] border border-border bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">{isEdit && actual?.estado === 'BORRADOR' && <Button variant="danger" onClick={handleDelete} disabled={saving}>Eliminar transformación pendiente</Button>}</div>
               <div className="flex flex-wrap items-center gap-3">
-                <Button variant="neutral" onClick={() => navigate('/transformaciones')} disabled={saving}>Cancelar</Button>
-                {currentStep > 1 && <Button variant="neutral" onClick={() => handleStepChange(currentStep - 1)} disabled={saving}>Volver</Button>}
+                <Button variant="neutral" className={SECONDARY_BTN_CLASS} onClick={() => navigate('/transformaciones')} disabled={saving}>Cancelar</Button>
+                {currentStep > 1 && <Button variant="neutral" className={SECONDARY_BTN_CLASS} onClick={() => handleStepChange(currentStep - 1)} disabled={saving}>Volver</Button>}
                 {currentStep < 5
-                  ? <Button onClick={() => handleStepChange(currentStep + 1)} disabled={continueDisabled}>Continuar</Button>
+                  ? <Button className={PRIMARY_BTN_CLASS} onClick={() => handleStepChange(currentStep + 1)} disabled={continueDisabled}>Continuar</Button>
                   : <>
-                    <Button variant="secondary" onClick={handleSave} disabled={saving || loading || !isEditableDraft}>{saving ? 'Guardando...' : 'Guardar lista para aplicar'}</Button>
-                    <Button onClick={handleOpenApply} disabled={saving || loading || !isEditableDraft}>Aplicar ahora</Button>
+                    <Button onClick={handleSave} disabled={saving || loading || !isEditableDraft}>{saving ? 'Guardando...' : 'Guardar lista para aplicar'}</Button>
+                    <Button className={PRIMARY_BTN_CLASS} onClick={handleOpenApply} disabled={saving || loading || !isEditableDraft}>Aplicar ahora</Button>
                   </>}
               </div>
             </div>
@@ -940,9 +1016,11 @@ export default function TransformacionFormPage() {
         </div>
         <SummaryPanel parentProduct={parentProduct} parentUnit={parentUnit} parentAvailableStock={parentAvailableStock} totalChildren={totalChildren} totalMerma={totalMerma} totalConsumed={totalConsumed} remainingStock={remainingStock} remainingStockBase={remainingStockBase} parentCostCents={parentCostCents} distribution={distribution} currentStep={currentStep} />
       </div>
-      <ProductSearchModal open={showBaseModal} title="Seleccionar producto padre" search={baseSearch} onSearchChange={setBaseSearch} filters={<div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Stock</label><Select value={baseStockFilter} onChange={(e) => setBaseStockFilter(e.target.value)}><option value="CON_STOCK">Con stock</option><option value="TODOS">Todos</option></Select></div>} rows={pagedBaseRows} page={basePage} totalPages={baseTotalPages} totalRecords={baseCandidates.length} onPageChange={setBasePage} onClose={() => setShowBaseModal(false)} onSelect={handleSelectBase} getStockLabel={(row) => formatQtyByUnit(baseToVisible(resolveProductStockBase(row), row.unidad_medida || row.unidad), row.unidad_medida || row.unidad, { fixedWeight: true })} />
-      <ProductSearchModal open={showChildModal} title="Agregar producto hijo" search={childSearch} onSearchChange={setChildSearch} filters={<div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Categoría</label><Select value={childCategory} onChange={(e) => setChildCategory(e.target.value)}><option value="ALL">Todas</option>{categoryOptions.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</Select></div>} rows={pagedChildRows} page={childPage} totalPages={childTotalPages} totalRecords={childCandidates.length} onPageChange={setChildPage} onClose={() => setShowChildModal(false)} onSelect={handleAddChild} getCutTypeLabel={(row) => row.tipo_corte || row.tipo_corte_nombre || row.categoria_nombre || '—'} getStockLabel={(row) => formatQtyByUnit(baseToVisible(resolveProductStockBase(row), row.unidad_medida || row.unidad), row.unidad_medida || row.unidad, { fixedWeight: true })} />
+      <ProductSearchModal open={showBaseModal} title="Seleccionar producto padre" search={baseSearch} onSearchChange={setBaseSearch} filters={<div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Stock</label><Select value={baseStockFilter} onChange={(e) => setBaseStockFilter(e.target.value)}><option value="CON_STOCK">Con stock</option><option value="TODOS">Todos</option></Select></div>} rows={pagedBaseRows} page={basePage} totalPages={baseTotalPages} totalRecords={baseCandidates.length} onPageChange={setBasePage} onClose={() => setShowBaseModal(false)} onSelect={handleSelectBase} getStockLabel={(row) => `${formatQtyByUnit(baseToVisible(resolveProductStockBase(row), row.unidad_medida || row.unidad), row.unidad_medida || row.unidad, { fixedWeight: true })} ${normalizeUnit(row.unidad_medida || row.unidad)}`} />
+      <ProductSearchModal open={showChildModal} title="Agregar producto hijo" search={childSearch} onSearchChange={setChildSearch} filters={<div><label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">Categoría</label><Select value={childCategory} onChange={(e) => setChildCategory(e.target.value)}><option value="ALL">Todas</option>{categoryOptions.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</Select></div>} rows={pagedChildRows} page={childPage} totalPages={childTotalPages} totalRecords={childCandidates.length} onPageChange={setChildPage} onClose={() => setShowChildModal(false)} onSelect={handleAddChild} getCategoryLabel={(row) => row.tipo_corte || row.tipo_corte_nombre || row.categoria_nombre || '—'} getStockLabel={(row) => `${formatQtyByUnit(baseToVisible(resolveProductStockBase(row), row.unidad_medida || row.unidad), row.unidad_medida || row.unidad, { fixedWeight: true })} ${normalizeUnit(row.unidad_medida || row.unidad)}`} />
       <ApplyConfirmModal open={showApplyModal} auth={auth} setAuth={setAuth} onClose={() => setShowApplyModal(false)} onConfirm={handleApply} loading={saving} needsAuth={!isAdminUser} parentName={parentProduct?.nombre || 'Producto padre'} parentUnit={parentUnit} initialQty={parentAvailableStock} totalConsumido={totalConsumed} remainingQty={remainingStock} mermaQty={totalMerma} />
+      <ValidationNoticeModal open={Boolean(validationModalMessage)} message={validationModalMessage} onClose={() => setValidationModalMessage('')} />
     </div>
   );
 }
+

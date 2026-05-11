@@ -9,13 +9,22 @@ const alignMap = {
 };
 
 const variantMap = {
-  neutral: uiClassTokens.button.tableActionNeutral,
-  warning: uiClassTokens.button.tableActionWarning,
-  success: uiClassTokens.button.tableActionSuccess,
-  primary: uiClassTokens.button.tableActionSuccess,
+  view: uiClassTokens.button.tableActionView,
+  edit: uiClassTokens.button.tableActionEdit,
+  primary: uiClassTokens.button.tableActionPrimary,
   danger: uiClassTokens.button.tableActionDanger,
-  secondary: uiClassTokens.button.tableActionSecondary
+  neutral: uiClassTokens.button.tableActionNeutral
 };
+
+const legacyVariantMap = {
+  secondary: 'edit',
+  success: 'primary',
+  warning: 'neutral'
+};
+
+function resolveVariant(variant = 'neutral') {
+  return variantMap[variant] ? variant : (legacyVariantMap[variant] || 'neutral');
+}
 
 export function TableActions({ children, align = 'end', wrap = true, className }) {
   return (
@@ -42,20 +51,24 @@ export function TableActionButton({
   className,
   ...props
 }) {
+  const resolvedVariant = resolveVariant(variant);
+
   return (
     <Button
-      variant={variant === 'success' ? 'primary' : variant === 'warning' ? 'secondary' : variant}
+      unstyled
       size={iconOnly ? 'icon' : 'table'}
       icon={icon}
-      disabled={disabled || loading}
+      loading={loading}
+      disabled={disabled}
       className={clsx(
+        uiClassTokens.button.base,
         uiClassTokens.button.tableActionBase,
-        variantMap[variant] || variantMap.neutral,
+        variantMap[resolvedVariant],
         className
       )}
       {...props}
     >
-      {iconOnly ? null : <span className="hidden lg:inline">{loading ? 'Procesando...' : children}</span>}
+      {iconOnly ? null : <span className="hidden lg:inline">{children}</span>}
     </Button>
   );
 }

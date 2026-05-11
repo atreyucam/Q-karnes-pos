@@ -3,6 +3,10 @@ import { parseApiError } from '../lib/apiClient';
 import { fetchReporte, sanitizeQueryParams } from '../services/reportesService';
 
 export const REPORT_VIEW_KEYS = [
+  'resumenOperativo',
+  'ventasPanel',
+  'cajaPanel',
+  'inventarioPanel',
   'dashboard',
   'ventasDia',
   'ventasPeriodo',
@@ -40,6 +44,13 @@ function createViewsState() {
   }, {});
 }
 
+const inflightControllers = new Map();
+const inflightRequestIds = new Map();
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED';
+}
+
 export const useReportesStore = create((set, get) => ({
   views: createViewsState(),
   async cargarReporte(reportKey, params = {}, force = false) {
@@ -54,6 +65,16 @@ export const useReportesStore = create((set, get) => ({
       return current.data;
     }
 
+    if (sameParams && current.loading) {
+      return current.data;
+    }
+
+    inflightControllers.get(reportKey)?.abort();
+    const controller = new AbortController();
+    const requestId = `${reportKey}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    inflightControllers.set(reportKey, controller);
+    inflightRequestIds.set(reportKey, requestId);
+
     set((state) => ({
       views: {
         ...state.views,
@@ -67,7 +88,11 @@ export const useReportesStore = create((set, get) => ({
     }));
 
     try {
-      const data = await fetchReporte(reportKey, normalizedParams);
+      const data = await fetchReporte(reportKey, normalizedParams, { signal: controller.signal });
+      if (inflightRequestIds.get(reportKey) !== requestId) {
+        return data;
+      }
+
       set((state) => ({
         views: {
           ...state.views,
@@ -82,7 +107,28 @@ export const useReportesStore = create((set, get) => ({
       }));
       return data;
     } catch (error) {
+      if (isAbortError(error)) {
+        if (inflightRequestIds.get(reportKey) !== requestId) {
+          return get().views[reportKey]?.data || null;
+        }
+
+        set((state) => ({
+          views: {
+            ...state.views,
+            [reportKey]: {
+              ...state.views[reportKey],
+              loading: false
+            }
+          }
+        }));
+        return get().views[reportKey]?.data || null;
+      }
+
       const message = parseApiError(error);
+      if (inflightRequestIds.get(reportKey) !== requestId) {
+        return get().views[reportKey]?.data || null;
+      }
+
       set((state) => ({
         views: {
           ...state.views,
@@ -99,6 +145,9 @@ export const useReportesStore = create((set, get) => ({
     }
   },
   resetReportesStore() {
+    inflightControllers.forEach((controller) => controller.abort());
+    inflightControllers.clear();
+    inflightRequestIds.clear();
     set({ views: createViewsState() });
   }
 }));

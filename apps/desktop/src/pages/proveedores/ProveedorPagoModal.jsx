@@ -6,6 +6,7 @@ import {
   Input,
   Modal,
   Select,
+  StatusBadge,
   Textarea
 } from '../../ui';
 import { formatMoney } from '../../lib/formatMoney';
@@ -119,9 +120,9 @@ export default function ProveedorPagoModal({
 
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Documento</p>
-          <div className="inline-flex rounded-full border border-[#F5D08A] bg-[#FFF7E6] px-3 py-1 text-xs font-semibold text-[#9A6700]">
+          <StatusBadge tone="warning">
             {`${factura?.numero_factura || factura?.numero_documento || `Factura #${factura?.id || ''}`} • Pendiente ${formatMoney(pendiente)}`}
-          </div>
+          </StatusBadge>
           <p className="text-xs text-[var(--color-text-muted)]">
             {configuracion?.exigir_caja_abierta_para_pagos
               ? 'El pago en efectivo requiere turno abierto. Transferencia no impacta caja física.'
@@ -223,9 +224,9 @@ export default function ProveedorPagoModal({
           Cancelar
         </Button>
         <Button
-          className="border border-[var(--color-text)] bg-[var(--color-text)] text-white hover:border-black hover:bg-black"
           onClick={handleSubmit}
           disabled={loading || pendiente <= 0}
+          loading={loading}
         >
           Registrar pago
         </Button>

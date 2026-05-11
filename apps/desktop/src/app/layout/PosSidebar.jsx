@@ -4,21 +4,7 @@ import clsx from 'clsx';
 import logoEmpresa from '../../public/logoFrigo.png';
 import { SidebarItem, SidebarSection } from '../../shared/ui';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
-import { isGroupActive, navigationItems } from './posNavigation';
-
-function getActiveKey(items, location) {
-  const activeLink = items.find(
-    (item) => item.type === 'link' && item.to === location.pathname
-  );
-  if (activeLink) return activeLink.to;
-
-  const activeGroup = items.find(
-    (item) => item.type === 'group' && isGroupActive(item, location)
-  );
-  if (activeGroup) return activeGroup.key;
-
-  return null;
-}
+import { hasActiveGroupDescendant, isNavigationItemActive, navigationItems } from './posNavigation';
 
 export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile }) {
   const configuracion = useConfiguracionStore((s) => s.configuracion);
@@ -32,22 +18,19 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
   );
 
   const [openGroupKey, setOpenGroupKey] = useState(null);
-  const [selectedKey, setSelectedKey] = useState(null);
-  const hasSelectedGroupOverride = useMemo(
-    () => visibleItems.some((item) => item.type === 'group' && item.key === selectedKey),
-    [selectedKey, visibleItems]
-  );
 
   useEffect(() => {
-    const hasDirectLinkMatch = visibleItems.some(
-      (item) => item.type === 'link' && item.to === location.pathname
-    );
     const activeGroup = visibleItems.find(
-      (item) => item.type === 'group' && !hasDirectLinkMatch && isGroupActive(item, location)
+      (item) => item.type === 'group' && hasActiveGroupDescendant(item, location)
     );
 
-    setOpenGroupKey(activeGroup?.key ?? null);
-    setSelectedKey(getActiveKey(visibleItems, location));
+    setOpenGroupKey((current) => {
+      if (activeGroup?.key) return activeGroup.key;
+      if (current && !visibleItems.some((item) => item.type === 'group' && item.key === current)) {
+        return null;
+      }
+      return current;
+    });
   }, [location.pathname, location.search, visibleItems]);
 
   const negocioNombre = configuracion?.negocio_nombre || 'QKarnes POS';
@@ -64,20 +47,20 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
 
       <aside
         className={clsx(
-          'fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-[var(--color-border)] bg-white',
-          'transition-all duration-200 ease-in-out',
+          'fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-[var(--color-border)] bg-[color-mix(in_oklab,white_96%,var(--color-surface-alt)_4%)]',
+          'transition-all duration-300 ease-out',
           'w-[var(--sidebar-width)]',
           'transform lg:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
       >
-        <div className="border-b border-[var(--color-border)]">
+        <div className="h-[var(--topbar-height)] border-b border-[var(--color-border)] px-2">
           <Link
             to="/"
             onClick={() => {
               onCloseMobile?.();
             }}
-            className={clsx('sidebar-brand', collapsed && 'sidebar-brand-collapsed')}
+            className={clsx('sidebar-brand !m-0 h-full', collapsed && 'sidebar-brand-collapsed')}
           >
             <img src={logoEmpresa} alt={negocioNombre} className="sidebar-brand-logo" />
 
@@ -90,7 +73,7 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
           </Link>
         </div>
 
-        <nav className="sidebar-scroll flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-2 py-5">
+        <nav className="sidebar-scroll flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2 py-3">
           {visibleItems.map((item) => {
             if (item.type === 'link') {
               return (
@@ -99,39 +82,37 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
                   to={item.to}
                   label={item.label}
                   Icon={item.icon}
+                  isActive={isNavigationItemActive(item, location)}
                   collapsed={collapsed}
                   onClick={() => {
-                    setSelectedKey(item.to);
                     onCloseMobile?.();
                   }}
-                  forceActive={selectedKey === item.to}
                 />
               );
             }
+
+            const hasActiveDescendant = hasActiveGroupDescendant(item, location);
+            const isExpanded = openGroupKey === item.key;
 
             return (
               <SidebarSection
                 key={item.key}
                 group={item}
                 collapsed={collapsed}
-                open={openGroupKey === item.key}
-                forceActive={selectedKey === item.key}
+                isExpanded={isExpanded}
+                hasActiveDescendant={hasActiveDescendant}
                 onToggle={() => {
-                  setSelectedKey(item.key);
                   setOpenGroupKey((current) => (current === item.key ? null : item.key));
                 }}
                 onNavigateDefault={() => {
-                  setSelectedKey(item.key);
                   navigate(item.defaultTo);
                   onCloseMobile?.();
                 }}
                 onChildNavigate={() => {
-                  setSelectedKey(item.key);
                   onCloseMobile?.();
                 }}
                 onCloseMobile={onCloseMobile}
                 location={location}
-                groupActive={hasSelectedGroupOverride ? selectedKey === item.key : isGroupActive(item, location)}
               />
             );
           })}

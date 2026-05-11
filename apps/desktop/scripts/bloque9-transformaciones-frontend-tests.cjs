@@ -49,7 +49,7 @@ function run() {
       'El formulario wizard está incompleto'
     );
     assert(!formPage.includes('Cantidad a despiezar') && !formPage.includes('cantidad a transformar'), 'El formulario sigue pidiendo cantidad inicial del padre');
-    assert(formPage.includes('type="button" onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft}>Seleccionar padre</Button>'), 'El botón seleccionar padre ya no quedó en la acción principal');
+    assert(formPage.includes('onClick={() => setShowBaseModal(true)} disabled={!isEditableDraft}>Seleccionar padre</Button>'), 'El botón seleccionar padre ya no quedó en la acción principal');
     add(2, 'Formulario wizard reemplaza el modelo anterior', true);
   } catch (error) {
     add(2, 'Formulario wizard reemplaza el modelo anterior', false, error.message);
@@ -191,13 +191,17 @@ function run() {
     const formPage = read('apps/desktop/src/pages/transformaciones/TransformacionFormPage.jsx');
     assert(formPage.includes('Stock disponible del padre'), 'No actualizó labels de stock del padre');
     assert(formPage.includes('Saldo sin transformar'), 'No actualizó labels de saldo');
-    assert(formPage.includes('Clasificación de merma'), 'No dejó el encabezado claro para merma');
+    assert(formPage.includes('Tipo de merma') || formPage.includes('Clasificación de merma'), 'No dejó el encabezado claro para merma');
     assert(!formPage.includes('Producto asociado') && !formPage.includes('Merma sin inventario (solo clasificatoria)'), 'La UI de merma sigue mostrando producto asociado');
     assert(formPage.includes('✅ Consumo completo del padre'), 'No muestra badge de consumo completo');
     assert(formPage.includes('currentStep !== 1'), 'El badge de consumo completo sigue apareciendo en paso 1');
     assert(formPage.includes('md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)_minmax(0,2fr)]'), 'La grilla alineada de resultados/merma no está definida');
-    assert(formPage.includes('Tipo Corte'), 'El modal de hijo no agrega columna tipo corte');
-    assert(formPage.includes('aria-label="Cerrar modal"') && formPage.includes('>×</button>'), 'El modal no usa la X de cierre');
+    assert(formPage.includes('Categoría') || formPage.includes('Tipo Corte'), 'El modal de hijo no agrega columna de clasificación');
+    assert(
+      (formPage.includes('aria-label="Cerrar modal"') || formPage.includes('ariaLabel="Cerrar modal"'))
+      && (formPage.includes('>×</button>') || formPage.includes('<IconButton type="button" variant="ghost" size="sm" ariaLabel="Cerrar modal"') || formPage.includes('<IconButton type="button" variant="icon" size="sm" aria-label="Cerrar modal"')),
+      'El modal no usa la X de cierre'
+    );
     assert(formPage.includes('text-xs font-medium text-text-muted'), 'La presentación del precio en resultados no fue ajustada');
     assert(formPage.includes("costMode === 'AUTOMATICA' ? <span className=\"font-semibold text-text\">{formatMoney(row.resolvedCost)}</span>"), 'Costo total automático no se muestra como texto');
     assert(formPage.includes('placeholder="Recorte, hueso, grasa, etc."') && formPage.includes('placeholder="Motivo de merma"'), 'La captura inline de merma no quedó completa');

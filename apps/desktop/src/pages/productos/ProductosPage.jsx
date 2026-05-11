@@ -14,6 +14,7 @@ import {
   PageHeader,
   Paginador,
   Select,
+  StatusBadge,
   Switch,
   Toast,
   TableActions,
@@ -95,7 +96,7 @@ function normalizeStockFieldInput(value, unit) {
     if (!Number.isFinite(parsed)) return '';
     return String(Math.trunc(parsed));
   }
-  return formatDecimalInput(value, 2);
+  return formatDecimalInput(value, 3);
 }
 
 function normalizeStockInputForUnit(value, unit) {
@@ -679,15 +680,12 @@ export default function ProductosPage() {
                         <span className="text-sm text-[var(--color-text-secondary)]">{stockStatus.label}</span>
                       </TablaCelda>
                       <TablaCelda>
-                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${Boolean(producto.activo) ? 'border-[#cce5d0] bg-[#f5fbf6] text-[#1f7a35]' : 'border-[#d9dce1] bg-[#f6f7f8] text-[#5c6670]'}`}>
-                          {Boolean(producto.activo) ? 'Activo' : 'Inactivo'}
-                        </span>
+                        <StatusBadge status={Boolean(producto.activo) ? 'ACTIVO' : 'INACTIVO'} />
                       </TablaCelda>
                       <TablaCelda>
                         <TableActions>
                           <TableActionButton
-                            variant="neutral"
-                            className="border-[#dfe3e8] bg-white hover:bg-[#f6f6f7]"
+                            variant="edit"
                             icon={<PiPencilSimple />}
                             aria-label="Editar producto"
                             title="Editar producto"
@@ -912,14 +910,12 @@ export default function ProductosPage() {
                         <TablaCelda className="font-semibold text-[var(--color-text)]">{categoria.nombre}</TablaCelda>
                         <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{productosLabel}</TablaCelda>
                         <TablaCelda>
-                          <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${Boolean(categoria.activo ?? true) ? 'border-green-200 bg-green-50 text-green-700' : 'border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'}`}>
-                            {Boolean(categoria.activo ?? true) ? 'Activa' : 'Inactiva'}
-                          </span>
+                          <StatusBadge tone={Boolean(categoria.activo ?? true) ? 'success' : 'neutral'}>{Boolean(categoria.activo ?? true) ? 'Activa' : 'Inactiva'}</StatusBadge>
                         </TablaCelda>
                         <TablaCelda>
                           <TableActions>
                             <TableActionButton
-                              variant="secondary"
+                              variant="edit"
                               icon={<PiPencilSimple />}
                               aria-label={`Editar categoría ${categoria.nombre}`}
                               title="Editar categoría"

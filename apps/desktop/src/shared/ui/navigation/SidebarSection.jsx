@@ -15,17 +15,16 @@ function isGroupChildActive(child, location) {
 export default function SidebarSection({
   group,
   collapsed,
-  open,
-  forceActive = false,
+  isExpanded = false,
+  hasActiveDescendant = false,
   onToggle,
   onNavigateDefault,
   onChildNavigate,
   onCloseMobile,
-  location,
-  groupActive = false
+  location
 }) {
   const Icon = group.icon;
-  const active = forceActive || groupActive;
+  const groupState = hasActiveDescendant ? 'ancestor' : isExpanded ? 'expanded' : 'idle';
 
   return (
     <div className="space-y-1">
@@ -33,14 +32,17 @@ export default function SidebarSection({
         type="button"
         title={group.label}
         onClick={collapsed ? onNavigateDefault : onToggle}
+        data-state={groupState}
         className={clsx(
           'ui-sidebar-item',
-          active ? 'ui-sidebar-item-active' : 'ui-sidebar-item-idle',
+          hasActiveDescendant
+            ? 'ui-sidebar-item-ancestor'
+            : isExpanded
+              ? 'ui-sidebar-item-expanded'
+              : 'ui-sidebar-item-idle',
           collapsed && 'justify-center px-0'
         )}
       >
-        {!collapsed && <span className={clsx('ui-sidebar-active-rail', active && 'ui-sidebar-active-rail-visible')} />}
-
         {!collapsed && (
           <>
             <span className="ui-sidebar-item-content min-w-0">
@@ -53,8 +55,14 @@ export default function SidebarSection({
               <span className="min-w-0 flex-1 truncate text-left">{group.label}</span>
             </span>
 
-            <span className={clsx('ui-sidebar-caret flex items-center justify-center transition-transform duration-150', active && 'ui-sidebar-caret-active')}>
-              {open ? (
+            <span
+              className={clsx(
+                'ui-sidebar-caret flex items-center justify-center transition-transform duration-150',
+                (isExpanded || hasActiveDescendant) && 'ui-sidebar-caret-open',
+                hasActiveDescendant && 'ui-sidebar-caret-ancestor'
+              )}
+            >
+              {isExpanded ? (
                 <PiCaretDownBold className="text-base" />
               ) : (
                 <PiCaretRightBold className="text-base" />
@@ -74,7 +82,7 @@ export default function SidebarSection({
         <div
           className={clsx(
             'grid transition-[grid-template-rows,opacity] duration-300 ease-out',
-            open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+            isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
           )}
         >
           <div className="overflow-hidden">
@@ -86,6 +94,8 @@ export default function SidebarSection({
                   <NavLink
                     key={buildHref(child)}
                     to={buildHref(child)}
+                    aria-current={active ? 'page' : undefined}
+                    data-state={active ? 'active' : 'idle'}
                     onClick={() => {
                       onChildNavigate?.();
                       onCloseMobile?.();
