@@ -16,6 +16,12 @@ export default function AppLayout() {
   }, [location.pathname, location.search]);
 
   useEffect(() => {
+    const current = `${location.pathname}${location.search || ''}`;
+    if (location.pathname === '/' || location.pathname === '/login') return;
+    window.localStorage.setItem('qk_last_route', current);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
     if (!user?.id) return;
     cargarTodo().catch(() => {});
   }, [user?.id, cargarTodo]);

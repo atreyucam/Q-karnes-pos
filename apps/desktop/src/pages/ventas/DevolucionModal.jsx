@@ -131,7 +131,7 @@ export default function DevolucionModal({
       if (!Number.isFinite(requestedQty) || requestedQty <= 0 || requestedBase <= 0) {
         lineError = 'Cantidad invalida';
       } else if (requestedBase > line.availableBase) {
-        lineError = 'Excede lo disponible para devolver';
+        lineError = 'No puedes devolver más de la cantidad disponible.';
       }
 
       const previewCentavos = lineError
@@ -186,6 +186,43 @@ export default function DevolucionModal({
 
   const breakdownMismatch = hasExplicitBreakdown && explicitBreakdownTotal !== totalRefundCentavos;
   const hasInvalidLines = lineDrafts.some((line) => line.error);
+  const manualDifferenceCentavos = totalRefundCentavos - explicitBreakdownTotal;
+  const hasMethodLimitError = (
+    (breakdownCentavos.contado_centavos !== undefined && breakdownCentavos.contado_centavos > remainingBreakdown.contado_centavos)
+    || (breakdownCentavos.transferencia_centavos !== undefined && breakdownCentavos.transferencia_centavos > remainingBreakdown.transferencia_centavos)
+    || (breakdownCentavos.credito_centavos !== undefined && breakdownCentavos.credito_centavos > remainingBreakdown.credito_centavos)
+  );
+  const disableSubmit = (
+    submitting
+    || !motivo.trim()
+    || !selectedItems.length
+    || hasInvalidLines
+    || totalRefundCentavos <= 0
+    || hasMethodLimitError
+    || breakdownMismatch
+    || ((breakdownCentavos.contado_centavos || 0) > 0 && !turnoActual?.id)
+  );
+  const submitDisabledReason = useMemo(() => {
+    if (submitting) return 'Guardando devolución...';
+    if (!motivo.trim()) return 'Debe seleccionar o ingresar un motivo.';
+    if (!selectedItems.length) return 'Ingrese una cantidad a devolver.';
+    if (hasInvalidLines) return 'La cantidad supera lo disponible.';
+    if (totalRefundCentavos <= 0) return 'No hay cantidades seleccionadas para devolver.';
+    if (hasMethodLimitError) return 'Uno de los montos supera el disponible reversible.';
+    if (breakdownMismatch) return 'El desglose manual no coincide con el total de devolución.';
+    if ((breakdownCentavos.contado_centavos || 0) > 0 && !turnoActual?.id) return 'Se requiere caja abierta para devolver efectivo.';
+    return '';
+  }, [
+    breakdownCentavos.contado_centavos,
+    breakdownMismatch,
+    hasInvalidLines,
+    hasMethodLimitError,
+    motivo,
+    selectedItems.length,
+    submitting,
+    totalRefundCentavos,
+    turnoActual?.id
+  ]);
 
   const applySingleBreakdown = (field) => {
     if (totalRefundCentavos <= 0) return;
@@ -284,9 +321,14 @@ export default function DevolucionModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} maxWidthClass="max-w-6xl" panelClassName="p-5">
-      <div className="space-y-4">
-        <div className="ui-modal-header">
+    <Modal
+      open={open}
+      onClose={onClose}
+      maxWidthClass="sm:max-w-[min(1200px,calc(100vw-2rem))]"
+      panelClassName="p-0 w-[calc(100vw-2rem)] sm:max-h-[calc(100vh-2rem)]"
+    >
+      <div className="max-h-[calc(100vh-2rem)] flex flex-1 flex-col overflow-hidden">
+        <div className="ui-modal-header shrink-0 border-b border-[var(--color-border)] bg-[var(--color-background)] px-6 py-5">
           <div className="ui-modal-header-copy">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">
               Devolucion venta #{ventaDetalle?.venta?.id || '-'}
@@ -300,245 +342,268 @@ export default function DevolucionModal({
           </Button>
         </div>
 
-        {(localError || error) && (
-          <Alert tone="error">
-            {localError || error}
-          </Alert>
-        )}
-
-        <div className="grid gap-3 md:grid-cols-4">
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Total venta</p>
-            <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(ventaDetalle?.venta?.total || 0)}</p>
-          </div>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Efectivo reversible</p>
-            <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(remainingBreakdown.contado_centavos))}</p>
-          </div>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Transferencia reversible</p>
-            <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(remainingBreakdown.transferencia_centavos))}</p>
-          </div>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Credito reversible</p>
-            <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(remainingBreakdown.credito_centavos))}</p>
-          </div>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-[1.3fr_0.9fr]">
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-[var(--color-text)]">Lineas disponibles</p>
-                  <p className="text-sm text-[var(--color-text-muted)]">Solo se permite devolver hasta la cantidad restante de cada linea.</p>
-                </div>
-                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-right">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Reembolso estimado</p>
-                  <p className="mt-1 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(totalRefundCentavos))}</p>
-                </div>
-              </div>
-
-              <Tabla>
-                <TablaCabecera>
-                  <tr>
-                    <TablaCelda as="th">Producto</TablaCelda>
-                    <TablaCelda as="th">Vendido</TablaCelda>
-                    <TablaCelda as="th">Devuelto</TablaCelda>
-                    <TablaCelda as="th">Disponible</TablaCelda>
-                    <TablaCelda as="th">Cantidad</TablaCelda>
-                    <TablaCelda as="th" className="text-right">Reembolso</TablaCelda>
-                  </tr>
-                </TablaCabecera>
-                <TablaCuerpo>
-                  {lines.map((line) => {
-                    const draft = lineDrafts.find((item) => item.id === line.id);
-                    const returnedVisible = baseToVisible(line.refunded.cantidad_base, line.unidad);
-                    const isLineClosed = line.availableBase <= 0;
-
-                    return (
-                      <TablaFila key={line.id}>
-                        <TablaCelda>
-                          <div>
-                            <p className="font-medium text-[var(--color-text)]">{line.producto_codigo} - {line.producto_nombre}</p>
-                            <p className="text-xs text-[var(--color-text-muted)]">Costo snapshot: {formatMoney(line.costo_unit_snapshot || 0)}</p>
-                          </div>
-                        </TablaCelda>
-                        <TablaCelda>{formatQtyByUnit(line.cantidad, line.unidad)}</TablaCelda>
-                        <TablaCelda>{formatQtyByUnit(returnedVisible, line.unidad)}</TablaCelda>
-                        <TablaCelda>{formatQtyByUnit(line.availableVisible, line.unidad)}</TablaCelda>
-                        <TablaCelda>
-                          <Input
-                            type="text"
-                            inputMode={line.unidad === 'UND' ? 'numeric' : 'decimal'}
-                            value={qtyByDetail[line.id] || ''}
-                            disabled={isLineClosed}
-                            placeholder={isLineClosed ? 'Agotado' : '0'}
-                            onChange={(event) => {
-                              setQtyByDetail((current) => ({
-                                ...current,
-                                [line.id]: sanitizeQtyInput(event.target.value, line.unidad)
-                              }));
-                            }}
-                          />
-                          {draft?.error ? (
-                            <p className="mt-1 text-[11px] text-[var(--color-danger)]">{draft.error}</p>
-                          ) : null}
-                        </TablaCelda>
-                        <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                          {formatMoney(centsToMoney(draft?.previewCentavos || 0))}
-                        </TablaCelda>
-                      </TablaFila>
-                    );
-                  })}
-                </TablaCuerpo>
-              </Tabla>
-            </div>
-          </div>
-
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           <div className="space-y-4">
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <p className="font-semibold text-[var(--color-text)]">Motivo y observación</p>
+            {(localError || error) && (
+              <Alert tone="error">
+                {localError || error}
+              </Alert>
+            )}
 
-              <div className="mt-3 space-y-3">
-                <Input
-                  error={Boolean(formErrors.errors.motivo)}
-                  value={motivo}
-                  onChange={(event) => {
-                    formErrors.clearFieldError('motivo');
-                    setMotivo(event.target.value);
-                  }}
-                  placeholder="Motivo de la devolución"
-                />
-                {formErrors.errors.motivo ? <p className="text-sm text-[var(--color-danger)]">{formErrors.errors.motivo}</p> : null}
-                <Textarea
-                  value={observacion}
-                  onChange={(event) => setObservacion(event.target.value)}
-                  placeholder="Observación operativa (opcional)"
-                  rows={4}
-                />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Total venta</p>
+                <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(ventaDetalle?.venta?.total || 0)}</p>
+              </div>
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Efectivo reversible</p>
+                <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(remainingBreakdown.contado_centavos))}</p>
+              </div>
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Transferencia reversible</p>
+                <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(remainingBreakdown.transferencia_centavos))}</p>
+              </div>
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Credito reversible</p>
+                <p className="mt-2 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(remainingBreakdown.credito_centavos))}</p>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-[var(--color-text)]">Desglose de devolución</p>
-                  <p className="text-sm text-[var(--color-text-muted)]">
-                    Opcional. Si dejas los campos vacíos, el backend repartirá el reembolso según el saldo reversible de la venta.
-                  </p>
-                </div>
-                <Button type="button" variant="secondary" size="sm" onClick={() => setBreakdown({ contado: '', transferencia: '', credito: '' })}>
-                  Automático
-                </Button>
-              </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.35fr_1fr]">
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-[var(--color-text)]">Lineas disponibles</p>
+                      <p className="text-sm text-[var(--color-text-muted)]">Solo se permite devolver hasta la cantidad restante de cada linea.</p>
+                    </div>
+                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-right sm:min-w-44">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Reembolso estimado</p>
+                      <p className="mt-1 text-lg font-bold text-[var(--color-text)]">{formatMoney(centsToMoney(totalRefundCentavos))}</p>
+                    </div>
+                  </div>
 
-              <div className="mt-3 grid gap-3">
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Efectivo</label>
-                    <span className="text-xs text-[var(--color-text-muted)]">Disponible: {formatMoney(centsToMoney(remainingBreakdown.contado_centavos))}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={breakdown.contado}
-                      onChange={(event) => setBreakdown((current) => ({
-                        ...current,
-                        contado: sanitizeDecimalInput(event.target.value, 2)
-                      }))}
-                      placeholder="0.00"
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={totalRefundCentavos <= 0 || totalRefundCentavos > remainingBreakdown.contado_centavos}
-                      onClick={() => applySingleBreakdown('contado')}
-                    >
-                      Todo
-                    </Button>
-                  </div>
-                </div>
+                  <Tabla className="overflow-x-auto rounded-xl border border-[var(--color-border)]">
+                    <TablaCabecera>
+                      <tr>
+                        <TablaCelda as="th" className="min-w-[260px]">Producto</TablaCelda>
+                        <TablaCelda as="th" className="w-[90px]">Vendido</TablaCelda>
+                        <TablaCelda as="th" className="w-[90px]">Devuelto</TablaCelda>
+                        <TablaCelda as="th" className="w-[100px]">Disponible</TablaCelda>
+                        <TablaCelda as="th" className="w-[120px] text-center">Cantidad</TablaCelda>
+                        <TablaCelda as="th" className="w-[120px] text-right">Reembolso</TablaCelda>
+                      </tr>
+                    </TablaCabecera>
+                    <TablaCuerpo>
+                      {lines.map((line) => {
+                        const draft = lineDrafts.find((item) => item.id === line.id);
+                        const returnedVisible = baseToVisible(line.refunded.cantidad_base, line.unidad);
+                        const isLineClosed = line.availableBase <= 0;
 
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Transferencia</label>
-                    <span className="text-xs text-[var(--color-text-muted)]">Disponible: {formatMoney(centsToMoney(remainingBreakdown.transferencia_centavos))}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={breakdown.transferencia}
-                      onChange={(event) => setBreakdown((current) => ({
-                        ...current,
-                        transferencia: sanitizeDecimalInput(event.target.value, 2)
-                      }))}
-                      placeholder="0.00"
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={totalRefundCentavos <= 0 || totalRefundCentavos > remainingBreakdown.transferencia_centavos}
-                      onClick={() => applySingleBreakdown('transferencia')}
-                    >
-                      Todo
-                    </Button>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label className="text-sm font-medium text-[var(--color-text)]">Crédito</label>
-                    <span className="text-xs text-[var(--color-text-muted)]">Disponible: {formatMoney(centsToMoney(remainingBreakdown.credito_centavos))}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={breakdown.credito}
-                      onChange={(event) => setBreakdown((current) => ({
-                        ...current,
-                        credito: sanitizeDecimalInput(event.target.value, 2)
-                      }))}
-                      placeholder="0.00"
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={totalRefundCentavos <= 0 || totalRefundCentavos > remainingBreakdown.credito_centavos}
-                      onClick={() => applySingleBreakdown('credito')}
-                    >
-                      Todo
-                    </Button>
-                  </div>
+                        return (
+                          <TablaFila key={line.id}>
+                            <TablaCelda>
+                              <div className="min-w-[240px]">
+                                <p className="font-medium leading-relaxed text-[var(--color-text)]">{line.producto_nombre}</p>
+                                <p className="text-xs text-[var(--color-text-muted)]">
+                                  Unidad: {line.unidad} | Costo snapshot: {formatMoney(line.costo_unit_snapshot || 0)}
+                                </p>
+                              </div>
+                            </TablaCelda>
+                            <TablaCelda>{formatQtyByUnit(line.cantidad, line.unidad)}</TablaCelda>
+                            <TablaCelda>{formatQtyByUnit(returnedVisible, line.unidad)}</TablaCelda>
+                            <TablaCelda>{formatQtyByUnit(line.availableVisible, line.unidad)}</TablaCelda>
+                            <TablaCelda className="text-center align-middle">
+                              <Input
+                                type="text"
+                                inputMode={line.unidad === 'UND' ? 'numeric' : 'decimal'}
+                                className="mx-auto h-10 w-24 text-center"
+                                value={qtyByDetail[line.id] || ''}
+                                disabled={isLineClosed}
+                                placeholder={isLineClosed ? 'Agotado' : '0'}
+                                onChange={(event) => {
+                                  setQtyByDetail((current) => ({
+                                    ...current,
+                                    [line.id]: sanitizeQtyInput(event.target.value, line.unidad)
+                                  }));
+                                }}
+                              />
+                              {draft?.error ? (
+                                <p className="mt-1 text-[11px] text-[var(--color-danger)]">{draft.error}</p>
+                              ) : null}
+                            </TablaCelda>
+                            <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
+                              {formatMoney(centsToMoney(draft?.previewCentavos || 0))}
+                            </TablaCelda>
+                          </TablaFila>
+                        );
+                      })}
+                    </TablaCuerpo>
+                  </Tabla>
                 </div>
               </div>
 
-              <div className="mt-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm text-[var(--color-text-muted)]">
-                <p>
-                  Total estimado: <strong className="text-[var(--color-text)]">{formatMoney(centsToMoney(totalRefundCentavos))}</strong>
-                </p>
-                <p className="mt-1">
-                  Desglose manual: <strong className={breakdownMismatch ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}>
-                    {formatMoney(centsToMoney(explicitBreakdownTotal))}
-                  </strong>
-                </p>
-                {(breakdownCentavos.contado_centavos || 0) > 0 && !turnoActual?.id ? (
-                  <p className="mt-1 text-[var(--color-warning)]">
-                    La devolucion en efectivo requiere caja abierta.
-                  </p>
-                ) : null}
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                  <p className="font-semibold text-[var(--color-text)]">Motivo y observación</p>
+
+                  <div className="mt-3 space-y-3">
+                    <Input
+                      error={Boolean(formErrors.errors.motivo)}
+                      value={motivo}
+                      onChange={(event) => {
+                        formErrors.clearFieldError('motivo');
+                        setMotivo(event.target.value);
+                      }}
+                      placeholder="Motivo de la devolución"
+                    />
+                    {formErrors.errors.motivo ? <p className="text-sm text-[var(--color-danger)]">{formErrors.errors.motivo}</p> : null}
+                    <Textarea
+                      className="min-h-[96px]"
+                      value={observacion}
+                      onChange={(event) => setObservacion(event.target.value)}
+                      placeholder="Observación operativa (opcional)"
+                      rows={4}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-[var(--color-text)]">Desglose de devolución</p>
+                      <p className="text-sm text-[var(--color-text-muted)]">
+                        Opcional. Si dejas los campos vacíos, el backend repartirá el reembolso según el saldo reversible de la venta.
+                      </p>
+                    </div>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setBreakdown({ contado: '', transferencia: '', credito: '' })}>
+                      Automático
+                    </Button>
+                  </div>
+
+                  <div className="mt-3 grid gap-3">
+                    <div>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <label className="text-sm font-medium text-[var(--color-text)]">Efectivo</label>
+                        <span className="text-xs text-[var(--color-text-muted)]">Disponible: {formatMoney(centsToMoney(remainingBreakdown.contado_centavos))}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          disabled={remainingBreakdown.contado_centavos <= 0}
+                          value={breakdown.contado}
+                          onChange={(event) => setBreakdown((current) => ({
+                            ...current,
+                            contado: sanitizeDecimalInput(event.target.value, 2)
+                          }))}
+                          placeholder="0.00"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={totalRefundCentavos <= 0 || totalRefundCentavos > remainingBreakdown.contado_centavos}
+                          onClick={() => applySingleBreakdown('contado')}
+                        >
+                          Todo
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <label className="text-sm font-medium text-[var(--color-text)]">Transferencia</label>
+                        <span className="text-xs text-[var(--color-text-muted)]">Disponible: {formatMoney(centsToMoney(remainingBreakdown.transferencia_centavos))}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          disabled={remainingBreakdown.transferencia_centavos <= 0}
+                          value={breakdown.transferencia}
+                          onChange={(event) => setBreakdown((current) => ({
+                            ...current,
+                            transferencia: sanitizeDecimalInput(event.target.value, 2)
+                          }))}
+                          placeholder="0.00"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={totalRefundCentavos <= 0 || totalRefundCentavos > remainingBreakdown.transferencia_centavos}
+                          onClick={() => applySingleBreakdown('transferencia')}
+                        >
+                          Todo
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <label className="text-sm font-medium text-[var(--color-text)]">Crédito</label>
+                        <span className="text-xs text-[var(--color-text-muted)]">Disponible: {formatMoney(centsToMoney(remainingBreakdown.credito_centavos))}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          disabled={remainingBreakdown.credito_centavos <= 0}
+                          value={breakdown.credito}
+                          onChange={(event) => setBreakdown((current) => ({
+                            ...current,
+                            credito: sanitizeDecimalInput(event.target.value, 2)
+                          }))}
+                          placeholder="0.00"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={totalRefundCentavos <= 0 || totalRefundCentavos > remainingBreakdown.credito_centavos}
+                          onClick={() => applySingleBreakdown('credito')}
+                        >
+                          Todo
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  {!hasExplicitBreakdown ? (
+                    <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+                      El sistema distribuirá el reembolso según los saldos reversibles disponibles.
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
         </div>
-
-        <div className="flex justify-end gap-2">
+        <div className="shrink-0 border-t border-[var(--color-border)] bg-white px-6 py-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="text-[var(--color-text-muted)]">
+              Total devolución: <strong className="text-[var(--color-text)]">{formatMoney(centsToMoney(totalRefundCentavos))}</strong>
+            </p>
+            <p className="text-[var(--color-text-muted)]">
+              Desglose manual: <strong className={breakdownMismatch ? 'text-[var(--color-danger)]' : 'text-[var(--color-text)]'}>
+                {formatMoney(centsToMoney(explicitBreakdownTotal))}
+              </strong>
+            </p>
+            {hasExplicitBreakdown ? (
+              <p className={manualDifferenceCentavos === 0 ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-danger)]'}>
+                {manualDifferenceCentavos === 0
+                  ? 'Desglose completo'
+                  : (manualDifferenceCentavos > 0
+                    ? `Faltan ${formatMoney(centsToMoney(manualDifferenceCentavos))} por distribuir`
+                    : `El desglose supera por ${formatMoney(centsToMoney(Math.abs(manualDifferenceCentavos)))}`)}
+              </p>
+            ) : null}
+          </div>
+          {disableSubmit && submitDisabledReason ? (
+            <p className="mb-2 text-xs text-[var(--color-text-muted)]">{submitDisabledReason}</p>
+          ) : null}
+          <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancelar
           </Button>
-          <Button type="button" onClick={submit} disabled={submitting}>
+          <Button type="button" onClick={submit} disabled={disableSubmit}>
             {submitting ? 'Guardando...' : 'Registrar devolución'}
           </Button>
+          </div>
         </div>
       </div>
     </Modal>

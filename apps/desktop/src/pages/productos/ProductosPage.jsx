@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PiFolders, PiPencilSimple, PiPlus, PiTrash } from 'react-icons/pi';
+import { useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Button,
@@ -45,6 +46,7 @@ const PRODUCT_ROLE_FILTER_OPTIONS = [
   { label: 'Insumo', key: 'es_insumo' },
   { label: 'Merma', key: 'es_merma' }
 ];
+const INVENTORY_GOVERNANCE_MESSAGE = 'El stock y el costo se modifican desde Inventario mediante conteos, ajustes, compras o despiece.';
 
 const emptyProductoForm = {
   id: null,
@@ -142,8 +144,24 @@ const getProductStatus = (producto) => {
   return { label: 'Normal', tone: 'normal' };
 };
 
+function resolveMarginView(precioVenta, costoVisible) {
+  const price = Number(precioVenta || 0);
+  const cost = Number(costoVisible || 0);
+  if (!Number.isFinite(price) || !Number.isFinite(cost) || price <= 0 || cost <= 0) {
+    return { calculable: false, label: 'Sin costo valorizado' };
+  }
+  const margin = price - cost;
+  const pct = (margin / price) * 100;
+  return {
+    calculable: true,
+    margin,
+    pct
+  };
+}
+
 export default function ProductosPage() {
   const { productos, error, loading, listar, crear, actualizar } = useProductosStore();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [categorias, setCategorias] = useState([]);
   const [allProductos, setAllProductos] = useState([]);
   const [pagina, setPagina] = useState(1);
@@ -191,6 +209,17 @@ export default function ProductosPage() {
   useEffect(() => {
     refreshCategorias();
   }, []);
+
+  useEffect(() => {
+    const editId = Number(searchParams.get('edit') || 0);
+    if (!editId) return;
+    const target = (productos || []).find((row) => Number(row.id) === editId);
+    if (!target) return;
+    openEditModal(target);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('edit');
+    setSearchParams(nextParams, { replace: true });
+  }, [productos, searchParams, setSearchParams]);
 
   const categoriasOrdenadas = useMemo(
     () => [...categorias].sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })),
@@ -301,7 +330,7 @@ export default function ProductosPage() {
     setProductoModal({ open: true, mode: 'edit' });
     setProductoForm({
       id: producto.id,
-      codigo: producto.codigo || '',
+      codigo: String(producto.codigo || '').toUpperCase(),
       nombre: producto.nombre || '',
       categoria_id: producto.categoria_id ? String(producto.categoria_id) : '',
       unidad_medida: producto.unidad_medida || producto.unidad || 'UND',
@@ -388,6 +417,7 @@ export default function ProductosPage() {
     }
 
     const payload = {
+      codigo: String(productoForm.codigo || '').trim().toUpperCase() || undefined,
       nombre: productoForm.nombre.trim(),
       categoria_id: productoForm.categoria_id ? Number(productoForm.categoria_id) : null,
       unidad_medida: productoForm.unidad_medida,
@@ -636,6 +666,7 @@ export default function ProductosPage() {
                   <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
                   <TablaCelda as="th" className="text-right">Precio venta</TablaCelda>
                   <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Margen</TablaCelda>
                   <TablaCelda as="th">Estado stock</TablaCelda>
                   <TablaCelda as="th">Activo</TablaCelda>
                   <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
@@ -648,6 +679,7 @@ export default function ProductosPage() {
                   const unidadMedida = producto.unidad_medida || producto.unidad || 'UND';
                   const roles = getProductRoles(producto);
                   const roleText = roles.length ? roles.map((role) => role.label.toLowerCase()).join(' · ') : 'sin rol';
+                  const marginView = resolveMarginView(producto.precio_venta, producto.costo_visible ?? producto.costo_promedio);
                   const statusAccentClass = stockStatus.tone === 'danger'
                     ? 'bg-[#d72c0d]'
                     : stockStatus.tone === 'warning'
@@ -676,6 +708,16 @@ export default function ProductosPage() {
                       </TablaCelda>
                       <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatCurrency(producto.precio_venta)}</TablaCelda>
                       <TablaCelda className="text-right">{formatCurrency(producto.costo_promedio)}</TablaCelda>
+                      <TablaCelda className="text-right">
+                        {marginView.calculable ? (
+                          <div>
+                            <p className="font-semibold text-[var(--color-text)]">{formatCurrency(marginView.margin)}</p>
+                            <p className="text-xs text-[var(--color-text-muted)]">{`${Number(marginView.pct).toFixed(2)}%`}</p>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-muted)]">Sin costo</span>
+                        )}
+                      </TablaCelda>
                       <TablaCelda>
                         <span className="text-sm text-[var(--color-text-secondary)]">{stockStatus.label}</span>
                       </TablaCelda>
@@ -716,29 +758,89 @@ export default function ProductosPage() {
 
       {loading && <LoadingState label="Cargando productos..." />}
 
-      <Modal open={productoModal.open} onClose={closeProductoModal} maxWidthClass="max-w-3xl" panelClassName="p-5">
-        <div className="ui-modal-header">
-          <div className="ui-modal-header-copy">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">
-              {productoModal.mode === 'edit' ? 'Editar producto' : 'Nuevo producto'}
-            </h3>
-            <p className="text-sm text-[var(--color-text-muted)]">Define datos base y roles operativos del producto.</p>
-          </div>
-          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeProductoModal}>
-            X
-          </Button>
-        </div>
+      <Modal
+        open={productoModal.open}
+        onClose={closeProductoModal}
+        maxWidthClass="max-w-[800px]"
+        panelClassName="w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] p-0"
+      >
+        {(() => {
+          const productoActual = productos.find((row) => row.id === productoForm.id) || null;
+          const isEditMode = productoModal.mode === 'edit';
+          const tieneMovimientos = Boolean(productoActual?.tiene_movimientos_inventario);
+          const precioVentaForm = Number(String(productoForm.precio_venta || '0').replace(',', '.')) || 0;
+          const costoVisibleActual = Number((productoActual?.costo_visible ?? productoActual?.costo_promedio) || 0);
+          const marginModal = resolveMarginView(precioVentaForm, costoVisibleActual);
+          const roleError = validateProductRoles(productoForm);
+          const canSave = Boolean(productoForm.nombre.trim()) && !roleError;
+          const unidadActual = productoActual?.unidad_medida || productoActual?.unidad || productoForm.unidad_medida;
 
-        <div className="mt-4 space-y-4">
-          <div className="rounded-lg border border-[var(--color-border)] p-4">
-            <p className="text-sm font-semibold text-[var(--color-text)]">Datos del producto</p>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {productoModal.mode === 'edit' ? (
-                <div>
-                  <label className={labelClassName()}>Código</label>
-                  <Input className="mt-2" value={productoForm.codigo} disabled />
+          return (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="shrink-0 border-b border-[var(--color-border)] px-6 py-5">
+                <div className="ui-modal-header">
+                  <div className="ui-modal-header-copy">
+                    <h3 className="text-lg font-semibold text-[var(--color-text)]">
+                      {isEditMode ? 'Editar producto' : 'Nuevo producto'}
+                    </h3>
+                    <p className="text-sm text-[var(--color-text-muted)]">Define datos base y roles operativos del producto.</p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={closeProductoModal}>
+                    X
+                  </Button>
                 </div>
-              ) : null}
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+                {isEditMode ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-[var(--color-text)]">Inventario y margen</p>
+                    <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
+                      {[
+                        ['Stock actual', formatWeight(Number(productoActual?.stock_actual || 0), unidadActual)],
+                        ['Costo actual', `${formatCurrency(costoVisibleActual)} / ${unidadActual}`],
+                        ['Valor inventario', formatCurrency(Number(productoActual?.valor_inventario_centavos || 0) / 100)],
+                        ['Precio de venta', formatCurrency(precioVentaForm)],
+                        ['Margen estimado', marginModal.calculable ? formatCurrency(marginModal.margin) : 'No calculable'],
+                        ['% margen', marginModal.calculable ? `${Number(marginModal.pct).toFixed(2)}%` : 'Sin costo valorizado']
+                      ].map(([label, value]) => (
+                        <div key={label}>
+                          <p className="text-[11px] text-slate-500">{label}</p>
+                          <p className="text-sm font-semibold text-[var(--color-text)]">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {!marginModal.calculable ? (
+                      <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                        El margen no se puede calcular porque el producto aún no tiene costo valorizado.
+                      </p>
+                    ) : null}
+                    <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+                      {INVENTORY_GOVERNANCE_MESSAGE}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs text-[var(--color-text-muted)]">
+                    {INVENTORY_GOVERNANCE_MESSAGE}
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-[var(--color-border)] p-4">
+            <p className="text-sm font-semibold text-[var(--color-text)]">Datos del producto</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className={labelClassName()}>Código</label>
+                <Input
+                  className="mt-2 uppercase"
+                  value={productoForm.codigo}
+                  onChange={(e) => setProductoForm((prev) => ({ ...prev, codigo: e.target.value.toUpperCase() }))}
+                  disabled={isEditMode && tieneMovimientos}
+                  placeholder="QK-001"
+                />
+                {isEditMode && tieneMovimientos ? (
+                  <p className="mt-1 text-xs text-[var(--color-text-muted)]">Bloqueado por movimientos de inventario.</p>
+                ) : null}
+              </div>
 
               <div>
                 <label className={labelClassName()}>Nombre descriptivo</label>
@@ -772,11 +874,15 @@ export default function ProductosPage() {
                   className="mt-2"
                   value={productoForm.unidad_medida}
                   onChange={(e) => onChangeUnidadMedida(e.target.value)}
+                  disabled={isEditMode && tieneMovimientos}
                 >
                   <option value="UND">UND</option>
                   <option value="KG">KG</option>
                   <option value="LB">LB</option>
                 </Select>
+                {isEditMode && tieneMovimientos ? (
+                  <p className="mt-1 text-xs text-[var(--color-text-muted)]">Bloqueado para preservar el histórico del Kardex.</p>
+                ) : null}
               </div>
 
               <div>
@@ -801,11 +907,14 @@ export default function ProductosPage() {
                   onBlur={() => setProductoForm((prev) => ({ ...prev, stock_minimo: normalizeStockFieldInput(prev.stock_minimo, prev.unidad_medida) }))}
                   placeholder="0.00"
                 />
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Unidad: {productoForm.unidad_medida} {productoForm.unidad_medida === 'UND' ? '(sin decimales)' : '(hasta 3 decimales)'}
+                </p>
               </div>
             </div>
-          </div>
+                </div>
 
-          <div className="rounded-lg border border-[var(--color-border)] p-4">
+                <div className="rounded-lg border border-[var(--color-border)] p-4">
             <p className="text-sm font-semibold text-[var(--color-text)]">Roles del producto</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {PRODUCT_ROLE_OPTIONS.map((role) => {
@@ -829,39 +938,41 @@ export default function ProductosPage() {
               })}
             </div>
             <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-              Debe existir al menos un rol activo. `Merma` es exclusivo y bloquea los demás roles mientras esté activo.
+              Debe existir al menos un rol activo. Merma es exclusivo.
             </p>
-          </div>
+                </div>
 
-          <div className="rounded-lg border border-[var(--color-border)] p-4">
+                <div className="rounded-lg border border-[var(--color-border)] p-4">
             <p className="text-sm font-semibold text-[var(--color-text)]">Estado del producto</p>
             <div className="mt-3">
               <Switch
                 checked={productoForm.activo}
                 onChange={(checked) => setProductoForm((prev) => ({ ...prev, activo: checked }))}
                 label="Activo"
-                description="Si está inactivo no aparece para nuevas operaciones."
+                description="Si está inactivo, no aparecerá para nuevas operaciones."
               />
             </div>
-          </div>
+                </div>
+              </div>
 
-          {productoModal.mode === 'edit' && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm text-[var(--color-text-muted)]">
-              Costo promedio actual: <strong className="text-[var(--color-text)]">{formatCurrency(Number(productos.find((row) => row.id === productoForm.id)?.costo_promedio || 0))}</strong>
+              <div className="shrink-0 border-t border-[var(--color-border)] bg-white px-6 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {canSave ? ' ' : (roleError || 'Completa los campos requeridos para continuar.')}
+                  </p>
+                  <div className="flex justify-end gap-3">
+                    <Button variant="secondary" onClick={closeProductoModal}>
+                      Cancelar
+                    </Button>
+                    <Button onClick={onSaveProducto} disabled={!canSave}>
+                      {isEditMode ? 'Guardar cambios' : 'Guardar producto'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-
-        <div className="mt-5 flex justify-end gap-2">
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={closeProductoModal}>
-              Cancelar
-            </Button>
-            <Button onClick={onSaveProducto}>
-              {productoModal.mode === 'edit' ? 'Guardar cambios' : 'Guardar producto'}
-            </Button>
-          </div>
-        </div>
+          );
+        })()}
       </Modal>
 
       <Modal open={categoriaManagerOpen} onClose={closeCategoriaManager} maxWidthClass="sm:max-w-[min(1120px,calc(100vw-1rem))]" panelClassName="p-0">

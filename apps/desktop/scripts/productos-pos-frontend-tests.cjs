@@ -46,6 +46,7 @@ function run() {
     assert(productosPage.includes('Costo visible'), 'La página Productos no expone costo visible');
     assert(productosPage.includes('labelClassName()}>Rol<'), 'La página Productos no expone filtro por rol');
     assert(productosPage.includes('<option value="KG">KG</option>'), 'La página Productos no permite seleccionar KG');
+    assert(productosPage.includes('El stock y el costo se modifican desde Inventario mediante conteos, ajustes, compras o despiece.'), 'La página Productos no informa la gobernanza de stock y costo');
     add(2, 'La pantalla Productos muestra tabla y filtros alineados al nuevo dominio', true);
   } catch (error) {
     add(2, 'La pantalla Productos muestra tabla y filtros alineados al nuevo dominio', false, error.message);

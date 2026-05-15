@@ -125,28 +125,28 @@ function buildCashMovementPayload({
 }
 
 function summarizeTreasuryMovements(movimientos = []) {
-  return movimientos.reduce(
+  const totalsInCents = movimientos.reduce(
     (acc, movimiento) => {
       const tipo = normalizeCashMovementType(movimiento.tipo);
       const sentido = movimiento.sentido || inferCashDirection(tipo);
-      const monto = movimiento?.monto_centavos !== undefined && movimiento?.monto_centavos !== null
-        ? centsToMoney(Number(movimiento.monto_centavos || 0))
-        : moneyRound(Number(movimiento.monto || 0));
+      const montoCentavos = movimiento?.monto_centavos !== undefined && movimiento?.monto_centavos !== null
+        ? Number(movimiento.monto_centavos || 0)
+        : moneyToCents(Number(movimiento.monto || 0), 'monto');
 
-      if (tipo === CASH_MOVEMENT_TYPES.VENTA_CONTADO) acc.ventas_efectivo += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.VENTA_TRANSFERENCIA) acc.ventas_transferencia += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.VENTA_CREDITO) acc.ventas_credito += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.ABONO_CLIENTE) acc.cobranzas_clientes += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.INGRESO_MANUAL) acc.ingresos_manuales += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.COMPRA_CONTADO) acc.compras_efectivo += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR) acc.pagos_proveedores += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.EGRESO_MANUAL) acc.egresos_manuales += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.DEVOLUCION_EFECTIVO) acc.devoluciones_efectivo += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.ANULACION_VENTA_EFECTIVO) acc.anulaciones_efectivo += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.REVERSO_ABONO_CLIENTE) acc.reversiones_abonos_clientes += monto;
-      else if (tipo === CASH_MOVEMENT_TYPES.REVERSO_PAGO_PROVEEDOR) acc.reversiones_pagos_proveedores += monto;
-      else if (sentido === CASH_DIRECTION.EGRESO) acc.otros_egresos += monto;
-      else acc.otros_ingresos += monto;
+      if (tipo === CASH_MOVEMENT_TYPES.VENTA_CONTADO) acc.ventas_efectivo += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.VENTA_TRANSFERENCIA) acc.ventas_transferencia += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.VENTA_CREDITO) acc.ventas_credito += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.ABONO_CLIENTE) acc.cobranzas_clientes += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.INGRESO_MANUAL) acc.ingresos_manuales += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.COMPRA_CONTADO) acc.compras_efectivo += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR) acc.pagos_proveedores += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.EGRESO_MANUAL) acc.egresos_manuales += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.DEVOLUCION_EFECTIVO) acc.devoluciones_efectivo += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.ANULACION_VENTA_EFECTIVO) acc.anulaciones_efectivo += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.REVERSO_ABONO_CLIENTE) acc.reversiones_abonos_clientes += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.REVERSO_PAGO_PROVEEDOR) acc.reversiones_pagos_proveedores += montoCentavos;
+      else if (sentido === CASH_DIRECTION.EGRESO) acc.otros_egresos += montoCentavos;
+      else acc.otros_ingresos += montoCentavos;
 
       return acc;
     },
@@ -167,53 +167,51 @@ function summarizeTreasuryMovements(movimientos = []) {
       otros_egresos: 0
     }
   );
+
+  return Object.fromEntries(
+    Object.entries(totalsInCents).map(([key, value]) => [key, centsToMoney(Number(value || 0))])
+  );
 }
 
 function buildTurnoCashSnapshot(turno, movimientos = []) {
   const totals = summarizeTreasuryMovements(movimientos);
-
-  const efectivoEsperado = moneyRound(
-    Number(turno.fondo_inicial || 0)
-    + Number(totals.ventas_efectivo || 0)
-    + Number(totals.cobranzas_clientes || 0)
-    + Number(totals.ingresos_manuales || 0)
-    + Number(totals.reversiones_pagos_proveedores || 0)
-    + Number(totals.otros_ingresos || 0)
-    - Number(totals.compras_efectivo || 0)
-    - Number(totals.pagos_proveedores || 0)
-    - Number(totals.egresos_manuales || 0)
-    - Number(totals.devoluciones_efectivo || 0)
-    - Number(totals.anulaciones_efectivo || 0)
-    - Number(totals.reversiones_abonos_clientes || 0)
-    - Number(totals.otros_egresos || 0)
+  const fondoInicialCentavos = turno?.fondo_inicial_centavos !== undefined && turno?.fondo_inicial_centavos !== null
+    ? Number(turno.fondo_inicial_centavos || 0)
+    : moneyToCents(turno?.fondo_inicial || 0, 'fondo_inicial');
+  const ingresosEfectivoCentavos = (
+    moneyToCents(totals.ventas_efectivo || 0, 'ventas_efectivo')
+    + moneyToCents(totals.cobranzas_clientes || 0, 'cobranzas_clientes')
+    + moneyToCents(totals.ingresos_manuales || 0, 'ingresos_manuales')
+    + moneyToCents(totals.reversiones_pagos_proveedores || 0, 'reversiones_pagos_proveedores')
+    + moneyToCents(totals.otros_ingresos || 0, 'otros_ingresos')
   );
+  const egresosEfectivoCentavos = (
+    moneyToCents(totals.compras_efectivo || 0, 'compras_efectivo')
+    + moneyToCents(totals.pagos_proveedores || 0, 'pagos_proveedores')
+    + moneyToCents(totals.egresos_manuales || 0, 'egresos_manuales')
+    + moneyToCents(totals.devoluciones_efectivo || 0, 'devoluciones_efectivo')
+    + moneyToCents(totals.anulaciones_efectivo || 0, 'anulaciones_efectivo')
+    + moneyToCents(totals.reversiones_abonos_clientes || 0, 'reversiones_abonos_clientes')
+    + moneyToCents(totals.otros_egresos || 0, 'otros_egresos')
+  );
+  const ventasTotalTurnoCentavos = (
+    moneyToCents(totals.ventas_efectivo || 0, 'ventas_efectivo')
+    + moneyToCents(totals.ventas_transferencia || 0, 'ventas_transferencia')
+    + moneyToCents(totals.ventas_credito || 0, 'ventas_credito')
+  );
+  const efectivoEsperadoCentavos = fondoInicialCentavos + ingresosEfectivoCentavos - egresosEfectivoCentavos;
 
   return {
     ...totals,
-    fondo_inicial: moneyRound(turno.fondo_inicial),
-    ingresos_efectivo: moneyRound(
-      Number(totals.ventas_efectivo || 0)
-      + Number(totals.cobranzas_clientes || 0)
-      + Number(totals.ingresos_manuales || 0)
-      + Number(totals.reversiones_pagos_proveedores || 0)
-      + Number(totals.otros_ingresos || 0)
+    fondo_inicial: centsToMoney(fondoInicialCentavos),
+    ingresos_efectivo: centsToMoney(ingresosEfectivoCentavos),
+    egresos_efectivo: centsToMoney(egresosEfectivoCentavos),
+    ventas_total_turno: centsToMoney(ventasTotalTurnoCentavos),
+    manual_neto: centsToMoney(
+      moneyToCents(totals.ingresos_manuales || 0, 'ingresos_manuales')
+      - moneyToCents(totals.egresos_manuales || 0, 'egresos_manuales')
     ),
-    egresos_efectivo: moneyRound(
-      Number(totals.compras_efectivo || 0)
-      + Number(totals.pagos_proveedores || 0)
-      + Number(totals.egresos_manuales || 0)
-      + Number(totals.devoluciones_efectivo || 0)
-      + Number(totals.anulaciones_efectivo || 0)
-      + Number(totals.reversiones_abonos_clientes || 0)
-      + Number(totals.otros_egresos || 0)
-    ),
-    ventas_total_turno: moneyRound(
-      Number(totals.ventas_efectivo || 0)
-      + Number(totals.ventas_transferencia || 0)
-      + Number(totals.ventas_credito || 0)
-    ),
-    manual_neto: moneyRound(Number(totals.ingresos_manuales || 0) - Number(totals.egresos_manuales || 0)),
-    efectivo_esperado: efectivoEsperado
+    efectivo_esperado: centsToMoney(efectivoEsperadoCentavos)
   };
 }
 

@@ -13,6 +13,7 @@ const { prepareDatabase } = require('../support/database');
 const { createProducto } = require('../support/factories');
 const demoSeed = require('../../seeds/001_demo');
 const { assert, expectThrows, printSuiteReport } = require('../support/testHarness');
+const { quantityToBase } = require('../../src/helpers/unitPolicy');
 
 async function ensureOpenShift(cajero) {
   const turno = await cajaService.turnoActual();
@@ -64,18 +65,43 @@ async function runSuite(options = {}) {
         es_vendible: true
       });
 
+      const blockedStock = await expectThrows(
+        () => productosService.update(base.id, {
+          stock_actual: 14
+        }, admin),
+        'inventario trazables'
+      );
+      assert(blockedStock.ok, 'Debe bloquear stock_actual en productos.update');
+
+      const blockedCost = await expectThrows(
+        () => productosService.update(base.id, {
+          costo_promedio: 4.75
+        }, admin),
+        'inventario trazables'
+      );
+      assert(blockedCost.ok, 'Debe bloquear costo_promedio en productos.update');
+
+      const blockedInventoryValue = await expectThrows(
+        () => productosService.update(base.id, {
+          valor_inventario_centavos: 1900
+        }, admin),
+        'inventario trazables'
+      );
+      assert(blockedInventoryValue.ok, 'Debe bloquear valor_inventario_centavos en productos.update');
+
       const actualizado = await productosService.update(base.id, {
         es_transformable: true,
-        stock_actual: 14,
         stock_minimo: 4
       }, admin);
 
       assert(actualizado.es_vendible === true, 'Perdió flag vendible al editar');
       assert(actualizado.es_transformable === true, 'No activó flag transformable');
-      assert(Number(actualizado.stock_actual) === 14, 'No actualizó stock_actual');
-      add(2, 'Edición de producto conserva y combina flags correctamente', true);
+      assert(Number(actualizado.stock_actual) === 0, 'No debe actualizar stock_actual desde productos');
+      assert(Number(actualizado.costo_promedio) === 0, 'No debe actualizar costo_promedio desde productos');
+      assert(Number(actualizado.valor_inventario_centavos || 0) === 0, 'No debe actualizar valor_inventario_centavos desde productos');
+      add(2, 'Edición de producto bloquea campos de inventario y conserva flags', true);
     } catch (error) {
-      add(2, 'Edición de producto conserva y combina flags correctamente', false, error.message);
+      add(2, 'Edición de producto bloquea campos de inventario y conserva flags', false, error.message);
     }
 
     {
@@ -309,6 +335,118 @@ async function runSuite(options = {}) {
       add(6, 'La limpieza conserva autenticación y repuebla una base mínima funcional', true);
     } catch (error) {
       add(6, 'La limpieza conserva autenticación y repuebla una base mínima funcional', false, error.message);
+    }
+
+    try {
+      const producto = await productosService.create({
+        nombre: 'Producto bloqueo unidad',
+        categoria_id: 1,
+        unidad_medida: 'LB',
+        precio_venta: 3.5,
+        es_vendible: true
+      });
+      await db('inventario_movimientos').insert({
+        tipo: 'AJUSTE',
+        producto_id: producto.id,
+        cantidad: 1,
+        cantidad_base: 1,
+        signo: 1,
+        referencia: 'TEST:BLOQUEO_UNIDAD',
+        saldo_resultante: 1,
+        saldo_resultante_base: 1,
+        costo_unitario: 3.5,
+        costo_total: 3.5,
+        costo_total_centavos: 350,
+        costo_origen_tipo: 'MANUAL',
+        origen_tipo: 'TEST',
+        origen_id: producto.id,
+        fecha: new Date().toISOString()
+      });
+
+      const changeUnitBlocked = await expectThrows(
+        () => productosService.update(producto.id, { unidad_medida: 'KG' }, admin),
+        'unidad de medida'
+      );
+      assert(changeUnitBlocked.ok, 'Debe bloquear cambio de unidad con movimientos');
+
+      add(7, 'Bloquea cambio de unidad cuando existe histórico de inventario', true);
+    } catch (error) {
+      add(7, 'Bloquea cambio de unidad cuando existe histórico de inventario', false, error.message);
+    }
+
+    try {
+      const case1 = await productosService.create({
+        nombre: 'Margen caso 1',
+        categoria_id: 1,
+        unidad_medida: 'LB',
+        precio_venta: 8.10,
+        es_vendible: true
+      });
+      await db('productos').where({ id: case1.id }).update({
+        costo_promedio: 2.16,
+        valor_inventario_centavos: 994,
+        stock_actual: 4.6,
+        stock_actual_base: quantityToBase(4.6, 'LB', { field: 'stock_actual', requirePositive: false, allowZero: true })
+      });
+      const case1Fetched = await productosService.getById(case1.id);
+      assert(Number(case1Fetched.margen_estimado) === 5.94, `Margen caso1 esperado 5.94 y obtuvo ${case1Fetched.margen_estimado}`);
+      assert(Number(case1Fetched.margen_estimado_porcentaje) === 73.33, `Pct caso1 esperado 73.33 y obtuvo ${case1Fetched.margen_estimado_porcentaje}`);
+      assert(case1Fetched.margen_calculable === true, 'Caso1 debe ser calculable');
+      assert(Number(case1Fetched.valor_inventario) === 9.94, `Valor inventario esperado 9.94 y obtuvo ${case1Fetched.valor_inventario}`);
+
+      const case2 = await productosService.create({
+        nombre: 'Margen caso 2',
+        categoria_id: 1,
+        unidad_medida: 'LB',
+        precio_venta: 4.05,
+        es_vendible: true
+      });
+      const case2Fetched = await productosService.getById(case2.id);
+      assert(case2Fetched.margen_estimado === null, 'Caso2 margen debe ser null');
+      assert(case2Fetched.margen_estimado_porcentaje === null, 'Caso2 porcentaje debe ser null');
+      assert(case2Fetched.margen_calculable === false, 'Caso2 no debe ser calculable');
+      assert(case2Fetched.margen_estado === 'SIN_COSTO_VALORIZADO', `Caso2 estado esperado SIN_COSTO_VALORIZADO y obtuvo ${case2Fetched.margen_estado}`);
+
+      const case3 = await productosService.create({
+        nombre: 'Margen caso 3',
+        categoria_id: 1,
+        unidad_medida: 'LB',
+        precio_venta: 0,
+        es_vendible: false,
+        es_insumo: true
+      });
+      await db('productos').where({ id: case3.id }).update({
+        costo_promedio: 2.5,
+        valor_inventario_centavos: 250,
+        stock_actual: 1,
+        stock_actual_base: quantityToBase(1, 'LB', { field: 'stock_actual', requirePositive: false, allowZero: true })
+      });
+      const case3Fetched = await productosService.getById(case3.id);
+      assert(case3Fetched.margen_estimado === null, 'Caso3 margen debe ser null');
+      assert(case3Fetched.margen_estimado_porcentaje === null, 'Caso3 porcentaje debe ser null');
+      assert(case3Fetched.margen_calculable === false, 'Caso3 no debe ser calculable');
+
+      const case4 = await productosService.create({
+        nombre: 'Margen caso 4',
+        categoria_id: 1,
+        unidad_medida: 'LB',
+        precio_venta: 2,
+        es_vendible: true
+      });
+      await db('productos').where({ id: case4.id }).update({
+        costo_promedio: 2.5,
+        valor_inventario_centavos: 250,
+        stock_actual: 1,
+        stock_actual_base: quantityToBase(1, 'LB', { field: 'stock_actual', requirePositive: false, allowZero: true })
+      });
+      const case4Fetched = await productosService.getById(case4.id);
+      assert(Number(case4Fetched.margen_estimado) === -0.5, `Caso4 margen esperado -0.5 y obtuvo ${case4Fetched.margen_estimado}`);
+      assert(Number(case4Fetched.margen_estimado_porcentaje) === -25, `Caso4 pct esperado -25 y obtuvo ${case4Fetched.margen_estimado_porcentaje}`);
+      assert(case4Fetched.margen_calculable === true, 'Caso4 debe ser calculable');
+
+      add(8, 'Calcula margen estimado y estados no calculables correctamente', true);
+    } catch (error) {
+      add(8, 'Calcula margen estimado y estados no calculables correctamente', false, error.message);
     }
   } catch (fatalError) {
     add(999, 'Preparación de suite', false, fatalError.message);

@@ -653,10 +653,10 @@ async function ensurePaymentMethodsEnabled(paymentRows, trx) {
   }
 }
 
-async function resolveTurnoForCashFlow({ requiresCashShift, config, trx }) {
+async function resolveTurnoForCashFlow({ requiresOpenShift, config, trx }) {
   const turno = await repository.getOpenShift(trx);
-  if (requiresCashShift && config.exigir_caja_abierta_para_cobros && !turno) {
-    throw new AppError(400, 'Se requiere turno abierto para pagos en efectivo');
+  if (requiresOpenShift && config.exigir_caja_abierta_para_cobros && !turno) {
+    throw new AppError(400, 'Se requiere turno abierto para registrar ventas');
   }
   return turno || null;
 }
@@ -768,7 +768,7 @@ async function createVenta(body, authUser) {
     await ensurePaymentMethodsEnabled(paymentData.rows, trx);
 
     const turno = await resolveTurnoForCashFlow({
-      requiresCashShift: paymentData.summary.contado_centavos > 0,
+      requiresOpenShift: paymentData.rows.length > 0,
       config,
       trx
     });

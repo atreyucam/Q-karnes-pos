@@ -313,6 +313,24 @@ function CashClosingModal({
   const [step, setStep] = useState(1);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const efectivoEsperado = Number(summary?.efectivo_esperado || 0);
+  const closeSummary = summary?.resumen_cierre || {
+    apertura: Number(summary?.resumen_caja?.saldo_inicial || turnoActual?.fondo_inicial || 0),
+    efectivo_esperado: efectivoEsperado,
+    transferencias: Number(summary?.resumen_ventas?.transferencia || 0),
+    credito: Number(summary?.resumen_ventas?.credito || 0),
+    total_vendido: Number(summary?.resumen_ventas?.total_ventas || 0),
+    total_cobrado: round2(
+      Number(summary?.resumen_ventas?.efectivo || 0)
+      + Number(summary?.resumen_ventas?.transferencia || 0)
+      + Number(summary?.cobranzas_clientes || 0)
+    ),
+    ingresos: Number(summary?.resumen_caja?.ingresos_efectivo || 0),
+    egresos: Number(summary?.resumen_caja?.egresos_efectivo || 0),
+    ventas_efectivo: Number(summary?.resumen_ventas?.efectivo || 0),
+    cobros_credito_efectivo: Number(summary?.cobranzas_clientes || 0),
+    ingresos_manuales: Number(summary?.ingresos_manuales || 0),
+    egresos_manuales: Number(summary?.egresos_manuales || 0)
+  };
   const contado = Number(form.efectivo_contado || 0);
   const diferencia = round2(contado - efectivoEsperado);
   const hasCountedCash = String(form.efectivo_contado || '').trim() !== '';
@@ -367,111 +385,130 @@ function CashClosingModal({
 
   return (
     <>
-      <Modal open={open} onClose={onClose} maxWidthClass="max-w-xl" panelClassName="p-6">
-        <div className="space-y-5">
-          <div className="ui-modal-header">
-            <div className="ui-modal-header-copy">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="ui-panel-title">{step === 1 ? 'Cerrar caja' : 'Confirmar cierre'}</h3>
-                <StatusBadge tone={step === 1 ? 'default' : statusMeta.tone}>
-                  {step === 1 ? 'Paso 1 de 2' : 'Paso 2 de 2'}
-                </StatusBadge>
-              </div>
-              <p className="ui-panel-description">
-                {turnoLabel} · {turnoActual?.usuario_nombre || user?.nombre || 'Usuario no identificado'}
-              </p>
-            </div>
-            <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={onClose}>
-              X
-            </Button>
-          </div>
-
-          {errorMessage ? <Alert tone="error">{errorMessage}</Alert> : null}
-
-          {step === 1 ? (
-            <div className="space-y-4">
-              <div className="rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
-                <p className="text-sm font-semibold text-[var(--color-text)]">Resumen del turno</p>
-                <div className="mt-3 space-y-3">
-                  <ResultRow label="Saldo inicial" value={formatMoney(summary?.resumen_caja?.saldo_inicial || turnoActual?.fondo_inicial || 0)} />
-                  <ResultRow label="Ingresos efectivo" value={formatMoney(summary?.resumen_caja?.ingresos_efectivo || 0)} />
-                  <ResultRow label="Egresos efectivo" value={formatMoney(summary?.resumen_caja?.egresos_efectivo || 0)} />
-                  <ResultRow label="Efectivo esperado" value={formatMoney(efectivoEsperado)} tone="success" />
-                </div>
-              </div>
-
-              <div className={`rounded-[1.1rem] border p-4 ${
-                hasDifference
-                  ? statusMeta.tone === 'danger'
-                    ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger-soft)]'
-                    : 'border-[var(--color-warning)]/35 bg-[var(--color-warning-soft)]'
-                  : 'border-[var(--color-border)] bg-[var(--color-surface)]'
-              }`}>
+      <Modal open={open} onClose={onClose} maxWidthClass="max-w-xl" panelClassName="max-h-[90vh] p-0">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 sm:px-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-[var(--color-text)]">Conteo físico</p>
-                  <StatusBadge tone={statusMeta.tone}>
-                    {statusMeta.badgeLabel}
+                  <h3 className="ui-panel-title">{step === 1 ? 'Cerrar caja' : 'Confirmar cierre'}</h3>
+                  <StatusBadge tone={step === 1 ? 'default' : statusMeta.tone}>
+                    {step === 1 ? 'Paso 1 de 2' : 'Paso 2 de 2'}
                   </StatusBadge>
                 </div>
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Efectivo contado</label>
-                    <Input
-                      inputMode="decimal"
-                      min="0"
-                      max={MAX_CASH_OPERATION_AMOUNT}
-                      error={Boolean(errors.efectivo_contado)}
-                      placeholder="$0.00"
-                      value={form.efectivo_contado}
-                      onChange={(event) => onFormChange('efectivo_contado', sanitizeCashAmountInput(event.target.value))}
-                    />
-                    {errors.efectivo_contado ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.efectivo_contado}</p> : null}
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Observación {hasDifference ? '(obligatoria)' : '(opcional)'}</label>
-                    <Textarea
-                      rows={3}
-                      placeholder={hasDifference ? 'Describe el motivo de la diferencia detectada.' : 'Notas del cierre.'}
-                      value={form.observacion}
-                      onChange={(event) => onFormChange('observacion', event.target.value)}
-                    />
-                    {errors.observacion ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.observacion}</p> : null}
-                  </div>
-                </div>
+                <p className="ui-panel-description">
+                  {turnoLabel} · {turnoActual?.usuario_nombre || user?.nombre || 'Usuario no identificado'}
+                </p>
               </div>
+              <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain shrink-0" onClick={onClose}>
+                X
+              </Button>
+            </div>
+          </div>
 
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+            <div className="space-y-4 pb-1">
+              {errorMessage ? <Alert tone="error">{errorMessage}</Alert> : null}
+
+              {step === 1 ? (
+                <>
+                  <div className="rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+                    <p className="text-sm font-semibold text-[var(--color-text)]">Resumen del turno</p>
+                    <div className="mt-3 space-y-3">
+                      <ResultRow label="Apertura de caja" value={formatMoney(closeSummary.apertura)} />
+                      <ResultRow label="Ventas efectivo" value={formatMoney(closeSummary.ventas_efectivo)} />
+                      <ResultRow label="Cobros crédito efectivo" value={formatMoney(closeSummary.cobros_credito_efectivo)} />
+                      <ResultRow label="Ingresos manuales" value={formatMoney(closeSummary.ingresos_manuales)} />
+                      <ResultRow label="Egresos manuales" value={formatMoney(closeSummary.egresos_manuales)} />
+                      <ResultRow label="Ingresos efectivo" value={formatMoney(closeSummary.ingresos)} />
+                      <ResultRow label="Egresos efectivo" value={formatMoney(closeSummary.egresos)} />
+                      <ResultRow label="Transferencias" value={formatMoney(closeSummary.transferencias)} />
+                      <ResultRow label="Crédito" value={formatMoney(closeSummary.credito)} />
+                      <ResultRow label="Total vendido" value={formatMoney(closeSummary.total_vendido)} />
+                      <ResultRow label="Total cobrado" value={formatMoney(closeSummary.total_cobrado)} />
+                      <ResultRow label="Efectivo esperado" value={formatMoney(efectivoEsperado)} tone="success" />
+                    </div>
+                  </div>
+
+                  <div className={`rounded-[1.1rem] border p-4 ${
+                    hasDifference
+                      ? statusMeta.tone === 'danger'
+                        ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger-soft)]'
+                        : 'border-[var(--color-warning)]/35 bg-[var(--color-warning-soft)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-surface)]'
+                  }`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-[var(--color-text)]">Conteo físico</p>
+                      <StatusBadge tone={statusMeta.tone}>
+                        {statusMeta.badgeLabel}
+                      </StatusBadge>
+                    </div>
+                    <div className="mt-4 space-y-4">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Efectivo contado</label>
+                        <Input
+                          inputMode="decimal"
+                          min="0"
+                          max={MAX_CASH_OPERATION_AMOUNT}
+                          error={Boolean(errors.efectivo_contado)}
+                          placeholder="$0.00"
+                          value={form.efectivo_contado}
+                          onChange={(event) => onFormChange('efectivo_contado', sanitizeCashAmountInput(event.target.value))}
+                        />
+                        {errors.efectivo_contado ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.efectivo_contado}</p> : null}
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Observación {hasDifference ? '(obligatoria)' : '(opcional)'}</label>
+                        <Textarea
+                          rows={3}
+                          placeholder={hasDifference ? 'Describe el motivo de la diferencia detectada.' : 'Notas del cierre.'}
+                          value={form.observacion}
+                          onChange={(event) => onFormChange('observacion', event.target.value)}
+                        />
+                        {errors.observacion ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.observacion}</p> : null}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className={`rounded-[1.1rem] border p-4 ${
+                  statusMeta.tone === 'danger'
+                    ? 'border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)]'
+                    : statusMeta.tone === 'warning'
+                      ? 'border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)]'
+                      : 'border-[var(--color-success)]/20 bg-[var(--color-success-soft)]'
+                }`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge tone={statusMeta.tone}>{statusMeta.badgeLabel}</StatusBadge>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    <ResultRow label="Esperado" value={formatMoney(efectivoEsperado)} />
+                    <ResultRow label="Contado" value={formatMoney(contado)} />
+                    <ResultRow label="Diferencia" value={formatMoney(diferencia)} tone={statusMeta.tone} />
+                  </div>
+                  <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+                    {hasDifference ? 'Se detectó una diferencia en caja.' : 'Sin diferencias detectadas.'}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 sm:px-6">
+            {step === 1 ? (
               <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
                   Cancelar
+                </Button>
+                <Button type="button" variant="secondary" onClick={onPrint} disabled={loading}>
+                  Imprimir corte X
                 </Button>
                 <Button type="button" onClick={handleContinue} disabled={loading}>
                   Continuar
                 </Button>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className={`rounded-[1.1rem] border p-4 ${
-                statusMeta.tone === 'danger'
-                  ? 'border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)]'
-                  : statusMeta.tone === 'warning'
-                    ? 'border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)]'
-                    : 'border-[var(--color-success)]/20 bg-[var(--color-success-soft)]'
-              }`}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge tone={statusMeta.tone}>{statusMeta.badgeLabel}</StatusBadge>
-                </div>
-                <div className="mt-4 space-y-3">
-                  <ResultRow label="Esperado" value={formatMoney(efectivoEsperado)} />
-                  <ResultRow label="Contado" value={formatMoney(contado)} />
-                  <ResultRow label="Diferencia" value={formatMoney(diferencia)} tone={statusMeta.tone} />
-                </div>
-                <p className="mt-4 text-sm text-[var(--color-text-muted)]">
-                  {hasDifference ? 'Se detectó una diferencia en caja.' : 'Sin diferencias detectadas.'}
-                </p>
-              </div>
-
+            ) : (
               <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
                   Cancelar
@@ -480,8 +517,8 @@ function CashClosingModal({
                   {hasDifference ? 'Confirmar cierre con diferencia' : 'Confirmar cierre'}
                 </Button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </Modal>
 

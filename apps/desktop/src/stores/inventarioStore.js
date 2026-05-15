@@ -1,129 +1,163 @@
 import { create } from 'zustand';
 import apiClient, { normalizeResponse, parseApiError } from '../lib/apiClient';
 
-export const useInventarioStore = create((set) => ({
+const computeGlobalLoading = (state) => Boolean(
+  state.loadingDisponible
+  || state.loadingAlertas
+  || state.loadingConteos
+  || state.loadingMermas
+  || state.loadingMovimientos
+  || state.loadingOperacion
+);
+
+export const useInventarioStore = create((set, get) => ({
   disponible: [],
   alertas: [],
   conteos: [],
   mermas: [],
   movimientos: [],
   loading: false,
+  loadingDisponible: false,
+  loadingAlertas: false,
+  loadingConteos: false,
+  loadingMermas: false,
+  loadingMovimientos: false,
+  loadingOperacion: false,
   error: null,
+  setLoadingState: (partial) => set((state) => {
+    const next = { ...state, ...partial };
+    return {
+      ...partial,
+      loading: computeGlobalLoading(next)
+    };
+  }),
   cargarDisponible: async () => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingDisponible: true, error: null });
     try {
       const response = await apiClient.get('/api/inventario/disponible');
-      set({ disponible: normalizeResponse(response.data), loading: false });
+      get().setLoadingState({ disponible: normalizeResponse(response.data), loadingDisponible: false });
     } catch (error) {
-      set({ loading: false, error: parseApiError(error) });
+      get().setLoadingState({ loadingDisponible: false, error: parseApiError(error) });
     }
   },
   cargarAlertas: async () => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingAlertas: true, error: null });
     try {
       const response = await apiClient.get('/api/inventario/alertas');
-      set({ alertas: normalizeResponse(response.data), loading: false });
+      get().setLoadingState({ alertas: normalizeResponse(response.data), loadingAlertas: false });
     } catch (error) {
-      set({ loading: false, error: parseApiError(error) });
+      get().setLoadingState({ loadingAlertas: false, error: parseApiError(error) });
     }
   },
   cargarConteos: async () => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingConteos: true, error: null });
     try {
       const response = await apiClient.get('/api/inventario/conteos');
-      set({ conteos: normalizeResponse(response.data), loading: false });
+      get().setLoadingState({ conteos: normalizeResponse(response.data), loadingConteos: false });
     } catch (error) {
-      set({ loading: false, error: parseApiError(error) });
+      get().setLoadingState({ loadingConteos: false, error: parseApiError(error) });
     }
   },
   actualizarStockMinimo: async (id, stock_minimo) => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingOperacion: true, error: null });
     try {
       const response = await apiClient.patch(`/api/inventario/productos/${id}/stock-minimo`, { stock_minimo });
-      set({ loading: false });
+      get().setLoadingState({ loadingOperacion: false });
       return normalizeResponse(response.data);
     } catch (error) {
       const message = parseApiError(error);
-      set({ loading: false, error: message });
+      get().setLoadingState({ loadingOperacion: false, error: message });
       throw new Error(message);
     }
   },
   crearConteo: async (payload) => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingOperacion: true, error: null });
     try {
       const response = await apiClient.post('/api/inventario/conteos', payload);
-      set({ loading: false });
+      get().setLoadingState({ loadingOperacion: false });
       return normalizeResponse(response.data);
     } catch (error) {
       const message = parseApiError(error);
-      set({ loading: false, error: message });
+      get().setLoadingState({ loadingOperacion: false, error: message });
       throw new Error(message);
     }
   },
   aplicarConteo: async (id) => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingOperacion: true, error: null });
     try {
       const response = await apiClient.post(`/api/inventario/conteos/${id}/aplicar`);
-      set({ loading: false });
+      get().setLoadingState({ loadingOperacion: false });
       return normalizeResponse(response.data);
     } catch (error) {
       const message = parseApiError(error);
-      set({ loading: false, error: message });
+      get().setLoadingState({ loadingOperacion: false, error: message });
+      throw new Error(message);
+    }
+  },
+  cancelarConteo: async (id) => {
+    get().setLoadingState({ loadingOperacion: true, error: null });
+    try {
+      const response = await apiClient.post(`/api/inventario/conteos/${id}/cancelar`);
+      get().setLoadingState({ loadingOperacion: false });
+      return normalizeResponse(response.data);
+    } catch (error) {
+      const message = parseApiError(error);
+      get().setLoadingState({ loadingOperacion: false, error: message });
+      throw new Error(message);
+    }
+  },
+  obtenerConteoDetalle: async (id) => {
+    get().setLoadingState({ loadingOperacion: true, error: null });
+    try {
+      const response = await apiClient.get(`/api/inventario/conteos/${id}`);
+      get().setLoadingState({ loadingOperacion: false });
+      return normalizeResponse(response.data);
+    } catch (error) {
+      const message = parseApiError(error);
+      get().setLoadingState({ loadingOperacion: false, error: message });
       throw new Error(message);
     }
   },
   ajustesMasivo: async (payload) => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingOperacion: true, error: null });
     try {
       const response = await apiClient.post('/api/inventario/ajustes/masivo', payload);
-      set({ loading: false });
+      get().setLoadingState({ loadingOperacion: false });
       return normalizeResponse(response.data);
     } catch (error) {
       const message = parseApiError(error);
-      set({ loading: false, error: message });
+      get().setLoadingState({ loadingOperacion: false, error: message });
       throw new Error(message);
     }
   },
   cargarMermas: async () => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingMermas: true, error: null });
     try {
       const response = await apiClient.get('/api/inventario/mermas');
-      set({ mermas: normalizeResponse(response.data), loading: false });
+      get().setLoadingState({ mermas: normalizeResponse(response.data), loadingMermas: false });
     } catch (error) {
-      set({ loading: false, error: parseApiError(error) });
+      get().setLoadingState({ loadingMermas: false, error: parseApiError(error) });
     }
   },
   crearMerma: async (payload) => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingOperacion: true, error: null });
     try {
       const response = await apiClient.post('/api/inventario/mermas', payload);
-      set({ loading: false });
+      get().setLoadingState({ loadingOperacion: false });
       return normalizeResponse(response.data);
     } catch (error) {
       const message = parseApiError(error);
-      set({ loading: false, error: message });
+      get().setLoadingState({ loadingOperacion: false, error: message });
       throw new Error(message);
     }
   },
   cargarMovimientos: async () => {
-    set({ loading: true, error: null });
+    get().setLoadingState({ loadingMovimientos: true, error: null });
     try {
       const response = await apiClient.get('/api/inventario/movimientos');
-      set({ movimientos: normalizeResponse(response.data), loading: false });
+      get().setLoadingState({ movimientos: normalizeResponse(response.data), loadingMovimientos: false });
     } catch (error) {
-      set({ loading: false, error: parseApiError(error) });
-    }
-  },
-  actualizarProducto: async (id, payload) => {
-    set({ loading: true, error: null });
-    try {
-      const response = await apiClient.patch(`/api/productos/${id}`, payload);
-      set({ loading: false });
-      return normalizeResponse(response.data);
-    } catch (error) {
-      const message = parseApiError(error);
-      set({ loading: false, error: message });
-      throw new Error(message);
+      get().setLoadingState({ loadingMovimientos: false, error: parseApiError(error) });
     }
   }
 }));

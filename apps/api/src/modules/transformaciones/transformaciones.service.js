@@ -899,6 +899,49 @@ async function aplicarTransformacion(id, body, actorUser) {
   });
 }
 
+async function assertAnulacionSegura(transformacion, trx) {
+  if (!transformacion) throw new AppError(404, 'Transformación no encontrada');
+  if (transformacion.estado !== 'APLICADA') {
+    throw new AppError(400, 'Solo una transformación APLICADA puede anularse');
+  }
+
+  const resultados = await repository.getResultadosByTransformacionId(transformacion.id, trx);
+  const childIds = resultados.map((row) => row.producto_id);
+  const involvedIds = new Set([transformacion.insumo_producto_id, ...childIds]);
+
+  const originalMovements = await repository.listMovimientosByReferencias([`TRANSFORMACION:${transformacion.id}`], trx);
+  const maxOriginalMovementId = originalMovements.reduce(
+    (max, row) => Math.max(max, Number(row.id || 0)),
+    0
+  );
+
+  const hasLaterMovements = await repository.hasLaterInventoryMovements({
+    productIds: [...involvedIds],
+    afterDate: transformacion.fecha_aplicacion || transformacion.updated_at || transformacion.fecha,
+    afterMovementId: maxOriginalMovementId || null,
+    excludedReferences: [`TRANSFORMACION:${transformacion.id}`, `TRANSFORMACION_ANULACION:${transformacion.id}`]
+  }, trx);
+  if (hasLaterMovements) {
+    throw new AppError(400, 'No es seguro anular: existen movimientos posteriores sobre productos hijo');
+  }
+}
+
+async function resolveAnulacionDisponibilidad(transformacion, trx) {
+  if (!transformacion || transformacion.estado !== 'APLICADA') {
+    return { puede_anular: false, motivo_no_anulable: null };
+  }
+
+  try {
+    await assertAnulacionSegura(transformacion, trx);
+    return { puede_anular: true, motivo_no_anulable: null };
+  } catch (error) {
+    if (error instanceof AppError) {
+      return { puede_anular: false, motivo_no_anulable: error.message || 'No se puede anular de forma segura' };
+    }
+    throw error;
+  }
+}
+
 async function anularTransformacion(id, body, actorUser) {
   const parsed = cancelSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
@@ -919,29 +962,12 @@ async function anularTransformacion(id, body, actorUser) {
 
   return db.transaction(async (trx) => {
     const transformacion = await repository.getTransformacionById(id, trx);
-    if (!transformacion) throw new AppError(404, 'Transformación no encontrada');
-    if (transformacion.estado !== 'APLICADA') throw new AppError(400, 'Solo una transformación APLICADA puede anularse');
+    await assertAnulacionSegura(transformacion, trx);
 
     const resultados = await repository.getResultadosByTransformacionId(id, trx);
     const mermas = await repository.getMermasByTransformacionId(id, trx);
     const childIds = resultados.map((row) => row.producto_id);
     const involvedIds = new Set([transformacion.insumo_producto_id, ...childIds]);
-
-    const originalMovements = await repository.listMovimientosByReferencias([`TRANSFORMACION:${id}`], trx);
-    const maxOriginalMovementId = originalMovements.reduce(
-      (max, row) => Math.max(max, Number(row.id || 0)),
-      0
-    );
-
-    const hasLaterMovements = await repository.hasLaterInventoryMovements({
-      productIds: [...involvedIds],
-      afterDate: transformacion.fecha_aplicacion || transformacion.updated_at || transformacion.fecha,
-      afterMovementId: maxOriginalMovementId || null,
-      excludedReferences: [`TRANSFORMACION:${id}`, `TRANSFORMACION_ANULACION:${id}`]
-    }, trx);
-    if (hasLaterMovements) {
-      throw new AppError(400, 'No es seguro anular: existen movimientos posteriores sobre productos hijo');
-    }
 
     const products = await repository.getProductosByIds([...involvedIds], trx);
     const productsMap = new Map(products.map((row) => [row.id, normalizeProducto(row)]));
@@ -1077,7 +1103,9 @@ async function listTransformaciones(query = {}) {
   if (!parsed.success) throw new AppError(400, 'Filtros inválidos', zodError(parsed.error).details);
 
   const rows = await repository.listTransformaciones(parsed.data, db);
-  const data = rows.map((row) => ({
+  const data = await Promise.all(rows.map(async (row) => {
+    const anulacion = await resolveAnulacionDisponibilidad(row, db);
+    return {
     id: row.id,
     numero: row.numero,
     estado: row.estado,
@@ -1120,12 +1148,15 @@ async function listTransformaciones(query = {}) {
       total_merma: Number(row.merma_total || 0),
       total_consumido: Number(row.insumo_cantidad || 0)
     },
+    puede_anular: anulacion.puede_anular,
+    motivo_no_anulable: anulacion.motivo_no_anulable,
     acciones: {
       puede_editar: row.estado === 'BORRADOR',
       puede_aplicar: false,
       puede_aplicar_desde_detalle: row.estado === 'BORRADOR',
-      puede_anular: row.estado === 'APLICADA'
+      puede_anular: anulacion.puede_anular
     }
+  };
   }));
 
   return { ok: true, data };

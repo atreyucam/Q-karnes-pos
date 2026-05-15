@@ -27,6 +27,15 @@ async function conteos(req, res, next) {
   }
 }
 
+async function conteoDetalle(req, res, next) {
+  try {
+    const data = await service.conteoDetalle(Number(req.params.id));
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function stockMinimo(req, res, next) {
   try {
     const data = await service.updateStockMinimo(Number(req.params.id), req.body);
@@ -48,6 +57,15 @@ async function crearConteo(req, res, next) {
 async function aplicarConteo(req, res, next) {
   try {
     const data = await service.aplicarConteo(Number(req.params.id), req.user);
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function cancelarConteo(req, res, next) {
+  try {
+    const data = await service.cancelarConteo(Number(req.params.id), req.user);
     return res.json(data);
   } catch (error) {
     return next(error);
@@ -94,9 +112,11 @@ module.exports = {
   disponible,
   alertas,
   conteos,
+  conteoDetalle,
   stockMinimo,
   crearConteo,
   aplicarConteo,
+  cancelarConteo,
   ajustesMasivo,
   mermas,
   crearMerma,

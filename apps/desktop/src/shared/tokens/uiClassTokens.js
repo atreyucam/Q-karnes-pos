@@ -26,7 +26,7 @@ export const uiClassTokens = {
     empty: 'py-16 text-center'
   },
   button: {
-    base: 'relative inline-flex items-center justify-center whitespace-nowrap transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none disabled:transform-none',
+    base: 'relative inline-flex cursor-pointer items-center justify-center whitespace-nowrap transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none disabled:transform-none',
     primary: 'bg-[var(--color-primary)] text-[var(--color-text-inverse)] border border-[var(--color-primary)] shadow-sm hover:bg-[var(--color-primary-hover)] hover:border-[var(--color-primary-hover)] active:bg-[var(--color-primary-active)] active:border-[var(--color-primary-active)]',
     secondary: 'bg-[var(--color-surface-alt)] text-[var(--color-text)] border border-[var(--color-border)] hover:bg-[var(--color-hover)] hover:border-[var(--color-border-strong)] active:bg-[var(--color-surface-muted)] active:border-[var(--color-border-strong)]',
     neutral: 'bg-[var(--color-surface)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)] active:bg-[var(--color-surface-muted)] active:border-[var(--color-border-strong)]',
