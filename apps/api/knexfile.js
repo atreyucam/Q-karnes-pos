@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { resolveDbFilePath, ensureDbDirectory } = require('./src/config/dbFile');
 
 const SQLITE_PRAGMAS = [
@@ -22,10 +23,10 @@ function sqliteConfigFor(nodeEnv) {
     connection: { filename },
     useNullAsDefault: true,
     migrations: {
-      directory: './migrations'
+      directory: path.join(__dirname, 'migrations')
     },
     seeds: {
-      directory: './seeds'
+      directory: path.join(__dirname, 'seeds')
     },
     pool: {
       afterCreate: (conn, done) => {

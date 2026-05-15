@@ -5,9 +5,16 @@ const path = require('node:path');
 const REDACT_PATTERN = /pass|password|secret|token|authorization|cookie|jwt|key/i;
 
 function resolveDesktopLogDir() {
-  const mode = process.env.ELECTRON_RENDERER_MODE || 'development';
+  const mode = process.env.ELECTRON_RENDERER_MODE || (process.defaultApp ? 'development' : 'production');
   if (mode === 'production') {
-    const appData = process.env.LOCALAPPDATA || process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    let appData = null;
+    if (process.platform === 'win32') {
+      appData = process.env.LOCALAPPDATA || process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    } else if (process.platform === 'darwin') {
+      appData = path.join(os.homedir(), 'Library', 'Application Support');
+    } else {
+      appData = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+    }
     return path.join(appData, 'QKarnesPOS', 'logs');
   }
   return path.resolve(__dirname, '..', 'logs');
@@ -53,9 +60,13 @@ function createDesktopLogger(channel = 'desktop-runtime') {
     fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
 
     const summary = `[${payload.ts}] [${channel}] ${level.toUpperCase()} ${event} ${message}`;
-    if (level === 'error' || level === 'critical') console.error(summary);
-    else if (level === 'warn') console.warn(summary);
-    else console.log(summary);
+    try {
+      if (level === 'error' || level === 'critical') console.error(summary);
+      else if (level === 'warn') console.warn(summary);
+      else console.log(summary);
+    } catch (_) {
+      // En apps empaquetadas stdout/stderr puede no estar disponible.
+    }
   }
 
   return {

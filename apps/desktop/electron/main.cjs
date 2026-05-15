@@ -1,6 +1,7 @@
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { startEmbeddedApi } = require('./api-runtime.cjs');
 const { createDesktopLogger, resolveDesktopLogDir } = require('./logger.cjs');
 
 const rendererMode = process.env.ELECTRON_RENDERER_MODE
@@ -9,6 +10,7 @@ const isDev = rendererMode !== 'production';
 const DEV_ORIGIN = process.env.ELECTRON_DEV_URL || 'http://127.0.0.1:5173';
 const DIST_INDEX = path.join(__dirname, '..', 'dist', 'index.html');
 const desktopLogger = createDesktopLogger('desktop-runtime');
+let apiRuntime = null;
 
 function isAllowedNavigation(url) {
   if (isDev) return url.startsWith(DEV_ORIGIN);
@@ -25,6 +27,7 @@ function createWindow() {
     width: 1280,
     height: 800,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -74,11 +77,25 @@ process.on('unhandledRejection', (reason) => {
 });
 
 app.whenReady().then(() => {
-  desktopLogger.info('desktop_ready', 'Electron listo', {
-    rendererMode,
-    logDir: resolveDesktopLogDir()
-  });
-  createWindow();
+  return (async () => {
+    desktopLogger.info('desktop_ready', 'Electron listo', {
+      rendererMode,
+      logDir: resolveDesktopLogDir()
+    });
+
+    if (!isDev) {
+      apiRuntime = await startEmbeddedApi();
+      desktopLogger.info('desktop_api_ready', 'API embebida lista', {
+        apiRoot: apiRuntime.apiRoot,
+        apiPort: apiRuntime.apiPort
+      });
+    }
+
+    createWindow();
+  })();
+}).catch((error) => {
+  desktopLogger.critical('desktop_boot_fail', 'Fallo inicializando aplicación desktop', { error });
+  app.quit();
 });
 
 app.on('window-all-closed', () => {
@@ -91,4 +108,19 @@ app.on('activate', () => {
     openWindows: BrowserWindow.getAllWindows().length
   });
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+
+app.on('before-quit', (event) => {
+  if (!apiRuntime) return;
+
+  event.preventDefault();
+  const closeRuntime = apiRuntime;
+  apiRuntime = null;
+  closeRuntime.close()
+    .catch((error) => {
+      desktopLogger.error('desktop_api_close_fail', 'No se pudo cerrar API embebida', { error });
+    })
+    .finally(() => {
+      app.quit();
+    });
 });

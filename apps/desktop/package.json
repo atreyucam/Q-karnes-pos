@@ -10,6 +10,8 @@
     "electron:dev": "node electron/dev.cjs",
     "electron:prod": "node electron/run-prod.cjs",
     "electron": "npm run electron:prod",
+    "prepare:packaging": "node scripts/prepare-packaging.cjs",
+    "restore:node-deps": "npm rebuild better-sqlite3",
     "test:modulo2:frontend": "node scripts/modulo2-compras-inventario-frontend-tests.cjs",
     "test:bloque6": "node scripts/bloque6-frontend-tests.cjs",
     "test:ux-regression": "npm run build && npm run test:bloque6",
@@ -23,28 +25,37 @@
     "test:auditoria": "node scripts/auditoria-frontend-tests.cjs",
     "test:ticket": "node scripts/ticket-print-tests.cjs",
     "test:dashboard:v2": "node scripts/dashboard-v2-frontend-tests.cjs",
-    "dist:win64": "npm run build && electron-builder --win nsis --x64",
-    "dist:win32": "npm run build && electron-builder --win nsis --ia32",
-    "dist:win:all": "npm run build && electron-builder --win nsis --x64 --ia32",
+    "dist:win64": "node scripts/package-installer.cjs --win nsis --x64",
+    "dist:win32": "node scripts/package-installer.cjs --win nsis --ia32",
+    "dist:win:all": "node scripts/package-installer.cjs --win nsis --x64 --ia32",
+    "dist:deb": "node scripts/package-installer.cjs --linux deb",
     "test:design-system": "node scripts/design-system-playwright.cjs"
   },
   "dependencies": {
     "apexcharts": "^5.4.0",
     "axios": "^1.8.1",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^12.10.0",
     "clsx": "^2.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "knex": "^3.1.0",
     "react": "^19.0.0",
     "react-apexcharts": "^1.9.0",
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
     "react-router-dom": "^7.1.5",
     "recharts": "^2.15.4",
+    "zod": "^3.24.1",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.8",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.20",
-    "electron": "34.0.1",
+    "electron": "41.6.1",
     "electron-builder": "^26.8.1",
     "playwright-core": "^1.59.1",
     "postcss": "^8.5.1",
@@ -52,7 +63,11 @@
     "vite": "^6.1.0"
   },
   "description": "Q Karnes POS desktop app",
-  "author": "Q Karnes",
+  "author": {
+    "name": "Q Karnes",
+    "email": "camachoalex1k@gamil.com"
+  },
+  "homepage": "https://qkarnes.local",
   "build": {
     "appId": "com.qkarnes.pos",
     "productName": "Q Karnes POS",
@@ -62,6 +77,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      ".app-bundle/**/*",
       "package.json"
     ],
     "asar": true,
@@ -70,6 +86,14 @@
         "nsis"
       ],
       "artifactName": "${productName} Setup ${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "category": "Office",
+      "maintainer": "Q Karnes <camachoalex1k@gamil.com>",
+      "artifactName": "${productName}_${version}_${arch}.${ext}"
     },
     "nsis": {
       "allowToChangeInstallationDirectory": true,

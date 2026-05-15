@@ -9,6 +9,8 @@ apps/desktop/logs/
 apps/desktop/dist/
 apps/desktop/dist-electron/
 apps/desktop/.vite/
+apps/desktop/.app-bundle/
+apps/desktop/release*/
 .env
 docs/
 apps/api/data/test-runs/

@@ -87,9 +87,13 @@ function createLogger(options = {}) {
     fs.appendFileSync(filePath, toJsonLine(payload), { encoding: 'utf8' });
 
     const summary = `[${payload.ts}] [${channel}] ${level.toUpperCase()} ${event} ${payload.message}`;
-    if (level === 'error' || level === 'critical') console.error(summary);
-    else if (level === 'warn') console.warn(summary);
-    else console.log(summary);
+    try {
+      if (level === 'error' || level === 'critical') console.error(summary);
+      else if (level === 'warn') console.warn(summary);
+      else console.log(summary);
+    } catch (_) {
+      // En apps empaquetadas stdout/stderr puede cerrarse antes que el proceso.
+    }
   }
 
   return {
