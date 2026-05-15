@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PiArrowsClockwise, PiCheckCircle, PiClipboardText, PiPackage, PiPencilSimple, PiWarningCircle, PiWaves } from 'react-icons/pi';
-import { useSearchParams } from 'react-router-dom';
+import { PiArrowsClockwise, PiCheckCircle, PiClipboardText, PiPackage, PiWarningCircle, PiWaves } from 'react-icons/pi';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { parseApiError } from '../../lib/apiClient';
 import {
   Alert,
@@ -17,6 +17,7 @@ import {
   PageHeader,
   Paginador,
   Select,
+  StatusBadge,
   Tabs,
   TableActions,
   TableActionButton,
@@ -35,7 +36,7 @@ import { fetchCategorias } from '../../services/catalogoService';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 
 const PAGE_SIZE = GLOBAL_PAGE_SIZE;
-const MODAL_PAGE_SIZE = GLOBAL_PAGE_SIZE;
+const MODAL_PAGE_SIZE = 10;
 
 function formatInventoryQty(value, unidad, options = {}) {
   const unit = getUnidad(unidad);
@@ -55,6 +56,28 @@ function getInventoryValue(row) {
     return Number(row.valor_inventario_centavos || 0) / 100;
   }
   return Number(row?.stock_actual || 0) * Number(row?.costo_promedio || 0);
+}
+
+function formatSignedCurrency(value) {
+  const amount = Number(value || 0);
+  if (amount > 0) return `+${formatCurrency(amount)}`;
+  if (amount < 0) return `-${formatCurrency(Math.abs(amount))}`;
+  return formatCurrency(0);
+}
+
+function formatSignedQty(value, unidad) {
+  const amount = Number(value || 0);
+  const formatted = formatInventoryQty(Math.abs(amount), unidad, { appendUnit: true });
+  if (amount > 0) return `+${formatted}`;
+  if (amount < 0) return `-${formatted}`;
+  return `0 ${getUnidad(unidad)}`;
+}
+
+function getSignedTextClass(value, { money = false } = {}) {
+  const amount = Number(value || 0);
+  if (amount > 0) return 'text-emerald-700 font-semibold';
+  if (amount < 0) return 'text-red-700 font-semibold';
+  return money ? 'text-slate-700 font-medium' : 'text-slate-700 font-medium';
 }
 
 function hasInventoryAlert(row) {
@@ -105,8 +128,8 @@ function InventoryActionModal({
   loading
 }) {
   return (
-    <Modal open={open} onClose={onClose} maxWidthClass="max-w-5xl" panelClassName="p-5">
-      <div className="space-y-4">
+    <Modal open={open} onClose={onClose} maxWidthClass="max-w-5xl" panelClassName="p-5 sm:max-h-[calc(100dvh-2rem)]">
+      <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="ui-panel-title">{title}</h3>
@@ -116,8 +139,10 @@ function InventoryActionModal({
             X
           </Button>
         </div>
-        <div className="space-y-4">{children}</div>
-        <div className="flex justify-end gap-2">
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="space-y-4 pb-2">{children}</div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose} disabled={loading}>
             Cancelar
           </Button>
@@ -209,12 +234,15 @@ export default function InventarioPage() {
     cargarMovimientos,
     crearConteo,
     aplicarConteo,
+    cancelarConteo,
+    obtenerConteoDetalle,
     ajustesMasivo,
     crearMerma,
-    actualizarProducto
+    actualizarStockMinimo
   } = useInventarioStore();
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const alertaQuery = String(searchParams.get('alerta') || '').toLowerCase();
   const initialAlertaFiltro = alertaQuery === 'sin_stock' || alertaQuery === 'bajo_minimo'
     ? alertaQuery
@@ -227,13 +255,15 @@ export default function InventarioPage() {
   const [tab, setTab] = useState('stock');
   const [pagina, setPagina] = useState(1);
 
-  const [productoEdit, setProductoEdit] = useState(null);
-  const [editForm, setEditForm] = useState({ nombre: '', stock_minimo: '', activo: true, categoria_id: '' });
+  const [productoDetalle, setProductoDetalle] = useState(null);
+  const [stockMinimoDraft, setStockMinimoDraft] = useState('');
 
   const [showConteoModal, setShowConteoModal] = useState(false);
   const [showAjusteModal, setShowAjusteModal] = useState(false);
   const [showMermaModal, setShowMermaModal] = useState(false);
   const [conteoPendiente, setConteoPendiente] = useState(null);
+  const [conteoCancelPendiente, setConteoCancelPendiente] = useState(null);
+  const [conteoDetalle, setConteoDetalle] = useState(null);
 
   const [conteoForm, setConteoForm] = useState({
     producto_id: '',
@@ -318,7 +348,21 @@ export default function InventarioPage() {
   }, [conteoForm.stock_conteo, conteoProducto]);
 
   const isConteoPositivo = conteoDelta > 0;
+  const hasConteoIngresado = conteoForm.stock_conteo !== '';
   const isAjustePositivo = ajusteForm.tipo === 'ENTRADA';
+  const conteoCostoUsado = useMemo(() => {
+    if (!conteoProducto || !hasConteoIngresado) return null;
+    const promedio = Number(conteoProducto.costo_promedio || 0);
+    if (conteoDelta > 0 && conteoForm.costo_origen_tipo === 'MANUAL') {
+      const manual = Number(String(conteoForm.costo_unitario_manual || '').replace(',', '.'));
+      return Number.isFinite(manual) && manual > 0 ? manual : null;
+    }
+    return promedio;
+  }, [conteoProducto, conteoDelta, conteoForm.costo_origen_tipo, conteoForm.costo_unitario_manual, hasConteoIngresado]);
+  const conteoImpactoProyectado = useMemo(() => {
+    if (!conteoProducto || !hasConteoIngresado || conteoCostoUsado == null) return null;
+    return Number(conteoDelta || 0) * Number(conteoCostoUsado || 0);
+  }, [conteoProducto, hasConteoIngresado, conteoCostoUsado, conteoDelta]);
 
   const conteoProductosFiltrados = useMemo(() => filterProductosCatalogo(productoOpciones, conteoSearch), [productoOpciones, conteoSearch]);
   const ajusteProductosFiltrados = useMemo(() => filterProductosCatalogo(productoOpciones, ajusteSearch), [productoOpciones, ajusteSearch]);
@@ -329,6 +373,24 @@ export default function InventarioPage() {
   const conteoPickerTotal = Math.max(1, Math.ceil(conteoProductosFiltrados.length / MODAL_PAGE_SIZE));
   const ajustePickerTotal = Math.max(1, Math.ceil(ajusteProductosFiltrados.length / MODAL_PAGE_SIZE));
   const mermaPickerTotal = Math.max(1, Math.ceil(mermaProductosFiltrados.length / MODAL_PAGE_SIZE));
+
+  useEffect(() => {
+    if (conteoPickerPage > conteoPickerTotal) {
+      setConteoPickerPage(conteoPickerTotal);
+    }
+  }, [conteoPickerPage, conteoPickerTotal]);
+
+  useEffect(() => {
+    if (ajustePickerPage > ajustePickerTotal) {
+      setAjustePickerPage(ajustePickerTotal);
+    }
+  }, [ajustePickerPage, ajustePickerTotal]);
+
+  useEffect(() => {
+    if (mermaPickerPage > mermaPickerTotal) {
+      setMermaPickerPage(mermaPickerTotal);
+    }
+  }, [mermaPickerPage, mermaPickerTotal]);
 
   const ajustesRows = useMemo(
     () => (movimientos || []).filter((row) => String(row.tipo || '').toUpperCase() === 'AJUSTE'),
@@ -382,9 +444,9 @@ export default function InventarioPage() {
     mermas: 'La merma descuenta stock y valor del inventario.'
   };
 
-  const resetProductEdit = () => {
-    setProductoEdit(null);
-    setEditForm({ nombre: '', stock_minimo: '', activo: true, categoria_id: '' });
+  const resetProductoDetalle = () => {
+    setProductoDetalle(null);
+    setStockMinimoDraft('');
   };
 
   const resetConteoModal = () => {
@@ -422,26 +484,17 @@ export default function InventarioPage() {
     setMermaPickerPage(1);
   };
 
-  const onGuardarProducto = async () => {
+  const onGuardarStockMinimo = async () => {
     setFormError('');
-    if (!productoEdit) return;
-    if (!String(editForm.nombre || '').trim()) {
-      setFormError('El nombre del producto es obligatorio.');
-      return;
-    }
-    if (editForm.stock_minimo === '' || Number(editForm.stock_minimo) < 0) {
+    if (!productoDetalle) return;
+    if (stockMinimoDraft === '' || Number(stockMinimoDraft) < 0) {
       setFormError('El stock mínimo debe ser mayor o igual a 0.');
       return;
     }
 
-    await actualizarProducto(productoEdit.id, {
-      nombre: editForm.nombre.trim(),
-      stock_minimo: Number(editForm.stock_minimo || 0),
-      activo: editForm.activo,
-      categoria_id: editForm.categoria_id ? Number(editForm.categoria_id) : null
-    });
+    await actualizarStockMinimo(productoDetalle.id, Number(stockMinimoDraft || 0));
 
-    resetProductEdit();
+    resetProductoDetalle();
     await Promise.all([cargarDisponible(), cargarAlertas()]);
   };
 
@@ -486,6 +539,31 @@ export default function InventarioPage() {
     setFormError('');
     await aplicarConteo(Number(conteoPendiente.id));
     setConteoPendiente(null);
+    await Promise.all([cargarConteos(), cargarDisponible(), cargarMovimientos(), cargarAlertas()]);
+  };
+
+  const onVerConteo = async (row) => {
+    setFormError('');
+    const response = await obtenerConteoDetalle(Number(row.id));
+    setConteoDetalle(response);
+  };
+
+  const onAplicarDesdeDetalle = async () => {
+    if (!conteoDetalle?.conteo?.id) return;
+    setFormError('');
+    await aplicarConteo(Number(conteoDetalle.conteo.id));
+    setConteoDetalle(null);
+    await Promise.all([cargarConteos(), cargarDisponible(), cargarMovimientos(), cargarAlertas()]);
+  };
+
+  const onConfirmarCancelarConteo = async () => {
+    if (!conteoCancelPendiente?.id) return;
+    setFormError('');
+    await cancelarConteo(Number(conteoCancelPendiente.id));
+    setConteoCancelPendiente(null);
+    if (conteoDetalle?.conteo?.id && Number(conteoDetalle.conteo.id) === Number(conteoCancelPendiente.id)) {
+      setConteoDetalle(null);
+    }
     await Promise.all([cargarConteos(), cargarDisponible(), cargarMovimientos(), cargarAlertas()]);
   };
 
@@ -695,7 +773,7 @@ export default function InventarioPage() {
                   <TablaCelda as="th">Origen</TablaCelda>
                   <TablaCelda as="th" className="text-right">Cantidad</TablaCelda>
                   <TablaCelda as="th" className="text-right">Saldo resultante</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Costo usado</TablaCelda>
                   <TablaCelda as="th" className="text-right">Total visible</TablaCelda>
                 </>
               )}
@@ -705,9 +783,8 @@ export default function InventarioPage() {
                   <TablaCelda as="th">Fecha</TablaCelda>
                   <TablaCelda as="th">Estado</TablaCelda>
                   <TablaCelda as="th">Usuario</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Items</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Dif. total</TablaCelda>
-                  <TablaCelda as="th">Observación</TablaCelda>
+                  <TablaCelda as="th">Item</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Diferencia</TablaCelda>
                   <TablaCelda as="th" className="text-right">Acciones</TablaCelda>
                 </>
               )}
@@ -717,7 +794,7 @@ export default function InventarioPage() {
                   <TablaCelda as="th">Producto</TablaCelda>
                   <TablaCelda as="th">Referencia</TablaCelda>
                   <TablaCelda as="th" className="text-right">Cantidad</TablaCelda>
-                  <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Costo usado</TablaCelda>
                   <TablaCelda as="th" className="text-right">Total visible</TablaCelda>
                 </>
               )}
@@ -734,7 +811,7 @@ export default function InventarioPage() {
           <TablaCuerpo>
             {pagedRows.length === 0 && (
               <TablaFila>
-                <TablaCelda colSpan={tab === 'stock' ? 7 : tab === 'movimientos' ? 8 : tab === 'conteos' ? 8 : tab === 'ajustes' ? 6 : 4}>
+                <TablaCelda colSpan={tab === 'stock' ? 7 : tab === 'movimientos' ? 8 : tab === 'conteos' ? 7 : tab === 'ajustes' ? 6 : 4}>
                   <EmptyState title="Sin registros" description="No hay datos para la vista actual." />
                 </TablaCelda>
               </TablaFila>
@@ -771,21 +848,15 @@ export default function InventarioPage() {
                     <TablaCelda>
                       <TableActions>
                         <TableActionButton
-                          variant="edit"
-                          icon={<PiPencilSimple />}
-                          aria-label={`Editar ${row.nombre}`}
-                          title="Editar producto"
+                          variant="secondary"
+                          aria-label={`Ver detalle de ${row.nombre}`}
+                          title="Ver detalle"
                           onClick={() => {
-                            setProductoEdit(row);
-                            setEditForm({
-                              nombre: row.nombre || '',
-                              stock_minimo: String(row.stock_minimo ?? ''),
-                              activo: Boolean(row.activo),
-                              categoria_id: String(row.categoria_id || '')
-                            });
+                            setProductoDetalle(row);
+                            setStockMinimoDraft(String(row.stock_minimo ?? '0'));
                           }}
                         >
-                          Editar
+                          Ver detalle
                         </TableActionButton>
                       </TableActions>
                     </TablaCelda>
@@ -798,8 +869,10 @@ export default function InventarioPage() {
                     <TablaCelda> {row.producto_nombre}</TablaCelda>
                     <TablaCelda><TipoBadge tipo={row.tipo} /></TablaCelda>
                     <TablaCelda>{resolveOrigenLabel(row)}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                      {formatInventoryQty(Number(row.cantidad || 0) * Number(row.signo || 1), row.unidad_medida, { appendUnit: true })}
+                    <TablaCelda className="text-right">
+                      <span className={getSignedTextClass(Number(row.cantidad || 0) * Number(row.signo || 1))}>
+                        {formatSignedQty(Number(row.cantidad || 0) * Number(row.signo || 1), row.unidad_medida)}
+                      </span>
                     </TablaCelda>
                     <TablaCelda className="text-right">
                       {row.saldo_resultante === null || row.saldo_resultante === undefined
@@ -807,7 +880,15 @@ export default function InventarioPage() {
                         : formatInventoryQty(row.saldo_resultante, row.unidad_medida, { appendUnit: true })}
                     </TablaCelda>
                     <TablaCelda className="text-right">{row.costo_unitario == null ? '-' : formatCurrency(row.costo_unitario)}</TablaCelda>
-                    <TablaCelda className="text-right">{row.costo_total == null ? '-' : formatCurrency(row.costo_total)}</TablaCelda>
+                    <TablaCelda className="text-right">
+                      {row.costo_total == null
+                        ? '-'
+                        : (
+                          <span className={getSignedTextClass(Number(row.costo_total || 0) * Number(row.signo || 1), { money: true })}>
+                            {formatSignedCurrency(Number(row.costo_total || 0) * Number(row.signo || 1))}
+                          </span>
+                        )}
+                    </TablaCelda>
                   </>
                 )}
 
@@ -815,26 +896,51 @@ export default function InventarioPage() {
                   <>
                     <TablaCelda className="font-semibold text-[var(--color-text)]">#{row.id}</TablaCelda>
                     <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
-                    <TablaCelda>{row.estado}</TablaCelda>
+                    <TablaCelda>
+                      <StatusBadge status={row.estado} />
+                    </TablaCelda>
                     <TablaCelda>{row.usuario_nombre || '-'}</TablaCelda>
-                    <TablaCelda className="text-right">{formatNumber(row.items_count)}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">{formatNumber(row.diferencia_total)}</TablaCelda>
-                    <TablaCelda>{row.observacion || '-'}</TablaCelda>
+                    <TablaCelda>
+                      {row.item_nombre || '-'}
+                      {Number(row.items_count || 0) > 1 ? ` (+${Number(row.items_count) - 1})` : ''}
+                    </TablaCelda>
+                    <TablaCelda className="text-right">
+                      <span className={getSignedTextClass(row.diferencia_neta)}>
+                        {formatSignedQty(row.diferencia_neta, row.item_unidad || 'UND')}
+                      </span>
+                    </TablaCelda>
                     <TablaCelda>
                       <TableActions>
+                        <TableActionButton
+                          variant="secondary"
+                          icon={<PiClipboardText />}
+                          aria-label={`Ver conteo ${row.id}`}
+                          title="Ver detalle"
+                          onClick={() => onVerConteo(row)}
+                        >
+                          Ver
+                        </TableActionButton>
                         {row.estado === 'BORRADOR' ? (
-                          <TableActionButton
-                            variant="primary"
-                            icon={<PiCheckCircle />}
-                            aria-label={`Aplicar conteo ${row.id}`}
-                            title="Aplicar conteo"
-                            onClick={() => setConteoPendiente(row)}
-                          >
-                            Aplicar
-                          </TableActionButton>
-                        ) : (
-                          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Aplicado</span>
-                        )}
+                          <>
+                            <TableActionButton
+                              variant="primary"
+                              icon={<PiCheckCircle />}
+                              aria-label={`Aplicar conteo ${row.id}`}
+                              title="Aplicar conteo"
+                              onClick={() => setConteoPendiente(row)}
+                            >
+                              Aplicar
+                            </TableActionButton>
+                            <TableActionButton
+                              variant="danger"
+                              aria-label={`Cancelar conteo ${row.id}`}
+                              title="Cancelar conteo"
+                              onClick={() => setConteoCancelPendiente(row)}
+                            >
+                              Cancelar
+                            </TableActionButton>
+                          </>
+                        ) : null}
                       </TableActions>
                     </TablaCelda>
                   </>
@@ -845,11 +951,21 @@ export default function InventarioPage() {
                     <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
                     <TablaCelda> {row.producto_nombre}</TablaCelda>
                     <TablaCelda>{row.referencia || resolveOrigenLabel(row)}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                      {formatInventoryQty(Number(row.cantidad || 0) * Number(row.signo || 1), row.unidad_medida, { appendUnit: true })}
+                    <TablaCelda className="text-right">
+                      <span className={getSignedTextClass(Number(row.cantidad || 0) * Number(row.signo || 1))}>
+                        {formatSignedQty(Number(row.cantidad || 0) * Number(row.signo || 1), row.unidad_medida)}
+                      </span>
                     </TablaCelda>
                     <TablaCelda className="text-right">{row.costo_unitario == null ? '-' : formatCurrency(row.costo_unitario)}</TablaCelda>
-                    <TablaCelda className="text-right">{row.costo_total == null ? '-' : formatCurrency(row.costo_total)}</TablaCelda>
+                    <TablaCelda className="text-right">
+                      {row.costo_total == null
+                        ? '-'
+                        : (
+                          <span className={getSignedTextClass(Number(row.costo_total || 0) * Number(row.signo || 1), { money: true })}>
+                            {formatSignedCurrency(Number(row.costo_total || 0) * Number(row.signo || 1))}
+                          </span>
+                        )}
+                    </TablaCelda>
                   </>
                 )}
 
@@ -857,8 +973,10 @@ export default function InventarioPage() {
                   <>
                     <TablaCelda>{formatDateQuito(row.fecha)}</TablaCelda>
                     <TablaCelda>{row.producto_codigo} - {row.producto_nombre}</TablaCelda>
-                    <TablaCelda className="text-right font-semibold text-[var(--color-text)]">
-                      {formatInventoryQty(row.cantidad, row.unidad_medida, { appendUnit: true })}
+                    <TablaCelda className="text-right">
+                      <span className={getSignedTextClass(-Math.abs(Number(row.cantidad || 0)))}>
+                        {formatSignedQty(-Math.abs(Number(row.cantidad || 0)), row.unidad_medida)}
+                      </span>
                     </TablaCelda>
                     <TablaCelda>{row.motivo}</TablaCelda>
                   </>
@@ -909,12 +1027,39 @@ export default function InventarioPage() {
         </div>
         {conteoProducto && (
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
-            <p className="font-semibold text-[var(--color-text)]">
-              Stock sistema: {formatInventoryQty(conteoProducto.stock_actual, conteoProducto.unidad_medida || conteoProducto.unidad, { appendUnit: true })}
-            </p>
-            <p className="text-[var(--color-text-muted)]">
-              Diferencia proyectada: {formatInventoryQty(conteoDelta, conteoProducto.unidad_medida || conteoProducto.unidad, { appendUnit: true })}
-            </p>
+            {!hasConteoIngresado ? (
+              <p className="text-[var(--color-text-muted)]">Ingrese el stock contado para calcular la diferencia.</p>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                <p className="text-[var(--color-text-muted)]">
+                  Stock sistema: <span className="font-semibold text-[var(--color-text)]">{formatInventoryQty(conteoProducto.stock_actual, conteoProducto.unidad_medida || conteoProducto.unidad, { appendUnit: true })}</span>
+                </p>
+                <p className="text-[var(--color-text-muted)]">
+                  Stock contado: <span className="font-semibold text-[var(--color-text)]">{formatInventoryQty(conteoForm.stock_conteo, conteoProducto.unidad_medida || conteoProducto.unidad, { appendUnit: true })}</span>
+                </p>
+                <p className="text-[var(--color-text-muted)]">
+                  Diferencia proyectada:{' '}
+                  <span className={getSignedTextClass(conteoDelta)}>
+                    {formatSignedQty(conteoDelta, conteoProducto.unidad_medida || conteoProducto.unidad)}
+                  </span>
+                </p>
+                <p className="text-[var(--color-text-muted)]">
+                  Costo usado: <span className="font-semibold text-[var(--color-text)]">{conteoCostoUsado == null ? '-' : formatCurrency(conteoCostoUsado)}</span>
+                </p>
+                <p className="text-[var(--color-text-muted)]">
+                  Impacto estimado en valor:{' '}
+                  {conteoImpactoProyectado == null
+                    ? <span className="text-slate-700 font-medium">-</span>
+                    : <span className={getSignedTextClass(conteoImpactoProyectado, { money: true })}>{formatSignedCurrency(conteoImpactoProyectado)}</span>}
+                </p>
+                <p className="text-[var(--color-text-muted)]">
+                  Nuevo stock estimado: <span className="font-semibold text-[var(--color-text)]">{formatInventoryQty(conteoProducto.stock_actual + conteoDelta, conteoProducto.unidad_medida || conteoProducto.unidad, { appendUnit: true })}</span>
+                </p>
+                {Number(conteoDelta || 0) === 0 && (
+                  <p className="md:col-span-2 text-[var(--color-text-muted)]">No habrá impacto en inventario para este conteo.</p>
+                )}
+              </div>
+            )}
           </div>
         )}
         {isConteoPositivo && (
@@ -1065,6 +1210,88 @@ export default function InventarioPage() {
         </div>
       </InventoryActionModal>
 
+      <Modal open={Boolean(conteoDetalle)} onClose={() => setConteoDetalle(null)} maxWidthClass="max-w-5xl" panelClassName="p-5">
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="ui-panel-title">Detalle de conteo #{conteoDetalle?.conteo?.id || ''}</h3>
+              <p className="ui-panel-description">
+                Estado: {conteoDetalle?.conteo?.estado || '-'}
+              </p>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setConteoDetalle(null)}>
+              X
+            </Button>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-[var(--color-border)]">
+            <Tabla>
+              <TablaCabecera>
+                <tr>
+                  <TablaCelda as="th">Producto</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Stock sistema</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Stock conteo</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Diferencia</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Costo usado</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Impacto valor</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Valor antes</TablaCelda>
+                  <TablaCelda as="th" className="text-right">Valor después</TablaCelda>
+                  <TablaCelda as="th">Política</TablaCelda>
+                </tr>
+              </TablaCabecera>
+              <TablaCuerpo>
+                {(conteoDetalle?.detalle || []).map((item) => (
+                  <TablaFila key={item.id}>
+                    <TablaCelda>{item.producto_codigo} - {item.producto_nombre}</TablaCelda>
+                    <TablaCelda className="text-right">{formatInventoryQty(item.stock_sistema, item.unidad_medida, { appendUnit: true })}</TablaCelda>
+                    <TablaCelda className="text-right">{formatInventoryQty(item.stock_conteo, item.unidad_medida, { appendUnit: true })}</TablaCelda>
+                    <TablaCelda className="text-right">
+                      <span className={getSignedTextClass(item.diferencia)}>
+                        {formatSignedQty(item.diferencia, item.unidad_medida)}
+                      </span>
+                    </TablaCelda>
+                    <TablaCelda className="text-right">{item.costo_usado == null ? '-' : formatCurrency(item.costo_usado)}</TablaCelda>
+                    <TablaCelda className="text-right">
+                      {item.impacto_valor == null
+                        ? '-'
+                        : (
+                          <span className={getSignedTextClass(item.impacto_valor, { money: true })}>
+                            {formatSignedCurrency(item.impacto_valor)}
+                          </span>
+                        )}
+                    </TablaCelda>
+                    <TablaCelda className="text-right">{item.valor_antes == null ? '-' : formatCurrency(item.valor_antes)}</TablaCelda>
+                    <TablaCelda className="text-right">{item.valor_despues == null ? '-' : formatCurrency(item.valor_despues)}</TablaCelda>
+                    <TablaCelda>
+                      {item.costo_origen_tipo}
+                      {item.costo_origen_tipo === 'MANUAL' && Number(item.costo_unitario_manual || 0) > 0
+                        ? ` (${formatCurrency(item.costo_unitario_manual)})`
+                        : ''}
+                    </TablaCelda>
+                  </TablaFila>
+                ))}
+              </TablaCuerpo>
+            </Tabla>
+          </div>
+
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-3 text-sm">
+            <p className="font-semibold text-[var(--color-text)]">Observación</p>
+            <p className="text-[var(--color-text-muted)]">{conteoDetalle?.conteo?.observacion || 'Sin observación'}</p>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConteoDetalle(null)} disabled={loading}>
+              Cerrar
+            </Button>
+            {conteoDetalle?.conteo?.estado === 'BORRADOR' && (
+              <Button variant="primary" onClick={onAplicarDesdeDetalle} disabled={loading}>
+                {loading ? 'Procesando...' : 'Aplicar conteo'}
+              </Button>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       <ConfirmDialog
         open={Boolean(conteoPendiente)}
         onClose={() => setConteoPendiente(null)}
@@ -1074,53 +1301,64 @@ export default function InventarioPage() {
         confirmLabel="Aplicar conteo"
         confirmVariant="primary"
       />
+      <ConfirmDialog
+        open={Boolean(conteoCancelPendiente)}
+        onClose={() => setConteoCancelPendiente(null)}
+        onConfirm={onConfirmarCancelarConteo}
+        title={`Cancelar conteo #${conteoCancelPendiente?.id || ''}`}
+        description="El conteo quedará en estado CANCELADO y ya no se podrá aplicar."
+        confirmLabel="Cancelar conteo"
+        confirmVariant="danger"
+      />
 
-      <Modal open={Boolean(productoEdit)} onClose={resetProductEdit} maxWidthClass="max-w-xl" panelClassName="p-5">
+      <Modal open={Boolean(productoDetalle)} onClose={resetProductoDetalle} maxWidthClass="max-w-xl" panelClassName="p-5">
         <div className="ui-modal-header">
           <div className="ui-modal-header-copy">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Editar producto</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">{productoEdit?.codigo} - {productoEdit?.nombre}</p>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Detalle de inventario</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">{productoDetalle?.codigo} - {productoDetalle?.nombre}</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={resetProductEdit}>
+          <Button type="button" variant="ghost" size="sm" className="ui-modal-close-plain" onClick={resetProductoDetalle}>
             X
           </Button>
         </div>
 
         <div className="mt-4 grid gap-3">
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm">
+            <p className="font-semibold text-[var(--color-text)]">Stock actual</p>
+            <p className="text-[var(--color-text-muted)]">
+              {formatInventoryQty(productoDetalle?.stock_actual || 0, productoDetalle?.unidad_medida || productoDetalle?.unidad, { appendUnit: true })}
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm">
+            <p className="font-semibold text-[var(--color-text)]">Costo promedio</p>
+            <p className="text-[var(--color-text-muted)]">{formatCurrency(productoDetalle?.costo_promedio || 0)}</p>
+          </div>
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm">
+            <p className="font-semibold text-[var(--color-text)]">Valor inventario</p>
+            <p className="text-[var(--color-text-muted)]">{formatCurrency(getInventoryValue(productoDetalle || {}))}</p>
+          </div>
           <div>
-            <label className="text-sm font-medium text-[var(--color-text)]">Nombre</label>
-            <Input className="mt-2" value={editForm.nombre} onChange={(e) => setEditForm((state) => ({ ...state, nombre: e.target.value }))} placeholder="Nombre" />
+            <label className="text-sm font-medium text-[var(--color-text)]">Stock mínimo</label>
+            <Input className="mt-2" value={stockMinimoDraft} onChange={(e) => setStockMinimoDraft(e.target.value)} placeholder="Stock mínimo" />
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <label className="text-sm font-medium text-[var(--color-text)]">Stock mínimo</label>
-              <Input className="mt-2" value={editForm.stock_minimo} onChange={(e) => setEditForm((state) => ({ ...state, stock_minimo: e.target.value }))} placeholder="Stock mínimo" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-[var(--color-text)]">Categoría</label>
-              <Select className="mt-2" value={editForm.categoria_id} onChange={(e) => setEditForm((state) => ({ ...state, categoria_id: e.target.value }))}>
-                <option value="">Sin categoría</option>
-                {categorias.map((categoria) => (
-                  <option key={categoria.id} value={categoria.id}>
-                    {categoria.nombre}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-
-          <label className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 text-sm font-medium text-[var(--color-text)]">
-            <input type="checkbox" checked={editForm.activo} onChange={(e) => setEditForm((state) => ({ ...state, activo: e.target.checked }))} />
-            Activo
-          </label>
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="secondary" onClick={resetProductEdit}>
+          <Button variant="secondary" onClick={resetProductoDetalle}>
             Cancelar
           </Button>
-          <Button onClick={onGuardarProducto} disabled={loading}>
-            Guardar cambios
+          <Button
+            variant="ghost"
+            onClick={() => {
+              const targetId = productoDetalle?.id;
+              resetProductoDetalle();
+              navigate(`/productos?edit=${targetId || ''}`);
+            }}
+          >
+            Abrir en Productos
+          </Button>
+          <Button onClick={onGuardarStockMinimo} disabled={loading}>
+            Guardar mínimo
           </Button>
         </div>
       </Modal>

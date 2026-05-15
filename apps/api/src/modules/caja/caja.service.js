@@ -58,6 +58,83 @@ const corteZSchema = z.object({
   }).optional()
 });
 
+function resolveCloseState(diferencia) {
+  if (diferencia === 0) return 'EXACTO';
+  return diferencia > 0 ? 'SOBRANTE' : 'FALTANTE';
+}
+
+function buildCloseSnapshot(turno, snapshot, contado, diferencia) {
+  const totalCobrado = moneyRound(
+    Number(snapshot.ventas_efectivo || 0)
+    + Number(snapshot.ventas_transferencia || 0)
+    + Number(snapshot.cobranzas_clientes || 0)
+  );
+
+  return {
+    turno_id: turno.id,
+    estado_cierre: resolveCloseState(diferencia),
+    apertura: Number(snapshot.fondo_inicial || 0),
+    efectivo_esperado: Number(snapshot.efectivo_esperado || 0),
+    efectivo_contado: contado,
+    diferencia,
+    transferencias: Number(snapshot.ventas_transferencia || 0),
+    credito: Number(snapshot.ventas_credito || 0),
+    total_vendido: Number(snapshot.ventas_total_turno || 0),
+    total_cobrado: totalCobrado,
+    ingresos: Number(snapshot.ingresos_efectivo || 0),
+    egresos: Number(snapshot.egresos_efectivo || 0),
+    ventas_efectivo: Number(snapshot.ventas_efectivo || 0),
+    cobros_credito_efectivo: Number(snapshot.cobranzas_clientes || 0),
+    ingresos_manuales: Number(snapshot.ingresos_manuales || 0),
+    egresos_manuales: Number(snapshot.egresos_manuales || 0),
+    compras_efectivo: Number(snapshot.compras_efectivo || 0),
+    pagos_proveedores: Number(snapshot.pagos_proveedores || 0),
+    devoluciones_efectivo: Number(snapshot.devoluciones_efectivo || 0),
+    anulaciones_efectivo: Number(snapshot.anulaciones_efectivo || 0),
+    reversiones_abonos_clientes: Number(snapshot.reversiones_abonos_clientes || 0),
+    reversiones_pagos_proveedores: Number(snapshot.reversiones_pagos_proveedores || 0),
+    otros_ingresos: Number(snapshot.otros_ingresos || 0),
+    otros_egresos: Number(snapshot.otros_egresos || 0)
+  };
+}
+
+function parseStoredCloseSnapshot(turno) {
+  if (!turno?.resumen_cierre_json) return null;
+  try {
+    return JSON.parse(turno.resumen_cierre_json);
+  } catch (_) {
+    return null;
+  }
+}
+
+function buildTurnoSummary(turno, snapshot) {
+  const storedCloseSnapshot = parseStoredCloseSnapshot(turno);
+  const closeSnapshot = storedCloseSnapshot || buildCloseSnapshot(
+    turno,
+    snapshot,
+    Number(turno?.efectivo_contado || 0),
+    Number(turno?.diferencia || 0)
+  );
+
+  return {
+    resumen_caja: {
+      saldo_inicial: snapshot.fondo_inicial,
+      ingresos_efectivo: snapshot.ingresos_efectivo,
+      egresos_efectivo: snapshot.egresos_efectivo,
+      saldo_actual: snapshot.efectivo_esperado
+    },
+    resumen_ventas: {
+      efectivo: snapshot.ventas_efectivo,
+      transferencia: snapshot.ventas_transferencia,
+      credito: snapshot.ventas_credito,
+      total_ventas: snapshot.ventas_total_turno
+    },
+    resumen_cierre: closeSnapshot,
+    estado_cierre: closeSnapshot.estado_cierre,
+    ...snapshot
+  };
+}
+
 async function turnoActual() {
   return repository.findOpenShift();
 }
@@ -112,19 +189,7 @@ async function corteX(user) {
 
   const resumen = {
     turno_id: turno.id,
-    resumen_caja: {
-      saldo_inicial: snapshot.fondo_inicial,
-      ingresos_efectivo: snapshot.ingresos_efectivo,
-      egresos_efectivo: snapshot.egresos_efectivo,
-      saldo_actual: snapshot.efectivo_esperado
-    },
-    resumen_ventas: {
-      efectivo: snapshot.ventas_efectivo,
-      transferencia: snapshot.ventas_transferencia,
-      credito: snapshot.ventas_credito,
-      total_ventas: snapshot.ventas_total_turno
-    },
-    ...snapshot,
+    ...buildTurnoSummary(turno, snapshot),
     movimientos
   };
 
@@ -202,6 +267,8 @@ async function corteZ(body, user) {
   const esperado = snapshot.efectivo_esperado;
   const contado = moneyRound(parsed.data.efectivo_contado);
   const diferencia = moneyRound(contado - esperado);
+  const estadoCierre = resolveCloseState(diferencia);
+  const closeSnapshot = buildCloseSnapshot(turno, snapshot, contado, diferencia);
   let authorizer = null;
 
   if (diferencia !== 0 && !parsed.data.observacion) {
@@ -233,7 +300,9 @@ async function corteZ(body, user) {
         efectivo_contado_centavos: moneyToCents(contado, 'efectivo_contado'),
         observacion: parsed.data.observacion || null,
         diferencia,
-        diferencia_centavos: moneyToCents(diferencia, 'diferencia')
+        diferencia_centavos: moneyToCents(diferencia, 'diferencia'),
+        estado_cierre: estadoCierre,
+        resumen_cierre_json: JSON.stringify(closeSnapshot)
       },
       trx
     );
@@ -255,6 +324,7 @@ async function corteZ(body, user) {
           esperado,
           contado,
           diferencia,
+          estado_cierre: estadoCierre,
           fecha_cierre: closed.fecha_cierre || null
         },
         detalle: {
@@ -288,7 +358,9 @@ async function corteZ(body, user) {
         turno: closed,
         esperado,
         contado,
-        diferencia
+        diferencia,
+        estado_cierre: estadoCierre,
+        resumen_cierre: closeSnapshot
       }
     };
   });
@@ -304,19 +376,7 @@ async function resumenTurno(turnoId) {
   return {
     turno,
     movimientos,
-    resumen_caja: {
-      saldo_inicial: snapshot.fondo_inicial,
-      ingresos_efectivo: snapshot.ingresos_efectivo,
-      egresos_efectivo: snapshot.egresos_efectivo,
-      saldo_actual: snapshot.efectivo_esperado
-    },
-    resumen_ventas: {
-      efectivo: snapshot.ventas_efectivo,
-      transferencia: snapshot.ventas_transferencia,
-      credito: snapshot.ventas_credito,
-      total_ventas: snapshot.ventas_total_turno
-    },
-    ...snapshot
+    ...buildTurnoSummary(turno, snapshot)
   };
 }
 

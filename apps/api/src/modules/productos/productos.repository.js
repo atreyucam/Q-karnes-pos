@@ -20,7 +20,14 @@ async function list(filters = {}, trx = db) {
       'p.es_vendible',
       'p.es_transformable',
       'p.es_insumo',
-      'p.es_merma'
+      'p.es_merma',
+      trx.raw(`
+        CASE WHEN EXISTS (
+          SELECT 1
+          FROM inventario_movimientos m
+          WHERE m.producto_id = p.id
+        ) THEN 1 ELSE 0 END as tiene_movimientos_inventario
+      `)
     )
     .orderBy('p.codigo', 'asc');
 
@@ -42,7 +49,19 @@ async function list(filters = {}, trx = db) {
 }
 
 async function getById(id, trx = db) {
-  return trx('productos').where({ id }).first();
+  return trx('productos as p')
+    .select(
+      'p.*',
+      trx.raw(`
+        CASE WHEN EXISTS (
+          SELECT 1
+          FROM inventario_movimientos m
+          WHERE m.producto_id = p.id
+        ) THEN 1 ELSE 0 END as tiene_movimientos_inventario
+      `)
+    )
+    .where('p.id', id)
+    .first();
 }
 
 async function getByCodigo(codigo, trx = db) {
@@ -58,17 +77,24 @@ async function getLastGeneratedCode(trx = db) {
 
 async function create(payload, trx = db) {
   const [id] = await trx('productos').insert(payload);
-  return trx('productos').where({ id }).first();
+  return getById(id, trx);
 }
 
 async function update(id, payload, trx = db) {
   await trx('productos').where({ id }).update(payload);
-  return trx('productos').where({ id }).first();
+  return getById(id, trx);
 }
 
 async function deactivate(id, trx = db) {
   await trx('productos').where({ id }).update({ activo: 0 });
-  return trx('productos').where({ id }).first();
+  return getById(id, trx);
+}
+
+async function hasInventoryMovements(productId, trx = db) {
+  const row = await trx('inventario_movimientos')
+    .where({ producto_id: productId })
+    .first('id');
+  return Boolean(row);
 }
 
 module.exports = {
@@ -78,5 +104,6 @@ module.exports = {
   getLastGeneratedCode,
   create,
   update,
-  deactivate
+  deactivate,
+  hasInventoryMovements
 };

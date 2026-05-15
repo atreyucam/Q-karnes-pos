@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PiInfo } from 'react-icons/pi';
 import apiClient, { normalizeResponse, parseApiError } from '../../lib/apiClient';
 import {
   Alert,
@@ -12,11 +11,6 @@ import {
   PageHeader,
   Select,
   StatusBadge,
-  Tabla,
-  TablaCabecera,
-  TablaCuerpo,
-  TablaFila,
-  TablaCelda,
   Textarea,
   Toast
 } from '../../ui';
@@ -271,6 +265,25 @@ export default function CompraCargarPage() {
   const projectedStatusMeta = resolveCompraStatus(projectedStatus, projectedStatus);
   const hasLineErrors = useMemo(() => lineStates.some(({ state }) => state.errors.length > 0), [lineStates]);
   const canSubmit = !recepcionBloqueada && !hasLineErrors && selectedPayloadItems.length > 0 && (efectivoHabilitado || creditoComprasHabilitado);
+  const linesWithQty = useMemo(
+    () => lineStates.filter(({ state }) => Number.isFinite(state.cantidad) && state.cantidad > 0).length,
+    [lineStates]
+  );
+  const hasQtyOverPending = useMemo(
+    () => lineStates.some(({ state }) => state.errors.includes('No puede recibir más que lo pendiente.')),
+    [lineStates]
+  );
+  const hasMissingCost = useMemo(
+    () => lineStates.some(({ state }) => state.errors.some((msg) => msg.includes('Costo') || msg.includes('costo'))),
+    [lineStates]
+  );
+  const footerMessage = useMemo(() => {
+    if (linesWithQty === 0) return 'Ingrese una cantidad a recibir para confirmar.';
+    if (hasQtyOverPending) return 'La cantidad a recibir supera lo pendiente.';
+    if (hasMissingCost || hasLineErrors) return 'Ingrese el costo real de las líneas seleccionadas.';
+    const noun = linesWithQty === 1 ? 'línea actualizará' : 'líneas actualizarán';
+    return `${linesWithQty} ${noun} inventario · Total recepción: ${formatMoney(totalRecepcion)}`;
+  }, [hasLineErrors, hasMissingCost, hasQtyOverPending, linesWithQty, totalRecepcion]);
 
   useEffect(() => {
     if (!statusToast) return undefined;
@@ -398,7 +411,7 @@ export default function CompraCargarPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-[1280px] space-y-4">
       {statusToast ? <div className="fixed right-5 top-5 z-[1200]"><Toast tone="success" className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToast}</Toast></div> : null}
       {statusToastError ? <div className="fixed right-5 top-5 z-[1200]"><Toast tone="danger" className={errorToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToastError}</Toast></div> : null}
       {statusToastWarning ? <div className="fixed right-5 top-5 z-[1200]"><Toast tone="warning" className={warningToastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}>{statusToastWarning}</Toast></div> : null}
@@ -406,12 +419,12 @@ export default function CompraCargarPage() {
 
       <PageHeader
         title={`Registrar recepción compra #${ordenId}`}
-        description="La recepción actualiza stock, costo visible y valorización."
+        description="Registra la entrada real de productos y actualiza inventario valorizado."
       />
 
       {(error || localError) && <Alert tone="error">{localError || error}</Alert>}
       <Alert tone="info">
-        La recepción actualiza stock, costo visible y valorización. La orden puede quedar PARCIAL o COMPLETA según lo recibido.
+        Al confirmar la recepción, el sistema actualizará stock, costo promedio y valor de inventario.
       </Alert>
       {requiredIssues.length > 0 && (
         <Alert tone="warning">
@@ -447,32 +460,32 @@ export default function CompraCargarPage() {
       )}
 
       {(proveedorInfo || ordenActual?.orden) && (
-        <Card className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Proveedor</p>
+        <Card className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]">Proveedor</p>
             <p className="font-semibold text-[var(--color-text)]">{ordenActual?.orden?.proveedor_nombre || proveedorInfo?.nombre || '-'}</p>
             <p className="text-sm text-[var(--color-text-muted)]">{proveedorInfo?.telefono || 'Sin teléfono'} • {proveedorInfo?.direccion || 'Sin dirección'}</p>
           </div>
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Orden actual</p>
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]">Estado actual</p>
             <div><StatusBadge status={resolveCompraStatus(ordenActual?.orden?.estado, ordenActual?.orden?.estado_label).badgeStatus}>{ordenActual?.orden?.estado_label || resolveCompraStatus(ordenActual?.orden?.estado).label}</StatusBadge></div>
-            <p className="text-sm text-[var(--color-text-muted)]">{formatDateQuito(ordenActual?.orden?.fecha_emision || ordenActual?.orden?.fecha)}</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Orden #{ordenId}</p>
           </div>
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Estado proyectado</p>
-            <div><StatusBadge status={projectedStatusMeta.badgeStatus}>{projectedStatusMeta.label}</StatusBadge></div>
-            <p className="text-sm text-[var(--color-text-muted)]">{selectedPayloadItems.length} línea(s) con recepción</p>
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]">Fecha de orden</p>
+            <p className="font-semibold text-[var(--color-text)]">{formatDateQuito(ordenActual?.orden?.fecha_emision || ordenActual?.orden?.fecha)}</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Emisión registrada</p>
           </div>
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Saldo proveedor</p>
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]">Saldo proveedor</p>
             <p className="text-lg font-bold text-[var(--color-text)]">{formatMoney(resumenCxp?.saldo || 0)}</p>
             <p className="text-sm text-[var(--color-text-muted)]">{proveedorInfo?.tiene_credito ? `Crédito ${Number(proveedorInfo?.dias_pago || 0)} días` : 'Proveedor sin crédito'}</p>
           </div>
         </Card>
       )}
 
-      <Card className="space-y-4 p-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <Card className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Fecha de recepción</label>
             <Input className="mt-2" type="date" value={fechaRecepcion} onChange={(e) => setFechaRecepcion(e.target.value)} />
@@ -504,20 +517,20 @@ export default function CompraCargarPage() {
           </div>
         </div>
 
-        <div>
+        <div className="md:col-span-2 xl:col-span-4">
           <label className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Observación</label>
           <Textarea
-            className="mt-2 max-w-2xl"
-            rows={3}
+            className="mt-2"
+            rows={2}
             value={observacion}
             onChange={(e) => setObservacion(e.target.value)}
             placeholder="Opcional"
           />
         </div>
 
-        <div className="grid gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 md:grid-cols-3">
           <div>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Impacto esperado</p>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Líneas con recepción</p>
             <p className="mt-1 font-semibold text-[var(--color-text)]">
               {selectedPayloadItems.length === 1 ? '1 línea actualiza inventario' : `${selectedPayloadItems.length} líneas actualizan inventario`}
             </p>
@@ -527,7 +540,7 @@ export default function CompraCargarPage() {
             <p className="mt-1 font-semibold text-[var(--color-text)]">{formatMoney(totalRecepcion)}</p>
           </div>
           <div>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Resultado de orden</p>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Estado proyectado</p>
             <p className="mt-1 font-semibold text-[var(--color-text)]">{projectedStatusMeta.label}</p>
           </div>
         </div>
@@ -539,24 +552,12 @@ export default function CompraCargarPage() {
         )}
       </Card>
 
-      <Card className="space-y-4 p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="font-semibold text-[var(--color-text)]">Líneas pendientes por recibir</p>
-            <p className="text-sm text-[var(--color-text-muted)]">Cada línea puede valorarse por costo unitario real o costo total real.</p>
-          </div>
+      <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-sm">
+        <div className="border-b border-[var(--color-border)] px-4 py-3">
+          <p className="font-semibold text-[var(--color-text)]">Líneas pendientes por recibir</p>
         </div>
 
-        <Tabla>
-          <TablaCabecera>
-            <tr>
-              <TablaCelda as="th" className="w-[25%]">Producto</TablaCelda>
-              <TablaCelda as="th" className="w-[22%]">Cantidad a recibir</TablaCelda>
-              <TablaCelda as="th" className="w-[22%]">Modalidad costo</TablaCelda>
-              <TablaCelda as="th" className="w-[31%]">Costo</TablaCelda>
-            </tr>
-          </TablaCabecera>
-          <TablaCuerpo>
+        <div className="space-y-3 p-4">
             {(ordenActual?.detalle || []).map((detail) => {
               const line = buildLineReception(detail, recv[detail.id] || getEmptyLineState());
               const hasReceivingQty = Number.isFinite(line.cantidad) && line.cantidad > 0;
@@ -564,76 +565,83 @@ export default function CompraCargarPage() {
               const editableTotal = line.costMode === 'TOTAL' && hasReceivingQty;
               const hasErrors = submitAttempted && line.errors.length > 0;
               const quantityOverMax = Number.isFinite(line.cantidad) && line.cantidad > line.pendiente;
-              const editableInputClass = 'h-9 pr-3 pl-7 text-right bg-white border-[color-mix(in_oklab,var(--color-text-muted)_45%,white_55%)] text-[var(--color-text)] transition-colors duration-150 hover:border-[var(--color-text-muted)] focus:border-[var(--color-text)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--color-text)_16%,transparent)]';
-              const readonlyInputClass = 'h-9 pr-3 pl-7 text-right bg-[var(--color-surface-muted)] border-[var(--color-border)] text-[var(--color-text-muted)] cursor-not-allowed transition-colors duration-150';
+              const editableInputClass = 'h-10 min-w-0 w-full flex-1 rounded-l-none rounded-r-lg border border-l-0 border-[color-mix(in_oklab,var(--color-text-muted)_45%,white_55%)] bg-white px-3 text-right text-[var(--color-text)] transition-colors duration-150 hover:border-[var(--color-text-muted)] focus:border-[var(--color-text)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--color-text)_16%,transparent)]';
+              const readonlyInputClass = 'h-10 min-w-0 w-full flex-1 rounded-l-none rounded-r-lg border border-l-0 border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 text-right text-[var(--color-text-muted)] cursor-not-allowed transition-colors duration-150';
 
               return (
-                <TablaFila key={detail.id} className={`align-top ${hasErrors ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_82%,white_18%)]' : ''}`}>
-                  <TablaCelda className="py-5">
-                    <div>
-                      <p className="text-[0.95rem] font-bold text-[var(--color-text)]" title={detail.producto_codigo || ''}>{detail.producto_nombre}</p>
-                      <p className="text-[13px] text-[var(--color-text-muted)]">
+                <div
+                  key={detail.id}
+                  className={`rounded-xl border border-slate-200 bg-white p-4 ${hasErrors ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_92%,white_8%)]' : ''}`}
+                >
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="truncate text-[0.95rem] font-semibold text-slate-900" title={detail.producto_codigo || ''}>{detail.producto_nombre}</p>
+                      <p className="mt-1 text-sm text-slate-500">
                         Recibido: {formatQtyByUnit(detail.cantidad_recibida, line.unidad, { fixedLB: line.unidad !== 'UND' })} de {formatQtyByUnit(detail.cantidad, line.unidad, { fixedLB: line.unidad !== 'UND' })} {line.unidad.toLowerCase()}
                       </p>
-                      <p className="text-[13px] text-[var(--color-text-muted)]">
-                        Pendiente: {formatQtyByUnit(line.pendiente, line.unidad, { fixedLB: line.unidad !== 'UND' })} {line.unidad.toLowerCase()}
-                      </p>
                     </div>
-                  </TablaCelda>
-                  <TablaCelda className="py-5">
-                    <div className="w-full max-w-[230px]">
-                      <div className={`flex h-10 overflow-hidden rounded-lg border bg-white ${quantityOverMax || (hasErrors && line.cantidadRaw) ? 'border-[var(--color-danger)]' : 'border-[var(--color-border)]'}`}>
+                    <p className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-700">
+                      Pendiente: {formatQtyByUnit(line.pendiente, line.unidad, { fixedLB: line.unidad !== 'UND' })} {line.unidad.toLowerCase()}
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <div className="grid min-w-[860px] grid-cols-[1fr_0.8fr_1.2fr] items-start gap-4">
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Cantidad a recibir</p>
+                      <div className={`flex w-full max-w-[280px] ${quantityOverMax || (hasErrors && line.cantidadRaw) ? 'text-[var(--color-danger)]' : ''}`}>
                         <Input
-                          className={`h-10 flex-1 border-0 bg-transparent text-right focus:ring-0 ${quantityOverMax || (hasErrors && line.cantidadRaw) ? 'text-[var(--color-danger)]' : ''}`}
+                          className={`h-10 min-w-0 flex-1 rounded-r-none border text-right focus:ring-0 ${quantityOverMax || (hasErrors && line.cantidadRaw) ? 'border-[var(--color-danger)] text-[var(--color-danger)]' : 'border-[var(--color-border)]'}`}
                           value={recv[detail.id]?.cantidad || ''}
                           onChange={(e) => onLineChange(detail.id, 'cantidad', e.target.value)}
                           onBlur={() => onLineBlur(detail, 'cantidad')}
                           placeholder={line.unidad === 'UND' ? '0' : '0.000'}
                         />
-                        <div className="flex w-14 items-center justify-center border-l border-[var(--color-border)] bg-[var(--color-surface-muted)] text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-                          {line.unidad.toLowerCase()}
+                        <div className={`h-10 w-14 shrink-0 rounded-r-lg border border-l-0 bg-slate-50 text-xs font-semibold uppercase ${quantityOverMax || (hasErrors && line.cantidadRaw) ? 'border-[var(--color-danger)] text-[var(--color-danger)]' : 'border-[var(--color-border)] text-[var(--color-text-muted)]'} flex items-center justify-center`}>
+                          {line.unidad}
                         </div>
                       </div>
-                      <p className="mt-1 text-[13px] text-[var(--color-text-muted)]">Máx. {formatQtyByUnit(line.pendiente, line.unidad, { fixedLB: line.unidad !== 'UND' })} {line.unidad.toLowerCase()}</p>
+                      <p className="mt-1 text-xs text-[var(--color-text-muted)]">Máx. {formatQtyByUnit(line.pendiente, line.unidad, { fixedLB: line.unidad !== 'UND' })} {line.unidad.toLowerCase()}</p>
                     </div>
-                  </TablaCelda>
-                  <TablaCelda className="py-5">
-                    <div className="inline-flex rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-1 align-middle">
-                      <button
-                        type="button"
-                        className={`h-8 min-w-[88px] rounded-md px-3 text-xs font-semibold transition-colors ${
-                          (recv[detail.id]?.costMode || 'UNITARIO') === 'UNITARIO'
-                            ? 'bg-[var(--color-text)] text-white shadow-sm'
-                            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-                        }`}
-                        onClick={() => onLineChange(detail.id, 'costMode', 'UNITARIO')}
-                      >
-                        Unitario
-                      </button>
-                      <button
-                        type="button"
-                        className={`h-8 min-w-[88px] rounded-md px-3 text-xs font-semibold transition-colors ${
-                          (recv[detail.id]?.costMode || 'UNITARIO') === 'TOTAL'
-                            ? 'bg-[var(--color-text)] text-white shadow-sm'
-                            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-                        }`}
-                        onClick={() => onLineChange(detail.id, 'costMode', 'TOTAL')}
-                      >
-                        Total
-                      </button>
+
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Modalidad costo</p>
+                      <div className="inline-flex w-fit rounded-xl bg-slate-100 p-1">
+                        <button
+                          type="button"
+                          className={`h-8 min-w-[78px] rounded-lg px-3 text-xs font-semibold transition-colors ${
+                            (recv[detail.id]?.costMode || 'UNITARIO') === 'UNITARIO'
+                              ? 'bg-[var(--color-text)] text-white shadow-sm'
+                              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                          }`}
+                          onClick={() => onLineChange(detail.id, 'costMode', 'UNITARIO')}
+                        >
+                          Unitario
+                        </button>
+                        <button
+                          type="button"
+                          className={`h-8 min-w-[78px] rounded-lg px-3 text-xs font-semibold transition-colors ${
+                            (recv[detail.id]?.costMode || 'UNITARIO') === 'TOTAL'
+                              ? 'bg-[var(--color-text)] text-white shadow-sm'
+                              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                          }`}
+                          onClick={() => onLineChange(detail.id, 'costMode', 'TOTAL')}
+                        >
+                          Total
+                        </button>
+                      </div>
                     </div>
-                  </TablaCelda>
-                  <TablaCelda className="min-w-56 py-5">
-                    <div className="ml-auto max-w-[250px]">
-                      <p className="mb-1 text-xs font-medium text-[var(--color-text-muted)]">
+
+                    <div className="w-full">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                         {line.costMode === 'UNITARIO' ? 'Costo unitario real' : 'Costo total real'}
                       </p>
-                      <div className="flex h-10 overflow-hidden rounded-lg">
-                        <div className="flex w-11 items-center justify-center border border-r-0 border-[var(--color-border)] bg-[var(--color-surface-muted)] text-sm font-semibold text-[var(--color-text-muted)]">
+                      <div className="flex w-full max-w-[320px]">
+                        <div className="flex h-10 w-11 shrink-0 items-center justify-center rounded-l-lg border border-r-0 border-[var(--color-border)] bg-slate-50 text-sm font-semibold text-slate-500">
                           $
                         </div>
                         <Input
-                          className={`${(line.costMode === 'UNITARIO' ? editableUnit : editableTotal) ? editableInputClass : readonlyInputClass} h-10 flex-1 rounded-l-none border-l-0 focus:ring-0`}
+                          className={`${(line.costMode === 'UNITARIO' ? editableUnit : editableTotal) ? editableInputClass : readonlyInputClass}`}
                           readOnly={line.costMode === 'UNITARIO' ? !editableUnit : !editableTotal}
                           value={
                             line.costMode === 'UNITARIO'
@@ -645,31 +653,31 @@ export default function CompraCargarPage() {
                           placeholder="0.00"
                         />
                       </div>
-                    </div>
-                    <div className="mt-1 text-right text-[13px]">
-                      {line.costMode === 'UNITARIO' ? (
-                        <p className="text-[var(--color-text-muted)]">Total calculado: <span className="font-semibold text-[color-mix(in_oklab,var(--color-success,#2e7d32)_80%,black_20%)]">{formatMoney(Number.isFinite(line.derivedTotalCost) ? line.derivedTotalCost : 0)}</span></p>
-                      ) : (
-                        <p className="text-[var(--color-text-muted)]">Unitario calculado: <span className="font-semibold text-[color-mix(in_oklab,var(--color-success,#2e7d32)_80%,black_20%)]">{formatMoney(Number.isFinite(line.derivedUnitCost) ? line.derivedUnitCost : 0)}</span> / {line.unidad.toLowerCase()}</p>
-                      )}
-                    </div>
-                    {hasReceivingQty ? null : (
-                      <p className="mt-1 text-right text-xs text-[var(--color-text-muted)]">Ingresa una cantidad para calcular el costo.</p>
-                    )}
-                    {hasErrors ? (
-                      <div className="space-y-1 text-xs text-[var(--color-danger)]">
-                        {line.errors.map((message) => <p key={message}>{message}</p>)}
+                      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        {line.costMode === 'UNITARIO' ? (
+                          <p>Total calculado: <span className="font-semibold text-[color-mix(in_oklab,var(--color-success,#2e7d32)_80%,black_20%)]">{formatMoney(Number.isFinite(line.derivedTotalCost) ? line.derivedTotalCost : 0)}</span></p>
+                        ) : (
+                          <p>Costo unitario estimado: <span className="font-semibold text-[color-mix(in_oklab,var(--color-success,#2e7d32)_80%,black_20%)]">{formatMoney(Number.isFinite(line.derivedUnitCost) ? line.derivedUnitCost : 0)}</span></p>
+                        )}
                       </div>
-                    ) : null}
-                  </TablaCelda>
-                </TablaFila>
+                      {hasReceivingQty ? null : (
+                        <p className="mt-1 text-xs text-[var(--color-text-muted)]">Ingresa una cantidad para calcular el costo.</p>
+                      )}
+                      {hasErrors ? (
+                        <div className="mt-1 space-y-1 text-xs text-[var(--color-danger)]">
+                          {line.errors.map((message) => <p key={message}>{message}</p>)}
+                        </div>
+                      ) : null}
+                    </div>
+                    </div>
+                  </div>
+                </div>
               );
             })}
-          </TablaCuerpo>
-        </Tabla>
+        </div>
 
-        <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-4">
-          <p className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]"><PiInfo className="text-base" /> La orden quedará <strong>{projectedStatusMeta.label}</strong> si confirmas esta recepción.</p>
+        <div className="flex flex-col gap-3 border-t border-[var(--color-border)] bg-slate-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-[var(--color-text-muted)]">{footerMessage}</p>
           <Button disabled={!canSubmit} onClick={onRegistrar}>
             Confirmar recepción
           </Button>

@@ -288,6 +288,11 @@ export default function TransformacionesListPage() {
                 </TablaCelda>
                 <TablaCelda>{row.actor?.nombre || row.actor?.usuario || '-'}</TablaCelda>
                 <TablaCelda>
+                  {(() => {
+                    const canShowAnular = row.estado === 'APLICADA';
+                    const canAnular = row.puede_anular === true;
+                    const motivoNoAnulable = row.motivo_no_anulable || 'No se puede anular de forma segura.';
+                    return (
                   <TableActions>
                     <TableActionButton variant="neutral" onClick={() => navigate(`/transformaciones/${row.id}`)}>
                       Ver
@@ -297,12 +302,19 @@ export default function TransformacionesListPage() {
                         Editar
                       </TableActionButton>
                     )}
-                    {row.acciones?.puede_anular && (
-                      <TableActionButton variant="danger" onClick={() => openModal(row)} disabled={saving}>
+                    {canShowAnular && (
+                      <TableActionButton
+                        variant="danger"
+                        onClick={() => (canAnular ? openModal(row) : undefined)}
+                        disabled={saving || !canAnular}
+                        title={canAnular ? 'Anular transformación' : `No se puede anular: ${motivoNoAnulable}`}
+                      >
                         Anular
                       </TableActionButton>
                     )}
                   </TableActions>
+                    );
+                  })()}
                 </TablaCelda>
               </TablaFila>
             ))}

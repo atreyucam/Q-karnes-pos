@@ -34,7 +34,7 @@ async function login(body) {
     throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
   }
 
-  const user = await repository.findByUsuario(parsed.data.usuario);
+  const user = await repository.findByLoginIdentifier(parsed.data.usuario);
   if (!user || !user.activo) {
     await auditoriaService.logEvent({
       entidad: 'SEGURIDAD',

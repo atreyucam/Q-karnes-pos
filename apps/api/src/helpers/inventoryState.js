@@ -111,7 +111,7 @@ function computeOutgoingInventory({
     throw new AppError(400, `Cantidad inválida para ${context}`);
   }
   if (qtyBase > currentStockBase) {
-    throw new AppError(400, `Stock insuficiente para ${context}`);
+    throw new AppError(400, 'No hay stock suficiente para completar la operación.');
   }
   if (qtyBase === 0) {
     return {

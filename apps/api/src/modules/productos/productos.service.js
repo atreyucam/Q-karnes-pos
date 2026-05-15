@@ -6,8 +6,9 @@ const auditoriaService = require('../auditoria/auditoria.service');
 const { resolveAdminAuthorizer } = require('../auth/adminAuthorization.service');
 const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
-const { quantityToBase, baseToVisible, moneyToCents } = require('../../helpers/unitPolicy');
+const { quantityToBase, moneyToCents } = require('../../helpers/unitPolicy');
 const { resolveProductInventory, buildProductInventoryUpdatePayload } = require('../../helpers/inventoryState');
+const { deriveMarginMetrics, fromCents } = require('../../helpers/marginMetrics');
 
 const GENERATED_CODE_PREFIX = 'QK-';
 const ROLE_FIELDS = ['es_vendible', 'es_transformable', 'es_insumo', 'es_merma'];
@@ -73,11 +74,19 @@ function normalizeProduct(product) {
   const normalizedInventory = resolveProductInventory(product);
   const precioVenta = Number(normalizedInventory.precio_venta || normalizedInventory.precio_referencia || 0);
   const roles = normalizeRoleFlags(product);
+  const margin = deriveMarginMetrics({
+    precioVenta,
+    costoVisible: Number(normalizedInventory.costo_promedio || 0)
+  });
+  const valorInventarioCentavos = Number(normalizedInventory.valor_inventario_centavos || 0);
   return {
     ...normalizedInventory,
     unidad_medida: normalizedInventory.unidad_medida || normalizedInventory.unidad || 'UND',
     precio_referencia: precioVenta,
     precio_venta: precioVenta,
+    valor_inventario: fromCents(valorInventarioCentavos),
+    ...margin,
+    tiene_movimientos_inventario: Boolean(Number(product.tiene_movimientos_inventario || 0)),
     ...roles
   };
 }
@@ -87,10 +96,8 @@ const createSchema = z.object({
   nombre: z.string().trim().min(1),
   categoria_id: z.number().int().positive().optional().nullable(),
   unidad_medida: z.enum(['KG', 'LB', 'UND']),
-  costo_promedio: z.number().nonnegative().optional(),
   precio_referencia: z.number().nonnegative().optional(),
   precio_venta: z.number().nonnegative().optional(),
-  stock_actual: z.number().nonnegative().optional(),
   stock_minimo: z.number().nonnegative().optional(),
   activo: z.boolean().optional(),
   es_vendible: z.boolean().optional(),
@@ -120,13 +127,12 @@ async function generateNextProductCode() {
 }
 
 const updateSchema = z.object({
+  codigo: z.string().trim().min(1).optional(),
   nombre: z.string().trim().min(1).optional(),
   categoria_id: z.number().int().positive().nullable().optional(),
   unidad_medida: z.enum(['KG', 'LB', 'UND']).optional(),
-  costo_promedio: z.number().nonnegative().optional(),
   precio_referencia: z.number().nonnegative().optional(),
   precio_venta: z.number().nonnegative().optional(),
-  stock_actual: z.number().nonnegative().optional(),
   stock_minimo: z.number().nonnegative().optional(),
   activo: z.boolean().optional(),
   es_vendible: z.boolean().optional(),
@@ -146,6 +152,16 @@ const removeSchema = z.object({
   })
 });
 
+function assertNoInventoryEditableFields(rawBody = {}) {
+  const forbiddenFields = ['stock_actual', 'costo_promedio', 'valor_inventario_centavos'];
+  const field = forbiddenFields.find((key) => Object.prototype.hasOwnProperty.call(rawBody, key));
+  if (field) {
+    throw new AppError(400, 'Este campo solo puede cambiar mediante operaciones de inventario trazables', {
+      field
+    }, 'INVENTORY_FIELD_FORBIDDEN');
+  }
+}
+
 async function list(query) {
   const filters = {
     categoria_id: query.categoria_id ? Number(query.categoria_id) : undefined,
@@ -162,6 +178,7 @@ async function list(query) {
 }
 
 async function create(body) {
+  assertNoInventoryEditableFields(body);
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
 
@@ -177,7 +194,7 @@ async function create(body) {
   const roleFlags = resolveRoleFlags(parsed.data);
   const precioVenta = parsed.data.precio_venta ?? parsed.data.precio_referencia ?? 0;
   const unidadMedida = parsed.data.unidad_medida;
-  const stockActualBase = quantityToBase(parsed.data.stock_actual ?? 0, unidadMedida, {
+  const stockActualBase = quantityToBase(0, unidadMedida, {
     field: 'stock_actual',
     requirePositive: false,
     allowZero: true
@@ -187,7 +204,7 @@ async function create(body) {
     requirePositive: false,
     allowZero: true
   });
-  const valorInventarioCentavos = moneyToCents((parsed.data.costo_promedio ?? 0) * (parsed.data.stock_actual ?? 0), 'valor_inventario');
+  const valorInventarioCentavos = moneyToCents(0, 'valor_inventario');
   const inventoryPayload = buildProductInventoryUpdatePayload({
     unit: unidadMedida,
     stockBase: stockActualBase,
@@ -212,6 +229,7 @@ async function create(body) {
 }
 
 async function update(id, body, actorUser) {
+  assertNoInventoryEditableFields(body);
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
 
@@ -229,7 +247,35 @@ async function update(id, body, actorUser) {
     : null;
   const currentInventory = resolveProductInventory(product);
 
-  if (parsed.data.unidad_medida) payload.unidad = parsed.data.unidad_medida;
+  if (parsed.data.codigo !== undefined) {
+    const nextCodigo = String(parsed.data.codigo || '').trim();
+    const currentCodigo = String(product.codigo || '').trim();
+    if (nextCodigo && nextCodigo.toLowerCase() !== currentCodigo.toLowerCase()) {
+      const hasMovements = await repository.hasInventoryMovements(id);
+      if (hasMovements) {
+        throw new AppError(400, 'No se puede cambiar el código: el producto ya tiene movimientos de inventario');
+      }
+      const exists = await repository.getByCodigo(nextCodigo);
+      if (exists && Number(exists.id) !== Number(id)) {
+        throw new AppError(400, 'El código del producto ya existe');
+      }
+      payload.codigo = nextCodigo;
+    } else {
+      delete payload.codigo;
+    }
+  }
+
+  if (parsed.data.unidad_medida) {
+    const currentUnit = String(product.unidad_medida || product.unidad || 'UND').toUpperCase();
+    const nextUnitRaw = String(parsed.data.unidad_medida || '').toUpperCase();
+    if (nextUnitRaw && nextUnitRaw !== currentUnit) {
+      const hasMovements = await repository.hasInventoryMovements(id);
+      if (hasMovements) {
+        throw new AppError(400, 'No se puede cambiar la unidad de medida: el producto ya tiene movimientos de inventario');
+      }
+    }
+    payload.unidad = parsed.data.unidad_medida;
+  }
   if (parsed.data.precio_venta !== undefined || parsed.data.precio_referencia !== undefined) {
     const precioVenta = parsed.data.precio_venta ?? parsed.data.precio_referencia;
     payload.precio_venta = precioVenta;
@@ -238,9 +284,9 @@ async function update(id, body, actorUser) {
   if (roleFlags) Object.assign(payload, roleFlags);
 
   const nextUnit = parsed.data.unidad_medida || currentInventory.unidad_operativa;
-  const stockActualVisible = parsed.data.stock_actual ?? currentInventory.stock_actual;
+  const stockActualVisible = currentInventory.stock_actual;
   const stockMinimoVisible = parsed.data.stock_minimo ?? currentInventory.stock_minimo;
-  const costoPromedioVisible = parsed.data.costo_promedio ?? currentInventory.costo_promedio;
+  const costoPromedioVisible = currentInventory.costo_promedio;
   const stockActualBase = quantityToBase(stockActualVisible, nextUnit, {
     field: 'stock_actual',
     requirePositive: false,
@@ -269,6 +315,7 @@ async function update(id, body, actorUser) {
         accion: 'MODIFICAR',
         descripcion: `Producto ${product.codigo} actualizado`,
         datos_anteriores: {
+          codigo: product.codigo,
           nombre: product.nombre,
           categoria_id: product.categoria_id,
           unidad_medida: product.unidad_medida || product.unidad || 'UND',

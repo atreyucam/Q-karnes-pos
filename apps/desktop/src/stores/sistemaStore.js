@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import apiClient, { normalizeResponse, parseApiError } from '../lib/apiClient';
+import {
+  listarUsuariosSistema,
+  crearUsuarioSistema,
+  actualizarUsuarioSistema,
+  cambiarPasswordUsuarioSistema,
+  actualizarEstadoUsuarioSistema
+} from '../services/usuariosSistemaService';
 
 export const useSistemaStore = create((set, get) => ({
   health: null,
@@ -13,6 +20,11 @@ export const useSistemaStore = create((set, get) => ({
   loadingBackups: false,
   runningIntegrity: false,
   working: false,
+  loadingUsuarios: false,
+  usuariosSistema: {
+    items: [],
+    roles: []
+  },
   error: null,
   async cargarHealth() {
     set({ loadingHealth: true, error: null });
@@ -99,6 +111,69 @@ export const useSistemaStore = create((set, get) => ({
       await get().cargarBackups();
       set({ working: false });
       return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ working: false, error: message });
+      throw new Error(message);
+    }
+  },
+  async cargarUsuariosSistema(filters = {}) {
+    set({ loadingUsuarios: true, error: null });
+    try {
+      const data = await listarUsuariosSistema(filters);
+      set({ usuariosSistema: data, loadingUsuarios: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ loadingUsuarios: false, error: message });
+      throw new Error(message);
+    }
+  },
+  async crearUsuarioSistema(payload, filters = {}) {
+    set({ working: true, error: null });
+    try {
+      const created = await crearUsuarioSistema(payload);
+      await get().cargarUsuariosSistema(filters);
+      set({ working: false });
+      return created;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ working: false, error: message });
+      throw new Error(message);
+    }
+  },
+  async actualizarUsuarioSistema(id, payload, filters = {}) {
+    set({ working: true, error: null });
+    try {
+      const updated = await actualizarUsuarioSistema(id, payload);
+      await get().cargarUsuariosSistema(filters);
+      set({ working: false });
+      return updated;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ working: false, error: message });
+      throw new Error(message);
+    }
+  },
+  async cambiarPasswordUsuarioSistema(id, payload) {
+    set({ working: true, error: null });
+    try {
+      const result = await cambiarPasswordUsuarioSistema(id, payload);
+      set({ working: false });
+      return result;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ working: false, error: message });
+      throw new Error(message);
+    }
+  },
+  async actualizarEstadoUsuarioSistema(id, activo, filters = {}) {
+    set({ working: true, error: null });
+    try {
+      const updated = await actualizarEstadoUsuarioSistema(id, activo);
+      await get().cargarUsuariosSistema(filters);
+      set({ working: false });
+      return updated;
     } catch (error) {
       const message = parseApiError(error);
       set({ working: false, error: message });

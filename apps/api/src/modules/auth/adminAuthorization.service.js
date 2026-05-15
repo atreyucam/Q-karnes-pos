@@ -164,7 +164,7 @@ async function validateAdminCredentials(authz, trx, options = {}) {
     throw new AppError(400, 'Autorización ADMIN inválida', zodError(parsed.error).details);
   }
 
-  const user = await authRepository.findByUsuario(parsed.data.usuario, trx);
+  const user = await authRepository.findByLoginIdentifier(parsed.data.usuario, trx);
   if (!user || !user.activo || user.rol_nombre !== 'ADMIN') {
     const fail = registerFailedAttempt(key);
     await safeAuditAdminAuthorization({

@@ -313,6 +313,24 @@ function CashClosingModal({
   const [step, setStep] = useState(1);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const efectivoEsperado = Number(summary?.efectivo_esperado || 0);
+  const closeSummary = summary?.resumen_cierre || {
+    apertura: Number(summary?.resumen_caja?.saldo_inicial || turnoActual?.fondo_inicial || 0),
+    efectivo_esperado: efectivoEsperado,
+    transferencias: Number(summary?.resumen_ventas?.transferencia || 0),
+    credito: Number(summary?.resumen_ventas?.credito || 0),
+    total_vendido: Number(summary?.resumen_ventas?.total_ventas || 0),
+    total_cobrado: round2(
+      Number(summary?.resumen_ventas?.efectivo || 0)
+      + Number(summary?.resumen_ventas?.transferencia || 0)
+      + Number(summary?.cobranzas_clientes || 0)
+    ),
+    ingresos: Number(summary?.resumen_caja?.ingresos_efectivo || 0),
+    egresos: Number(summary?.resumen_caja?.egresos_efectivo || 0),
+    ventas_efectivo: Number(summary?.resumen_ventas?.efectivo || 0),
+    cobros_credito_efectivo: Number(summary?.cobranzas_clientes || 0),
+    ingresos_manuales: Number(summary?.ingresos_manuales || 0),
+    egresos_manuales: Number(summary?.egresos_manuales || 0)
+  };
   const contado = Number(form.efectivo_contado || 0);
   const diferencia = round2(contado - efectivoEsperado);
   const hasCountedCash = String(form.efectivo_contado || '').trim() !== '';
@@ -393,9 +411,17 @@ function CashClosingModal({
               <div className="rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
                 <p className="text-sm font-semibold text-[var(--color-text)]">Resumen del turno</p>
                 <div className="mt-3 space-y-3">
-                  <ResultRow label="Saldo inicial" value={formatMoney(summary?.resumen_caja?.saldo_inicial || turnoActual?.fondo_inicial || 0)} />
-                  <ResultRow label="Ingresos efectivo" value={formatMoney(summary?.resumen_caja?.ingresos_efectivo || 0)} />
-                  <ResultRow label="Egresos efectivo" value={formatMoney(summary?.resumen_caja?.egresos_efectivo || 0)} />
+                  <ResultRow label="Apertura de caja" value={formatMoney(closeSummary.apertura)} />
+                  <ResultRow label="Ventas efectivo" value={formatMoney(closeSummary.ventas_efectivo)} />
+                  <ResultRow label="Cobros crédito efectivo" value={formatMoney(closeSummary.cobros_credito_efectivo)} />
+                  <ResultRow label="Ingresos manuales" value={formatMoney(closeSummary.ingresos_manuales)} />
+                  <ResultRow label="Egresos manuales" value={formatMoney(closeSummary.egresos_manuales)} />
+                  <ResultRow label="Ingresos efectivo" value={formatMoney(closeSummary.ingresos)} />
+                  <ResultRow label="Egresos efectivo" value={formatMoney(closeSummary.egresos)} />
+                  <ResultRow label="Transferencias" value={formatMoney(closeSummary.transferencias)} />
+                  <ResultRow label="Crédito" value={formatMoney(closeSummary.credito)} />
+                  <ResultRow label="Total vendido" value={formatMoney(closeSummary.total_vendido)} />
+                  <ResultRow label="Total cobrado" value={formatMoney(closeSummary.total_cobrado)} />
                   <ResultRow label="Efectivo esperado" value={formatMoney(efectivoEsperado)} tone="success" />
                 </div>
               </div>
@@ -444,6 +470,9 @@ function CashClosingModal({
               <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
                   Cancelar
+                </Button>
+                <Button type="button" variant="secondary" onClick={onPrint} disabled={loading}>
+                  Imprimir corte X
                 </Button>
                 <Button type="button" onClick={handleContinue} disabled={loading}>
                   Continuar

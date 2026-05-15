@@ -22,6 +22,7 @@ const {
   buildProductInventoryUpdatePayload,
   computeOutgoingInventory
 } = require('../../helpers/inventoryState');
+const { deriveMarginMetrics, fromCents } = require('../../helpers/marginMetrics');
 
 const stockMinSchema = z.object({ stock_minimo: z.number().nonnegative() });
 
@@ -107,16 +108,84 @@ function resolvePositiveAdjustmentCost(producto, cantidad, costOriginType, manua
 }
 
 async function disponible() {
-  return repository.listDisponible();
+  const rows = await repository.listDisponible();
+  return rows.map((row) => {
+    const precioVenta = Number(row.precio_venta || row.precio_referencia || 0);
+    const costoVisible = Number(row.costo_promedio || 0);
+    const margin = deriveMarginMetrics({ precioVenta, costoVisible });
+    const valorCentavos = Number(row.valor_inventario_centavos || 0);
+    return {
+      ...row,
+      costo_visible: costoVisible,
+      valor_inventario: fromCents(valorCentavos),
+      ...margin
+    };
+  });
 }
 
 async function alertas() {
-  return repository.listAlertas();
+  const rows = await repository.listAlertas();
+  return rows.map((row) => {
+    const precioVenta = Number(row.precio_venta || row.precio_referencia || 0);
+    const costoVisible = Number(row.costo_promedio || 0);
+    const margin = deriveMarginMetrics({ precioVenta, costoVisible });
+    const valorCentavos = Number(row.valor_inventario_centavos || 0);
+    return {
+      ...row,
+      costo_visible: costoVisible,
+      valor_inventario: fromCents(valorCentavos),
+      ...margin
+    };
+  });
 }
 
 async function conteos() {
   const rows = await repository.listConteos();
   return { ok: true, data: rows };
+}
+
+async function conteoDetalle(id) {
+  const conteo = await repository.getConteoById(id);
+  if (!conteo) throw new AppError(404, 'Conteo no encontrado');
+  const detalleRaw = await repository.getConteoDetalle(id);
+  const movimientos = conteo.estado === 'APLICADO'
+    ? await repository.listMovimientosByOrigen('CONTEO', id)
+    : [];
+  const movimientosByProducto = new Map(movimientos.map((row) => [Number(row.producto_id), row]));
+  const detalle = detalleRaw.map((item) => {
+    const diferencia = Number(item.diferencia || 0);
+    const stockSistema = Number(item.stock_sistema || 0);
+    const stockConteo = Number(item.stock_conteo || 0);
+    const costoPromedioProducto = Number(item.producto_costo_promedio || 0);
+    const movimientoAplicado = movimientosByProducto.get(Number(item.producto_id));
+    const costoUsado = movimientoAplicado
+      ? Number(movimientoAplicado.costo_unitario || 0)
+      : (
+          diferencia > 0 && String(item.costo_origen_tipo || '').toUpperCase() === 'MANUAL' && Number(item.costo_unitario_manual || 0) > 0
+            ? Number(item.costo_unitario_manual || 0)
+            : costoPromedioProducto
+        );
+    const impactoValor = movimientoAplicado
+      ? Number(movimientoAplicado.costo_total || 0)
+      : diferencia * costoUsado;
+    const valorAntes = stockSistema * costoPromedioProducto;
+    const valorDespues = valorAntes + impactoValor;
+    return {
+      ...item,
+      costo_usado: costoUsado,
+      impacto_valor: impactoValor,
+      valor_antes: valorAntes,
+      valor_despues: valorDespues,
+      stock_resultante: stockConteo
+    };
+  });
+  return {
+    ok: true,
+    data: {
+      conteo,
+      detalle
+    }
+  };
 }
 
 async function updateStockMinimo(id, body) {
@@ -344,6 +413,36 @@ async function aplicarConteo(id, actorUser) {
       data: {
         conteo: updatedConteo,
         movimientos: movements
+      }
+    };
+  });
+}
+
+async function cancelarConteo(id, actorUser) {
+  return db.transaction(async (trx) => {
+    const conteo = await repository.getConteoById(id, trx);
+    if (!conteo) throw new AppError(404, 'Conteo no encontrado');
+    if (conteo.estado !== 'BORRADOR') throw new AppError(400, 'Solo se puede cancelar un conteo en BORRADOR');
+
+    const updatedConteo = await repository.setConteoEstado(id, 'CANCELADO', trx);
+
+    await auditoriaService.logEvent(
+      {
+        entidad: 'INVENTARIO_CONTEO',
+        entidad_id: id,
+        accion: 'CANCELAR',
+        detalle: {
+          modulo: 'INVENTARIO',
+          actor: actorUser || null
+        }
+      },
+      trx
+    );
+
+    return {
+      ok: true,
+      data: {
+        conteo: updatedConteo
       }
     };
   });
@@ -612,9 +711,11 @@ module.exports = {
   disponible,
   alertas,
   conteos,
+  conteoDetalle,
   updateStockMinimo,
   crearConteo,
   aplicarConteo,
+  cancelarConteo,
   ajustesMasivo,
   listMermas,
   createMerma,

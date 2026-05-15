@@ -12,6 +12,7 @@ async function listAlertas(trx = db) {
   return trx('productos as p')
     .leftJoin('categorias as c', 'p.categoria_id', 'c.id')
     .select('p.*', 'c.nombre as categoria_nombre')
+    .where('p.activo', 1)
     .whereRaw('CAST(p.stock_actual AS REAL) <= CAST(p.stock_minimo AS REAL)')
     .orderBy('p.stock_actual', 'asc');
 }
@@ -61,6 +62,33 @@ async function listConteos(trx = db) {
           FROM inventario_conteo_detalle d
           WHERE d.conteo_id = c.id
         ), 0) as diferencia_total
+      `),
+      trx.raw(`
+        COALESCE((
+          SELECT SUM(CAST(d.diferencia AS REAL))
+          FROM inventario_conteo_detalle d
+          WHERE d.conteo_id = c.id
+        ), 0) as diferencia_neta
+      `),
+      trx.raw(`
+        (
+          SELECT p.nombre
+          FROM inventario_conteo_detalle d
+          LEFT JOIN productos p ON p.id = d.producto_id
+          WHERE d.conteo_id = c.id
+          ORDER BY d.id ASC
+          LIMIT 1
+        ) as item_nombre
+      `),
+      trx.raw(`
+        (
+          SELECT p.unidad_medida
+          FROM inventario_conteo_detalle d
+          LEFT JOIN productos p ON p.id = d.producto_id
+          WHERE d.conteo_id = c.id
+          ORDER BY d.id ASC
+          LIMIT 1
+        ) as item_unidad
       `)
     )
     .orderBy('c.id', 'desc');
@@ -73,10 +101,18 @@ async function getConteoDetalle(conteoId, trx = db) {
       'd.*',
       'p.codigo as producto_codigo',
       'p.nombre as producto_nombre',
-      'p.unidad_medida'
+      'p.unidad_medida',
+      'p.costo_promedio as producto_costo_promedio',
+      'p.valor_inventario_centavos as producto_valor_inventario_centavos'
     )
     .where({ conteo_id: conteoId })
     .orderBy('d.id', 'asc');
+}
+
+async function listMovimientosByOrigen(origenTipo, origenId, trx = db) {
+  return trx('inventario_movimientos')
+    .where({ origen_tipo: origenTipo, origen_id: origenId })
+    .orderBy('id', 'asc');
 }
 
 async function setConteoEstado(id, estado, trx = db) {
@@ -138,6 +174,7 @@ module.exports = {
   getConteoById,
   listConteos,
   getConteoDetalle,
+  listMovimientosByOrigen,
   setConteoEstado,
   setProductoStock,
   setProductoStockAndCost,
