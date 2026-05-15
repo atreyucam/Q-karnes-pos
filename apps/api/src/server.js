@@ -1,9 +1,9 @@
 process.env.TZ = process.env.TZ || 'America/Guayaquil';
 
 const crypto = require('node:crypto');
-const express = require('express');
 const cors = require('cors');
-const { port } = require('./config/env');
+const express = require('express');
+const { port: defaultPort } = require('./config/env');
 const { resolveDbFilePath } = require('./config/dbFile');
 const { ensureSupportDirectories } = require('./config/supportPaths');
 const { createLogger } = require('./helpers/logger');
@@ -31,52 +31,79 @@ const cxpRoutes = require('./modules/cxp/cxp.routes');
 const configuracionRoutes = require('./modules/configuracion/configuracion.routes');
 const transformacionesRoutes = require('./modules/transformaciones/transformaciones.routes');
 
-const app = express();
+function createApp() {
+  const app = express();
 
-app.use(cors());
-app.use(express.json());
-app.use((req, res, next) => {
-  const requestId = req.headers['x-request-id'] || crypto.randomUUID();
-  req.requestId = String(requestId);
-  res.setHeader('x-request-id', req.requestId);
+  app.use(cors());
+  app.use(express.json());
+  app.use((req, res, next) => {
+    const requestId = req.headers['x-request-id'] || crypto.randomUUID();
+    req.requestId = String(requestId);
+    res.setHeader('x-request-id', req.requestId);
 
-  const startAt = Date.now();
-  res.on('finish', () => {
-    if (req.path === '/health') return;
-    apiLogger.info('http_request', 'Request procesada', {
-      requestId: req.requestId,
-      method: req.method,
-      path: req.originalUrl,
-      statusCode: res.statusCode,
-      durationMs: Date.now() - startAt
+    const startAt = Date.now();
+    res.on('finish', () => {
+      if (req.path === '/health') return;
+      apiLogger.info('http_request', 'Request procesada', {
+        requestId: req.requestId,
+        method: req.method,
+        path: req.originalUrl,
+        statusCode: res.statusCode,
+        durationMs: Date.now() - startAt
+      });
     });
+
+    next();
   });
 
-  next();
-});
+  app.get('/health', (req, res) => {
+    res.json({ ok: true, service: 'qkarnes-api' });
+  });
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'qkarnes-api' });
-});
+  app.use('/api/auth', authRoutes);
+  app.use('/api/caja', cajaRoutes);
+  app.use('/api/ventas', ventasRoutes);
+  app.use('/api/inventario', inventarioRoutes);
+  app.use('/api/compras/ordenes', comprasRoutes);
+  app.use('/api/proveedores', proveedoresRoutes);
+  app.use('/api/clientes', clientesRoutes);
+  app.use('/api/reportes', reportesRoutes);
+  app.use('/api/auditoria', auditoriaRoutes);
+  app.use('/api/sistema', sistemaRoutes);
+  app.use('/api/categorias', categoriasRoutes);
+  app.use('/api/productos', productosRoutes);
+  app.use('/api/cxp', cxpRoutes);
+  app.use('/api/configuracion', configuracionRoutes);
+  app.use('/api/transformaciones', transformacionesRoutes);
 
-app.use('/api/auth', authRoutes);
-app.use('/api/caja', cajaRoutes);
-app.use('/api/ventas', ventasRoutes);
-app.use('/api/inventario', inventarioRoutes);
-app.use('/api/compras/ordenes', comprasRoutes);
-app.use('/api/proveedores', proveedoresRoutes);
-app.use('/api/clientes', clientesRoutes);
-app.use('/api/reportes', reportesRoutes);
-app.use('/api/auditoria', auditoriaRoutes);
-app.use('/api/sistema', sistemaRoutes);
-app.use('/api/categorias', categoriasRoutes);
-app.use('/api/productos', productosRoutes);
-app.use('/api/cxp', cxpRoutes);
-app.use('/api/configuracion', configuracionRoutes);
-app.use('/api/transformaciones', transformacionesRoutes);
+  app.use(notFound);
+  app.use(errorHandler);
 
-app.use(notFound);
-app.use(errorHandler);
+  return app;
+}
+
+function startServer(options = {}) {
+  const app = createApp();
+  const port = Number(options.port || process.env.PORT || defaultPort);
+
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, () => {
+      const dbFile = resolveDbFilePath({ nodeEnv });
+      apiLogger.info('api_start', 'API local iniciada', {
+        nodeEnv,
+        port,
+        dbFile,
+        logsDir: supportPaths.logsDir,
+        backupDir: supportPaths.backupDir,
+        supportDir: supportPaths.supportDir,
+        startupRestore
+      });
+      resolve(server);
+    });
+
+    server.on('error', reject);
+  });
+}
 
 process.on('uncaughtException', (error) => {
   apiLogger.critical('uncaught_exception', 'Excepción no controlada en API', { error });
@@ -86,15 +113,14 @@ process.on('unhandledRejection', (reason) => {
   apiLogger.critical('unhandled_rejection', 'Promesa rechazada sin manejo', { reason });
 });
 
-app.listen(port, () => {
-  const dbFile = resolveDbFilePath({ nodeEnv });
-  apiLogger.info('api_start', 'API local iniciada', {
-    nodeEnv,
-    port,
-    dbFile,
-    logsDir: supportPaths.logsDir,
-    backupDir: supportPaths.backupDir,
-    supportDir: supportPaths.supportDir,
-    startupRestore
+if (require.main === module) {
+  startServer().catch((error) => {
+    apiLogger.critical('api_start_fail', 'No se pudo iniciar API', { error });
+    process.exit(1);
   });
-});
+}
+
+module.exports = {
+  createApp,
+  startServer
+};
