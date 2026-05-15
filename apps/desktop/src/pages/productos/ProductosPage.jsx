@@ -46,6 +46,7 @@ const PRODUCT_ROLE_FILTER_OPTIONS = [
   { label: 'Insumo', key: 'es_insumo' },
   { label: 'Merma', key: 'es_merma' }
 ];
+const INVENTORY_GOVERNANCE_MESSAGE = 'El stock y el costo se modifican desde Inventario mediante conteos, ajustes, compras o despiece.';
 
 const emptyProductoForm = {
   id: null,
@@ -814,10 +815,13 @@ export default function ProductosPage() {
                         El margen no se puede calcular porque el producto aún no tiene costo valorizado.
                       </p>
                     ) : null}
+                    <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+                      {INVENTORY_GOVERNANCE_MESSAGE}
+                    </p>
                   </div>
                 ) : (
                   <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs text-[var(--color-text-muted)]">
-                    El stock, costo promedio y valor de inventario se calcularán mediante compras, conteos, ajustes o transformaciones.
+                    {INVENTORY_GOVERNANCE_MESSAGE}
                   </div>
                 )}
 

@@ -73,6 +73,22 @@ async function runSuite(options = {}) {
       );
       assert(blockedStock.ok, 'Debe bloquear stock_actual en productos.update');
 
+      const blockedCost = await expectThrows(
+        () => productosService.update(base.id, {
+          costo_promedio: 4.75
+        }, admin),
+        'inventario trazables'
+      );
+      assert(blockedCost.ok, 'Debe bloquear costo_promedio en productos.update');
+
+      const blockedInventoryValue = await expectThrows(
+        () => productosService.update(base.id, {
+          valor_inventario_centavos: 1900
+        }, admin),
+        'inventario trazables'
+      );
+      assert(blockedInventoryValue.ok, 'Debe bloquear valor_inventario_centavos en productos.update');
+
       const actualizado = await productosService.update(base.id, {
         es_transformable: true,
         stock_minimo: 4
@@ -81,6 +97,8 @@ async function runSuite(options = {}) {
       assert(actualizado.es_vendible === true, 'Perdió flag vendible al editar');
       assert(actualizado.es_transformable === true, 'No activó flag transformable');
       assert(Number(actualizado.stock_actual) === 0, 'No debe actualizar stock_actual desde productos');
+      assert(Number(actualizado.costo_promedio) === 0, 'No debe actualizar costo_promedio desde productos');
+      assert(Number(actualizado.valor_inventario_centavos || 0) === 0, 'No debe actualizar valor_inventario_centavos desde productos');
       add(2, 'Edición de producto bloquea campos de inventario y conserva flags', true);
     } catch (error) {
       add(2, 'Edición de producto bloquea campos de inventario y conserva flags', false, error.message);
