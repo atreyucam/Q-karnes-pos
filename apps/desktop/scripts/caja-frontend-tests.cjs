@@ -46,7 +46,14 @@ function run() {
     assert(cajaPage.includes('Paso 1 de 2') && cajaPage.includes('Paso 2 de 2'), 'Caja no implementa el wizard de cierre');
     assert(cajaPage.includes('Continuar'), 'Caja no expone el paso de conteo');
     assert(cajaPage.includes('Imprimir corte X'), 'Modal de cierre no expone corte X');
+    assert(cajaPage.includes('handlePrintCorteX'), 'Caja no define el flujo de impresión de corte X');
+    assert(cajaPage.includes("import { printCashCutDocument } from './printCashCut';"), 'Caja no importa el helper de impresión de corte X');
+    assert(cajaPage.includes('La caja se cerró correctamente.'), 'Caja no muestra toast tras cierre exitoso');
     assert(cajaPage.includes('La observación es obligatoria cuando existe diferencia'), 'Modal no obliga observación con diferencia');
+    assert(cajaPage.includes('Caja física'), 'Modal no separa la card de caja física');
+    assert(cajaPage.includes('Métodos de pago'), 'Modal no separa la card de métodos de pago');
+    assert(cajaPage.includes('Conteo físico'), 'Modal no separa la card de conteo físico');
+    assert(cajaPage.includes('grid grid-cols-1 gap-4 lg:grid-cols-2'), 'Modal no usa layout responsivo de dos columnas');
     add(2, 'Wizard de cierre contiene validaciones críticas', true);
   } catch (error) {
     add(2, 'Wizard de cierre contiene validaciones críticas', false, error.message);
@@ -78,9 +85,22 @@ function run() {
     assert(cajaPage.includes('Autorización administrativa'), 'Caja no refleja la autorización requerida por backend para diferencias');
     assert(cajaPage.includes('Autorizar cierre'), 'Caja no separa la autorización en sub-modal');
     assert(cajaPage.includes('handleOpenCloseModal'), 'Caja no prepara el modal con datos actualizados antes de cerrar');
+    assert(cajaPage.includes("const footerButtonClass = 'h-9 min-w-[112px] px-4 text-sm font-medium'"), 'Caja no fija métrica estable para botones secundarios');
+    assert(cajaPage.includes("const primaryFooterButtonClass = 'h-9 min-w-[128px] px-4 text-sm font-medium'"), 'Caja no fija métrica estable para botones principales');
     add(5, 'Frontend se alinea con restricciones reales del backend', true);
   } catch (error) {
     add(5, 'Frontend se alinea con restricciones reales del backend', false, error.message);
+  }
+
+  try {
+    const printCashCut = read('src/pages/caja/printCashCut.js');
+    assert(printCashCut.includes('size: 80mm auto;'), 'Corte X no imprime en formato ticket térmico');
+    assert(printCashCut.includes('Corte X'), 'Corte X no define el encabezado del ticket');
+    assert(printCashCut.includes('Caja física'), 'Corte X no incluye bloque de caja física');
+    assert(printCashCut.includes('Métodos de pago'), 'Corte X no incluye bloque de métodos de pago');
+    add(6, 'Corte X usa impresión tipo ticket con datos del turno', true);
+  } catch (error) {
+    add(6, 'Corte X usa impresión tipo ticket con datos del turno', false, error.message);
   }
 
   try {
@@ -92,9 +112,9 @@ function run() {
     assert(!cajaPage.includes('Origen</TableCell>'), 'Caja aún muestra columna Origen');
     assert(cajaPage.includes('function formatTimeQuito'), 'Caja no formatea hora sin fecha');
     assert(cajaPage.includes('function resolveMovementReference'), 'Caja no normaliza referencias legibles');
-    add(6, 'Tabla final usa columnas simplificadas y referencias operativas', true);
+    add(7, 'Tabla final usa columnas simplificadas y referencias operativas', true);
   } catch (error) {
-    add(6, 'Tabla final usa columnas simplificadas y referencias operativas', false, error.message);
+    add(7, 'Tabla final usa columnas simplificadas y referencias operativas', false, error.message);
   }
 
   try {
@@ -102,9 +122,9 @@ function run() {
     assert(cajaPage.includes('label="Efectivo esperado"'), 'Caja perdió el card de Efectivo esperado');
     assert(cajaPage.includes('xl:grid-cols-4'), 'Caja no deja cards completas en estado/ventas');
     assert(cajaPage.includes('PiWallet') && cajaPage.includes('PiArrowsLeftRightBold') && cajaPage.includes('PiCreditCardBold') && cajaPage.includes('PiChartBarBold'), 'Caja no agrega iconos a ventas');
-    add(7, 'Estado y ventas quedan en filas separadas con cards completas', true);
+    add(8, 'Estado y ventas quedan en filas separadas con cards completas', true);
   } catch (error) {
-    add(7, 'Estado y ventas quedan en filas separadas con cards completas', false, error.message);
+    add(8, 'Estado y ventas quedan en filas separadas con cards completas', false, error.message);
   }
 
   printResults(results);
