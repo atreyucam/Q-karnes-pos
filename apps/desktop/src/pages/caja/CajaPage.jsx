@@ -29,15 +29,18 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  Toast,
   Textarea
 } from '../../shared/ui';
 import { useCajaStore } from '../../stores/cajaStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { sanitizeDecimalInput } from '../../lib/formatQty';
 import useFormErrors from '../../shared/hooks/useFormErrors';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
+import { printCashCutDocument } from './printCashCut';
 
 const MAX_CASH_OPERATION_AMOUNT = 5000;
 
@@ -212,6 +215,20 @@ function ResultRow({ label, value, tone = 'default' }) {
   );
 }
 
+function SummaryCard({ title, subtitle, children, className = '' }) {
+  return (
+    <section className={`rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm ${className}`.trim()}>
+      <div className="space-y-1">
+        <h4 className="text-sm font-semibold text-[var(--color-text)]">{title}</h4>
+        {subtitle ? <p className="text-xs text-[var(--color-text-muted)]">{subtitle}</p> : null}
+      </div>
+      <div className="mt-4 space-y-3">
+        {children}
+      </div>
+    </section>
+  );
+}
+
 function StatTile({ icon, label, value, hint, accentClass }) {
   return (
     <div className="rounded-[1.2rem] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
@@ -312,6 +329,9 @@ function CashClosingModal({
 }) {
   const [step, setStep] = useState(1);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const footerButtonClass = 'h-9 min-w-[112px] px-4 text-sm font-medium';
+  const primaryFooterButtonClass = 'h-9 min-w-[128px] px-4 text-sm font-medium';
+  const dangerFooterButtonClass = 'h-9 min-w-[208px] px-4 text-sm font-medium';
   const efectivoEsperado = Number(summary?.efectivo_esperado || 0);
   const closeSummary = summary?.resumen_cierre || {
     apertura: Number(summary?.resumen_caja?.saldo_inicial || turnoActual?.fondo_inicial || 0),
@@ -385,7 +405,7 @@ function CashClosingModal({
 
   return (
     <>
-      <Modal open={open} onClose={onClose} maxWidthClass="max-w-xl" panelClassName="max-h-[90vh] p-0">
+      <Modal open={open} onClose={onClose} maxWidthClass="max-w-4xl" panelClassName="max-h-[90vh] p-0">
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 sm:px-6">
             <div className="flex items-start justify-between gap-4">
@@ -411,39 +431,45 @@ function CashClosingModal({
               {errorMessage ? <Alert tone="error">{errorMessage}</Alert> : null}
 
               {step === 1 ? (
-                <>
-                  <div className="rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
-                    <p className="text-sm font-semibold text-[var(--color-text)]">Resumen del turno</p>
-                    <div className="mt-3 space-y-3">
-                      <ResultRow label="Apertura de caja" value={formatMoney(closeSummary.apertura)} />
-                      <ResultRow label="Ventas efectivo" value={formatMoney(closeSummary.ventas_efectivo)} />
-                      <ResultRow label="Cobros crédito efectivo" value={formatMoney(closeSummary.cobros_credito_efectivo)} />
-                      <ResultRow label="Ingresos manuales" value={formatMoney(closeSummary.ingresos_manuales)} />
-                      <ResultRow label="Egresos manuales" value={formatMoney(closeSummary.egresos_manuales)} />
-                      <ResultRow label="Ingresos efectivo" value={formatMoney(closeSummary.ingresos)} />
-                      <ResultRow label="Egresos efectivo" value={formatMoney(closeSummary.egresos)} />
-                      <ResultRow label="Transferencias" value={formatMoney(closeSummary.transferencias)} />
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <SummaryCard title="Caja física" subtitle="Componentes que explican el efectivo real esperado al cierre." className="bg-[var(--color-surface-muted)]">
+                    <ResultRow label="Apertura de caja" value={formatMoney(closeSummary.apertura)} />
+                    <ResultRow label="Ventas efectivo" value={formatMoney(closeSummary.ventas_efectivo)} />
+                    <ResultRow label="Cobros crédito efectivo" value={formatMoney(closeSummary.cobros_credito_efectivo)} />
+                    <ResultRow label="Ingresos manuales" value={formatMoney(closeSummary.ingresos_manuales)} />
+                    <ResultRow label="Egresos manuales" value={formatMoney(closeSummary.egresos_manuales)} />
+                    <ResultRow label="Ingresos efectivo" value={formatMoney(closeSummary.ingresos)} />
+                    <ResultRow label="Egresos efectivo" value={formatMoney(closeSummary.egresos)} />
+                    <div className="rounded-xl border border-[var(--color-success)]/20 bg-[var(--color-success-soft)] px-3 py-3">
+                      <ResultRow label="Efectivo esperado" value={formatMoney(efectivoEsperado)} tone="success" />
+                    </div>
+                  </SummaryCard>
+
+                  <div className="space-y-4">
+                    <SummaryCard title="Métodos de pago" subtitle="Distribución comercial del turno por método de cobro.">
+                      <ResultRow label="Efectivo" value={formatMoney(closeSummary.ventas_efectivo)} />
+                      <ResultRow label="Transferencia" value={formatMoney(closeSummary.transferencias)} />
                       <ResultRow label="Crédito" value={formatMoney(closeSummary.credito)} />
                       <ResultRow label="Total vendido" value={formatMoney(closeSummary.total_vendido)} />
                       <ResultRow label="Total cobrado" value={formatMoney(closeSummary.total_cobrado)} />
-                      <ResultRow label="Efectivo esperado" value={formatMoney(efectivoEsperado)} tone="success" />
-                    </div>
-                  </div>
+                    </SummaryCard>
 
-                  <div className={`rounded-[1.1rem] border p-4 ${
-                    hasDifference
-                      ? statusMeta.tone === 'danger'
-                        ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger-soft)]'
-                        : 'border-[var(--color-warning)]/35 bg-[var(--color-warning-soft)]'
-                      : 'border-[var(--color-border)] bg-[var(--color-surface)]'
-                  }`}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-[var(--color-text)]">Conteo físico</p>
-                      <StatusBadge tone={statusMeta.tone}>
-                        {statusMeta.badgeLabel}
-                      </StatusBadge>
-                    </div>
-                    <div className="mt-4 space-y-4">
+                    <SummaryCard
+                      title="Conteo físico"
+                      subtitle={statusMeta.message}
+                      className={
+                        hasDifference
+                          ? statusMeta.tone === 'danger'
+                            ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger-soft)]'
+                            : 'border-[var(--color-warning)]/35 bg-[var(--color-warning-soft)]'
+                          : 'border-[var(--color-border)] bg-[var(--color-surface)]'
+                      }
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge tone={statusMeta.tone}>{statusMeta.badgeLabel}</StatusBadge>
+                        <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">{statusMeta.label}</span>
+                      </div>
+                      <ResultRow label="Efectivo esperado" value={formatMoney(efectivoEsperado)} tone="success" />
                       <div>
                         <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Efectivo contado</label>
                         <Input
@@ -457,7 +483,11 @@ function CashClosingModal({
                         />
                         {errors.efectivo_contado ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.efectivo_contado}</p> : null}
                       </div>
-
+                      <ResultRow
+                        label="Diferencia"
+                        value={formatMoney(diferencia)}
+                        tone={hasDifference ? statusMeta.tone : 'default'}
+                      />
                       <div>
                         <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Observación {hasDifference ? '(obligatoria)' : '(opcional)'}</label>
                         <Textarea
@@ -468,52 +498,56 @@ function CashClosingModal({
                         />
                         {errors.observacion ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.observacion}</p> : null}
                       </div>
-                    </div>
+                    </SummaryCard>
                   </div>
-                </>
+                </div>
               ) : (
-                <div className={`rounded-[1.1rem] border p-4 ${
+                <SummaryCard className={`${
                   statusMeta.tone === 'danger'
                     ? 'border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)]'
                     : statusMeta.tone === 'warning'
                       ? 'border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)]'
                       : 'border-[var(--color-success)]/20 bg-[var(--color-success-soft)]'
-                }`}>
+                }`} title="Confirmación del cierre" subtitle={hasDifference ? 'Verifica la diferencia antes de autorizar el cierre final.' : 'El conteo coincide con el esperado del turno.'}>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge tone={statusMeta.tone}>{statusMeta.badgeLabel}</StatusBadge>
                   </div>
-                  <div className="mt-4 space-y-3">
-                    <ResultRow label="Esperado" value={formatMoney(efectivoEsperado)} />
-                    <ResultRow label="Contado" value={formatMoney(contado)} />
-                    <ResultRow label="Diferencia" value={formatMoney(diferencia)} tone={statusMeta.tone} />
-                  </div>
+                  <ResultRow label="Esperado" value={formatMoney(efectivoEsperado)} />
+                  <ResultRow label="Contado" value={formatMoney(contado)} />
+                  <ResultRow label="Diferencia" value={formatMoney(diferencia)} tone={statusMeta.tone} />
                   <p className="mt-4 text-sm text-[var(--color-text-muted)]">
                     {hasDifference ? 'Se detectó una diferencia en caja.' : 'Sin diferencias detectadas.'}
                   </p>
-                </div>
+                </SummaryCard>
               )}
             </div>
           </div>
 
           <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 sm:px-6">
             {step === 1 ? (
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button type="button" variant="secondary" className={footerButtonClass} onClick={onClose} disabled={loading}>
                   Cancelar
                 </Button>
-                <Button type="button" variant="secondary" onClick={onPrint} disabled={loading}>
+                <Button type="button" variant="secondary" className={primaryFooterButtonClass} onClick={onPrint} disabled={loading}>
                   Imprimir corte X
                 </Button>
-                <Button type="button" onClick={handleContinue} disabled={loading}>
+                <Button type="button" className={primaryFooterButtonClass} onClick={handleContinue} disabled={loading}>
                   Continuar
                 </Button>
               </div>
             ) : (
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button type="button" variant="secondary" className={footerButtonClass} onClick={onClose} disabled={loading}>
                   Cancelar
                 </Button>
-                <Button type="button" variant={hasDifference ? 'danger' : 'primary'} onClick={handleConfirm} disabled={loading}>
+                <Button
+                  type="button"
+                  variant={hasDifference ? 'danger' : 'primary'}
+                  className={hasDifference ? dangerFooterButtonClass : primaryFooterButtonClass}
+                  onClick={handleConfirm}
+                  disabled={loading}
+                >
                   {hasDifference ? 'Confirmar cierre con diferencia' : 'Confirmar cierre'}
                 </Button>
               </div>
@@ -558,11 +592,11 @@ function CashClosingModal({
             </div>
           </div>
 
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setAuthModalOpen(false)} disabled={loading}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="button" variant="secondary" className={footerButtonClass} onClick={() => setAuthModalOpen(false)} disabled={loading}>
               Cancelar
             </Button>
-            <Button type="button" variant="danger" onClick={handleAuthorize} disabled={loading}>
+            <Button type="button" variant="danger" className={dangerFooterButtonClass} onClick={handleAuthorize} disabled={loading}>
               Autorizar cierre
             </Button>
           </div>
@@ -575,6 +609,7 @@ function CashClosingModal({
 export default function CajaPage() {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
+  const configuracion = useConfiguracionStore((state) => state.configuracion);
   const {
     turnoActual,
     resumen,
@@ -593,9 +628,13 @@ export default function CajaPage() {
   const [manualModal, setManualModal] = useState(null);
   const [manualForm, setManualForm] = useState({ concepto: '', monto: '' });
   const [manualNumericWarning, setManualNumericWarning] = useState('');
+  const [manualSubmitting, setManualSubmitting] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [closeForm, setCloseForm] = useState({ efectivo_contado: '', observacion: '' });
   const [closeAuth, setCloseAuth] = useState({ usuario: '', password: '' });
+  const [closeSubmitting, setCloseSubmitting] = useState(false);
+  const [successToast, setSuccessToast] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
   const [movimientoDetalle, setMovimientoDetalle] = useState(null);
   const [movementFilter, setMovementFilter] = useState('TODOS');
   const [showOnlyBalanceImpact, setShowOnlyBalanceImpact] = useState(false);
@@ -698,13 +737,14 @@ export default function CajaPage() {
 
   useEffect(() => {
     if (!turnoActual?.id) return undefined;
+    if (closeModalOpen || manualModal || movimientoDetalle) return undefined;
 
     const interval = setInterval(() => {
       void refreshTurnoData(movementFilter);
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [turnoActual?.id, movementFilter]);
+  }, [turnoActual?.id, movementFilter, closeModalOpen, manualModal, movimientoDetalle]);
 
   const resumenCaja = resumen?.resumen_caja || {
     saldo_inicial: Number(turnoActual?.fondo_inicial || 0),
@@ -745,6 +785,17 @@ export default function CajaPage() {
     }
   }, [closeHasDifference, closeAuth.usuario, closeAuth.password]);
 
+  useEffect(() => {
+    if (!successToast) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 2800);
+    const clearTimer = window.setTimeout(() => setSuccessToast(''), 3200);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [successToast]);
+
   const onAbrir = async () => {
     const fondoInicial = Number(fondo || 0);
     const nextErrors = {};
@@ -774,17 +825,22 @@ export default function CajaPage() {
     else if (monto > MAX_CASH_OPERATION_AMOUNT) nextErrors.monto = `El monto no puede superar ${MAX_CASH_OPERATION_AMOUNT}.`;
     if (!manualFormErrors.setErrors(nextErrors)) return;
 
-    await movimientoManual({
-      tipo: manualModal,
-      concepto: manualForm.concepto.trim(),
-      monto
-    });
+    setManualSubmitting(true);
+    try {
+      await movimientoManual({
+        tipo: manualModal,
+        concepto: manualForm.concepto.trim(),
+        monto
+      });
 
-    setManualModal(null);
-    setManualForm({ concepto: '', monto: '' });
-    setManualNumericWarning('');
-    manualFormErrors.resetErrors();
-    await refreshTurnoData();
+      setManualModal(null);
+      setManualForm({ concepto: '', monto: '' });
+      setManualNumericWarning('');
+      manualFormErrors.resetErrors();
+      await refreshTurnoData();
+    } finally {
+      setManualSubmitting(false);
+    }
   };
 
   const handleOpenCloseModal = async () => {
@@ -793,6 +849,15 @@ export default function CajaPage() {
     setCloseAuth({ usuario: '', password: '' });
     await refreshTurnoData();
     setCloseModalOpen(true);
+  };
+
+  const handlePrintCorteX = async () => {
+    const latestSummary = await corteX();
+    printCashCutDocument(latestSummary, {
+      turno: turnoActual,
+      negocioNombre: configuracion?.negocio_nombre || 'QKarnes POS',
+      usuarioNombre: currentUser?.nombre || turnoActual?.usuario_nombre || 'Usuario no identificado'
+    });
   };
 
   const validateCloseCountStep = () => {
@@ -827,20 +892,26 @@ export default function CajaPage() {
 
     if (!validateCloseCountStep()) return false;
 
-    await corteZ({
-      efectivo_contado: closeCountedCash,
-      observacion: closeForm.observacion.trim() || undefined,
-      autorizacion: closeHasDifference
-        ? { usuario: authorization?.usuario?.trim() || closeAuth.usuario.trim(), password: authorization?.password || closeAuth.password }
-        : undefined
-    });
+    setCloseSubmitting(true);
+    try {
+      await corteZ({
+        efectivo_contado: closeCountedCash,
+        observacion: closeForm.observacion.trim() || undefined,
+        autorizacion: closeHasDifference
+          ? { usuario: authorization?.usuario?.trim() || closeAuth.usuario.trim(), password: authorization?.password || closeAuth.password }
+          : undefined
+      });
 
-    setCloseModalOpen(false);
-    setCloseForm({ efectivo_contado: '', observacion: '' });
-    setCloseAuth({ usuario: '', password: '' });
-    cierreFormErrors.resetErrors();
-    await refreshTurnoData();
-    return true;
+      setCloseModalOpen(false);
+      setCloseForm({ efectivo_contado: '', observacion: '' });
+      setCloseAuth({ usuario: '', password: '' });
+      cierreFormErrors.resetErrors();
+      setSuccessToast('La caja se cerró correctamente.');
+      await refreshTurnoData();
+      return true;
+    } finally {
+      setCloseSubmitting(false);
+    }
   };
 
   const quickActions = turnoActual ? (
@@ -1089,7 +1160,7 @@ export default function CajaPage() {
         form={manualForm}
         errors={manualFormErrors.errors}
         numericWarning={manualNumericWarning}
-        loading={loading}
+        loading={manualSubmitting}
         onChange={(field, value) => {
           manualFormErrors.clearFieldError(field);
           if (field === 'monto') {
@@ -1105,7 +1176,7 @@ export default function CajaPage() {
       <CashClosingModal
         open={closeModalOpen}
         onClose={() => setCloseModalOpen(false)}
-        onPrint={() => void corteX()}
+        onPrint={() => void handlePrintCorteX()}
         onConfirm={onCloseShift}
         turnoActual={turnoActual}
         user={currentUser}
@@ -1114,7 +1185,7 @@ export default function CajaPage() {
         auth={closeAuth}
         errors={cierreFormErrors.errors}
         errorMessage={error}
-        loading={loading}
+        loading={closeSubmitting}
         onFormChange={(field, value) => {
           cierreFormErrors.clearFieldError(field);
           setCloseForm((state) => ({ ...state, [field]: value }));
@@ -1150,6 +1221,21 @@ export default function CajaPage() {
           </div>
         </div>
       </Modal>
+
+      {successToast ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone="success"
+            title="Caja cerrada"
+            description={successToast}
+            onClose={() => {
+              setToastVisible(false);
+              setSuccessToast('');
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
