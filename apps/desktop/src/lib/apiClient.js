@@ -2,8 +2,10 @@ import axios from 'axios';
 import { normalizeApiError, toUiMessage } from './apiError.js';
 
 const API_BASE_URL = (() => {
-  const envValue = import.meta?.env?.VITE_API_BASE_URL;
-  if (typeof envValue === 'string' && envValue.trim()) return envValue.trim();
+  const envValue = import.meta.env.VITE_API_BASE_URL;
+  if (typeof envValue === 'string') {
+    return envValue.trim();
+  }
   return 'http://localhost:4100';
 })();
 

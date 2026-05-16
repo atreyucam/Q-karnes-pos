@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:web-local": "vite build --mode web-local",
     "preview": "vite preview",
     "electron:dev": "node electron/dev.cjs",
     "electron:prod": "node electron/run-prod.cjs",

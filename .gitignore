@@ -16,3 +16,6 @@ docs/
 apps/api/data/test-runs/
 .codex-tmp/
 test-results/
+dist-web-local/
+deploy/
+dis-web-local/

@@ -1,6 +1,8 @@
 process.env.TZ = process.env.TZ || 'America/Guayaquil';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const cors = require('cors');
 const express = require('express');
 const { port: defaultPort } = require('./config/env');
@@ -31,8 +33,45 @@ const cxpRoutes = require('./modules/cxp/cxp.routes');
 const configuracionRoutes = require('./modules/configuracion/configuracion.routes');
 const transformacionesRoutes = require('./modules/transformaciones/transformaciones.routes');
 
+function isWebLocalEnabled() {
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.WEB_LOCAL || '').trim().toLowerCase());
+}
+
+function resolveWebDistDir() {
+  const configured = String(process.env.WEB_DIST_DIR || '').trim();
+  if (configured) {
+    return path.isAbsolute(configured) ? configured : path.resolve(process.cwd(), configured);
+  }
+  return path.resolve(__dirname, '..', '..', 'desktop', 'dist');
+}
+
+function mountWebLocalFrontend(app) {
+  const webDistDir = resolveWebDistDir();
+  const indexFile = path.join(webDistDir, 'index.html');
+
+  if (!fs.existsSync(indexFile)) {
+    throw new Error(`WEB_LOCAL activo pero no existe frontend compilado: ${indexFile}`);
+  }
+
+  app.use(express.static(webDistDir, {
+    index: false,
+    fallthrough: true
+  }));
+
+  app.get('*', (req, res, next) => {
+    if (req.path === '/health' || req.path.startsWith('/api/')) return next();
+    return res.sendFile(indexFile);
+  });
+
+  apiLogger.info('web_local_static_enabled', 'Frontend web local habilitado', {
+    webDistDir,
+    indexFile
+  });
+}
+
 function createApp() {
   const app = express();
+  const webLocal = isWebLocalEnabled();
 
   app.use(cors());
   app.use(express.json());
@@ -76,7 +115,13 @@ function createApp() {
   app.use('/api/configuracion', configuracionRoutes);
   app.use('/api/transformaciones', transformacionesRoutes);
 
-  app.use(notFound);
+  if (webLocal) {
+    app.use('/api', notFound);
+    mountWebLocalFrontend(app);
+  } else {
+    app.use(notFound);
+  }
+
   app.use(errorHandler);
 
   return app;
@@ -85,13 +130,17 @@ function createApp() {
 function startServer(options = {}) {
   const app = createApp();
   const port = Number(options.port || process.env.PORT || defaultPort);
+  const host = options.host || process.env.HOST || null;
 
   return new Promise((resolve, reject) => {
-    const server = app.listen(port, () => {
+    const onListening = () => {
       const dbFile = resolveDbFilePath({ nodeEnv });
       apiLogger.info('api_start', 'API local iniciada', {
         nodeEnv,
         port,
+        host: host || '(default)',
+        webLocal: isWebLocalEnabled(),
+        webDistDir: isWebLocalEnabled() ? resolveWebDistDir() : null,
         dbFile,
         logsDir: supportPaths.logsDir,
         backupDir: supportPaths.backupDir,
@@ -99,7 +148,11 @@ function startServer(options = {}) {
         startupRestore
       });
       resolve(server);
-    });
+    };
+
+    const server = host
+      ? app.listen(port, host, onListening)
+      : app.listen(port, onListening);
 
     server.on('error', reject);
   });
@@ -122,5 +175,7 @@ if (require.main === module) {
 
 module.exports = {
   createApp,
-  startServer
+  startServer,
+  isWebLocalEnabled,
+  resolveWebDistDir
 };
