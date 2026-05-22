@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const API_ROOT = path.resolve(__dirname, '..', '..');
 
 function resolveAppDataBase() {
   if (process.platform === 'win32') {
@@ -19,11 +20,11 @@ function resolveDefaultDbFile(nodeEnv) {
   if (nodeEnv === 'test') {
     const testRunId = process.env.TEST_RUN_ID;
     if (testRunId) {
-      return path.resolve(process.cwd(), 'data', 'test-runs', `qkarnes.${testRunId}.sqlite`);
+      return path.join(API_ROOT, 'data', 'test-runs', `qkarnes.${testRunId}.sqlite`);
     }
-    return path.resolve(process.cwd(), 'data', 'qkarnes.test.sqlite');
+    return path.join(API_ROOT, 'data', 'qkarnes.test.sqlite');
   }
-  return path.resolve(process.cwd(), 'data', 'qkarnes.sqlite');
+  return path.join(API_ROOT, 'data', 'qkarnes.sqlite');
 }
 
 function resolveDbFilePath(options = {}) {

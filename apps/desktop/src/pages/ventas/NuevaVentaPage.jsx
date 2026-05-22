@@ -770,12 +770,19 @@ export default function NuevaVentaPage() {
                   const stockText = `${formatStock(producto.stock_actual, unidad)} ${unidad} disponibles`;
 
                   return (
-                    <button
+                    <div
                       key={producto.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       ref={(node) => { productRefs.current[index] = node; }}
                       onMouseEnter={() => setSelectedProductoIndex(index)}
                       onClick={() => addProductoToCarrito(producto)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          addProductoToCarrito(producto);
+                        }
+                      }}
                       className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${stateTintClass} ${
                         selected
                           ? 'border-[var(--color-border-strong)]'
@@ -818,7 +825,7 @@ export default function NuevaVentaPage() {
                           ) : null}
                         </div>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

@@ -58,7 +58,8 @@ export function resolveLegacyReportLocation(section, tab) {
     return LEGACY_TAB_REDIRECTS[normalizedSection];
   }
 
-  if (LEGACY_TAB_REDIRECTS[normalizedTab]) {
+  // Evita redirect circular cuando ya estamos en /reportes/inventario?tab=...
+  if (normalizedSection !== 'inventario' && LEGACY_TAB_REDIRECTS[normalizedTab]) {
     return LEGACY_TAB_REDIRECTS[normalizedTab];
   }
 
