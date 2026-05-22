@@ -26,8 +26,17 @@ function parseDateRange(query = {}) {
   const parsed = dateRangeSchema.safeParse(query);
   if (!parsed.success) throw new AppError(400, 'Fechas inválidas', zodError(parsed.error).details);
 
-  const fechaInicio = parsed.data.fecha_inicio || parsed.data.desde || undefined;
-  const fechaFin = parsed.data.fecha_fin || parsed.data.hasta || undefined;
+  let fechaInicio = parsed.data.fecha_inicio || parsed.data.desde || undefined;
+  let fechaFin = parsed.data.fecha_fin || parsed.data.hasta || undefined;
+
+  if (!fechaInicio && !fechaFin) {
+    fechaFin = currentBusinessDate();
+    fechaInicio = shiftDate(fechaFin, -6);
+  } else if (fechaInicio && !fechaFin) {
+    fechaFin = fechaInicio;
+  } else if (!fechaInicio && fechaFin) {
+    fechaInicio = fechaFin;
+  }
 
   if (fechaInicio && !isValidDateString(fechaInicio)) {
     throw new AppError(400, 'fecha_inicio inválida');
@@ -192,6 +201,10 @@ function roundQty(value) {
 
 function summarizeMoney(items, field) {
   return moneyRound(items.reduce((acc, item) => acc + Number(item[field] || 0), 0));
+}
+
+function summarizeCentavos(items, field) {
+  return items.reduce((acc, item) => acc + Number(item[field] || 0), 0);
 }
 
 function emptyDashboardData() {
@@ -445,7 +458,8 @@ function buildHourlySeries(rows = []) {
     rows.map((row) => [
       String(row.hora || '').padStart(2, '0').slice(0, 2),
       {
-        total: moneyRound(row.total),
+        total: centsToMoney(Number(row.total_centavos || 0)),
+        total_centavos: Number(row.total_centavos || 0),
         transacciones: Number(row.transacciones || 0)
       }
     ])
@@ -462,16 +476,16 @@ function summarizeReceivables(rows = []) {
   const grouped = new Map();
 
   for (const row of rows) {
-    const saldo = moneyRound(row.saldo);
+    const saldoCentavos = Number(row.saldo_centavos || 0);
     const existing = grouped.get(row.cliente_id) || {
       cliente_id: Number(row.cliente_id),
       cliente: row.cliente_nombre || 'Cliente',
-      saldo_pendiente: 0,
+      saldo_pendiente_centavos: 0,
       proximo_vencimiento: row.fecha_vencimiento || null,
       documentos: 0
     };
 
-    existing.saldo_pendiente = moneyRound(existing.saldo_pendiente + saldo);
+    existing.saldo_pendiente_centavos += saldoCentavos;
     existing.documentos += 1;
 
     if (!existing.proximo_vencimiento || (row.fecha_vencimiento && row.fecha_vencimiento < existing.proximo_vencimiento)) {
@@ -481,10 +495,16 @@ function summarizeReceivables(rows = []) {
     grouped.set(row.cliente_id, existing);
   }
 
-  const clientes = Array.from(grouped.values()).sort((a, b) => Number(b.saldo_pendiente) - Number(a.saldo_pendiente));
+  const clientes = Array.from(grouped.values())
+    .map((item) => ({
+      ...item,
+      saldo_pendiente: centsToMoney(item.saldo_pendiente_centavos)
+    }))
+    .sort((a, b) => Number(b.saldo_pendiente_centavos) - Number(a.saldo_pendiente_centavos));
 
   return {
-    total: summarizeMoney(clientes, 'saldo_pendiente'),
+    total_centavos: summarizeCentavos(clientes, 'saldo_pendiente_centavos'),
+    total: centsToMoney(summarizeCentavos(clientes, 'saldo_pendiente_centavos')),
     clientes_con_deuda: clientes.length,
     documentos: rows.length,
     top_clientes: clientes.slice(0, 3)
@@ -622,10 +642,10 @@ function buildAlerts({ stockItems = [], receivables, openTurno, stagnantProducts
 
 function buildLatestSales(rows = []) {
   return rows.map((row) => {
-    const total = moneyRound(row.total);
-    const montoContado = moneyRound(row.monto_contado);
-    const montoTransferencia = moneyRound(row.monto_transferencia);
-    const montoCredito = moneyRound(row.monto_credito);
+    const totalCentavos = Number(row.total_centavos || 0);
+    const montoContadoCentavos = Number(row.monto_contado_centavos || 0);
+    const montoTransferenciaCentavos = Number(row.monto_transferencia_centavos || 0);
+    const montoCreditoCentavos = Number(row.monto_credito_centavos || 0);
 
     return {
       id: Number(row.id),
@@ -633,37 +653,59 @@ function buildLatestSales(rows = []) {
       estado: row.estado,
       hora: String(row.fecha || '').slice(11, 16),
       cliente: row.cliente_nombre || 'Consumidor final',
-      metodo: buildMetodoPago(montoContado, montoTransferencia, montoCredito),
-      total,
+      metodo: buildMetodoPago(
+        centsToMoney(montoContadoCentavos),
+        centsToMoney(montoTransferenciaCentavos),
+        centsToMoney(montoCreditoCentavos)
+      ),
+      total: centsToMoney(totalCentavos),
+      total_centavos: totalCentavos,
       usuario: row.usuario_nombre || '-'
     };
   });
 }
 
-async function dashboard() {
+function sanitizeDashboardForRole(data, actorUser) {
+  if (actorUser?.rol?.nombre !== 'CAJERO') return data;
+
+  return {
+    ...data,
+    kpis: {
+      ...data.kpis,
+      deudas_clientes: 0,
+      variacion_deudas: 0,
+      clientes_con_deuda: 0
+    },
+    actividad_reciente: [],
+    alertas_operativas: (data.alertas_operativas || []).filter((item) => item.category !== 'deudas'),
+    alertas: (data.alertas || []).filter((item) => item.category !== 'deudas')
+  };
+}
+
+async function dashboard(actorUser) {
   const snapshot = await repository.dashboard();
   const data = emptyDashboardData();
-  const ventasHoy = Number(snapshot?.ventas_hoy?.total || 0);
-  const ventasAyer = Number(snapshot?.ventas_ayer?.total || 0);
+  const ventasHoyCentavos = Number(snapshot?.ventas_hoy?.total_centavos || 0);
+  const ventasAyerCentavos = Number(snapshot?.ventas_ayer?.total_centavos || 0);
   const transaccionesHoy = Number(snapshot?.ventas_hoy?.transacciones || 0);
   const transaccionesAyer = Number(snapshot?.ventas_ayer?.transacciones || 0);
   const receivables = summarizeReceivables(snapshot?.cxc_pendiente || []);
-  const deudaAyer = Number(snapshot?.cxc_pendiente_ayer?.total || 0);
+  const deudaAyerCentavos = Number(snapshot?.cxc_pendiente_ayer?.total_centavos || 0);
   const stockBajoHoy = Number(snapshot?.stock_bajo?.total || 0);
   const stockBajoAyer = Number(snapshot?.stock_bajo_ayer?.total || 0);
 
   data.generated_at = new Date().toISOString();
   data.business_date = currentBusinessDate();
   data.kpis = {
-    ventas_hoy: moneyRound(ventasHoy),
+    ventas_hoy: centsToMoney(ventasHoyCentavos),
     transacciones_hoy: transaccionesHoy,
     stock_bajo: stockBajoHoy,
     deudas_clientes: receivables.total,
-    ticket_promedio: transaccionesHoy > 0 ? moneyRound(ventasHoy / transaccionesHoy) : 0,
-    variacion_ventas_vs_ayer: calculatePercentVariation(ventasHoy, ventasAyer),
+    ticket_promedio: transaccionesHoy > 0 ? centsToMoney(Math.round(ventasHoyCentavos / transaccionesHoy)) : 0,
+    variacion_ventas_vs_ayer: calculatePercentVariation(ventasHoyCentavos, ventasAyerCentavos),
     variacion_transacciones_vs_ayer: calculatePercentVariation(transaccionesHoy, transaccionesAyer),
     variacion_stock_vs_ayer: calculateDelta(stockBajoHoy, stockBajoAyer),
-    variacion_deudas: calculatePercentVariation(receivables.total, deudaAyer),
+    variacion_deudas: calculatePercentVariation(receivables.total_centavos, deudaAyerCentavos),
     clientes_con_deuda: receivables.clientes_con_deuda,
     caja_abierta: Boolean(snapshot?.turno_abierto?.id)
   };
@@ -678,7 +720,7 @@ async function dashboard() {
   data.ultimas_ventas = buildLatestSales(snapshot?.ultimas_ventas || []);
   data.alertas = data.alertas_operativas;
 
-  return { ok: true, data };
+  return { ok: true, data: sanitizeDashboardForRole(data, actorUser) };
 }
 
 async function resumenOperativo(query = {}) {
@@ -719,7 +761,7 @@ async function resumenOperativo(query = {}) {
   const proveedoresPendientes = cxpResponse.data?.items || [];
   const dashboardData = dashboardResponse.data || {};
   const inconsistencias = inventarioItems.filter((row) => Math.abs(Number(row.diferencia_stock || 0)) > 0.0001);
-  const ventas7Map = new Map((ventas7Response.data || []).map((row) => [row.fecha, toCentavos(row.total || 0)]));
+  const ventas7Map = new Map((ventas7Response.data || []).map((row) => [row.fecha, Number(row.total_centavos || 0)]));
   const productosCriticos = [...inventarioItems]
     .filter((row) => Boolean(row.bajo_minimo) || Number(row.stock_actual || 0) <= 0)
     .sort((left, right) => Number(left.stock_actual || 0) - Number(right.stock_actual || 0))
@@ -769,9 +811,9 @@ async function resumenOperativo(query = {}) {
         stock_critico: productosCriticos.length,
         inconsistencias_stock: inconsistencias.length,
         clientes_con_deuda: Number(cxcResponse.data?.resumen?.clientes_con_deuda || 0),
-        deuda_clientes_centavos: toCentavos(cxcResponse.data?.resumen?.saldo_total_pendiente || 0),
+        deuda_clientes_centavos: Number(cxcResponse.data?.resumen?.saldo_total_pendiente_centavos || 0),
         proveedores_pendientes: Number(cxpResponse.data?.resumen?.proveedores_con_deuda || 0),
-        saldo_proveedores_centavos: toCentavos(cxpResponse.data?.resumen?.saldo_total_pendiente || 0),
+        saldo_proveedores_centavos: Number(cxpResponse.data?.resumen?.saldo_total_pendiente_centavos || 0),
         valorizacion_total_inventario_centavos: Number(valorizacion.valor_total_inventario_centavos || 0)
       },
       ventas_ultimos_7_dias: buildDateSeries(range7, ventas7Map),
@@ -1189,22 +1231,29 @@ async function ventas(query = {}) {
   const rows = await repository.ventasReporte(bounds);
 
   const items = rows.map((row) => {
-    const totalDocumento = moneyRound(row.total_documento);
-    const totalDevuelto = moneyRound(row.total_devuelto);
-    const total = moneyRound(Math.max(totalDocumento - totalDevuelto, 0));
-    const montoContado = moneyRound(row.monto_contado);
-    const montoTransferencia = moneyRound(row.monto_transferencia);
-    const montoCredito = moneyRound(row.monto_credito);
+    const totalDocumentoCentavos = Number(row.total_documento_centavos || 0);
+    const totalDevueltoCentavos = Number(row.total_devuelto_centavos || 0);
+    const totalCentavos = Math.max(totalDocumentoCentavos - totalDevueltoCentavos, 0);
+    const montoContadoCentavos = Number(row.monto_contado_centavos || 0);
+    const montoTransferenciaCentavos = Number(row.monto_transferencia_centavos || 0);
+    const montoCreditoCentavos = Number(row.monto_credito_centavos || 0);
 
     return {
       id: row.id,
       fecha: row.fecha,
       numero_venta: row.numero_venta,
       cliente: row.cliente_nombre || 'Consumidor final',
-      total,
-      total_documento: totalDocumento,
-      total_devuelto: totalDevuelto,
-      metodo_pago: buildMetodoPago(montoContado, montoTransferencia, montoCredito),
+      total_centavos: totalCentavos,
+      total: centsToMoney(totalCentavos),
+      total_documento_centavos: totalDocumentoCentavos,
+      total_documento: centsToMoney(totalDocumentoCentavos),
+      total_devuelto_centavos: totalDevueltoCentavos,
+      total_devuelto: centsToMoney(totalDevueltoCentavos),
+      metodo_pago: buildMetodoPago(
+        centsToMoney(montoContadoCentavos),
+        centsToMoney(montoTransferenciaCentavos),
+        centsToMoney(montoCreditoCentavos)
+      ),
       usuario: row.usuario_nombre || '-',
       estado: row.estado
     };
@@ -1218,8 +1267,10 @@ async function ventas(query = {}) {
         fecha_fin: bounds.fecha_fin
       },
       resumen: {
-        total_ventas: summarizeMoney(items, 'total'),
-        total_devuelto: summarizeMoney(items, 'total_devuelto'),
+        total_ventas_centavos: summarizeCentavos(items, 'total_centavos'),
+        total_ventas: centsToMoney(summarizeCentavos(items, 'total_centavos')),
+        total_devuelto_centavos: summarizeCentavos(items, 'total_devuelto_centavos'),
+        total_devuelto: centsToMoney(summarizeCentavos(items, 'total_devuelto_centavos')),
         cantidad_ventas: items.length
       },
       items
@@ -1233,7 +1284,8 @@ async function ventasDiarias(query = {}) {
   const data = rows.map((row) => ({
     fecha: row.fecha,
     cantidad: Number(row.cantidad || 0),
-    total: moneyRound(row.total)
+    total_centavos: Number(row.total_centavos || 0),
+    total: centsToMoney(Number(row.total_centavos || 0))
   }));
   return { ok: true, data };
 }
@@ -1249,7 +1301,8 @@ async function ventasProducto(query = {}) {
     nombre: row.nombre,
     unidad_medida: row.unidad_medida || row.unidad || 'UND',
     cantidad_vendida: roundQty(row.cantidad_vendida),
-    total_vendido: moneyRound(row.total_vendido)
+    total_vendido_centavos: Number(row.total_vendido_centavos || 0),
+    total_vendido: centsToMoney(Number(row.total_vendido_centavos || 0))
   }));
 
   return {
@@ -1262,7 +1315,8 @@ async function ventasProducto(query = {}) {
       resumen: {
         productos: items.length,
         cantidad_vendida_total: roundQty(items.reduce((acc, item) => acc + Number(item.cantidad_vendida || 0), 0)),
-        total_vendido: summarizeMoney(items, 'total_vendido')
+        total_vendido_centavos: summarizeCentavos(items, 'total_vendido_centavos'),
+        total_vendido: centsToMoney(summarizeCentavos(items, 'total_vendido_centavos'))
       },
       items
     }
@@ -1278,7 +1332,8 @@ async function topProductos(query = {}) {
     nombre: row.nombre,
     unidad_medida: row.unidad_medida || row.unidad || 'UND',
     cantidad_total: roundQty(row.cantidad_vendida),
-    venta_total: moneyRound(row.total_vendido)
+    venta_total_centavos: Number(row.total_vendido_centavos || 0),
+    venta_total: centsToMoney(Number(row.total_vendido_centavos || 0))
   }));
   return { ok: true, data };
 }
@@ -1344,7 +1399,8 @@ async function caja(query = {}) {
     fecha: row.fecha,
     tipo_movimiento: row.tipo,
     sentido: row.sentido,
-    monto: moneyRound(row.monto),
+    monto_centavos: Number(row.monto_centavos || toCentavos(row.monto || 0)),
+    monto: centsToMoney(Number(row.monto_centavos || toCentavos(row.monto || 0))),
     descripcion: row.descripcion,
     usuario: row.usuario_nombre || '-',
     documento_origen: row.documento_origen,
@@ -1361,12 +1417,18 @@ async function caja(query = {}) {
         fecha_fin: bounds.fecha_fin
       },
       resumen: {
-        total_ingresos: moneyRound(
-          items.filter((item) => item.sentido === 'INGRESO').reduce((acc, item) => acc + Number(item.monto || 0), 0)
-        ),
-        total_egresos: moneyRound(
-          items.filter((item) => item.sentido === 'EGRESO').reduce((acc, item) => acc + Number(item.monto || 0), 0)
-        ),
+        total_ingresos_centavos: items
+          .filter((item) => item.sentido === 'INGRESO')
+          .reduce((acc, item) => acc + Number(item.monto_centavos || 0), 0),
+        total_egresos_centavos: items
+          .filter((item) => item.sentido === 'EGRESO')
+          .reduce((acc, item) => acc + Number(item.monto_centavos || 0), 0),
+        total_ingresos: centsToMoney(items
+          .filter((item) => item.sentido === 'INGRESO')
+          .reduce((acc, item) => acc + Number(item.monto_centavos || 0), 0)),
+        total_egresos: centsToMoney(items
+          .filter((item) => item.sentido === 'EGRESO')
+          .reduce((acc, item) => acc + Number(item.monto_centavos || 0), 0)),
         movimientos: items.length
       },
       items
@@ -1379,17 +1441,17 @@ async function cxc() {
   const grouped = new Map();
 
   for (const row of documentos) {
-    const saldo = moneyRound(row.saldo);
+    const saldoCentavos = Number(row.saldo_centavos || 0);
     const existing = grouped.get(row.cliente_id) || {
       cliente_id: row.cliente_id,
       cliente: row.cliente_nombre,
-      saldo_pendiente: 0,
+      saldo_pendiente_centavos: 0,
       ventas_asociadas: 0,
       proximo_vencimiento: row.fecha_vencimiento,
       documentos: []
     };
 
-    existing.saldo_pendiente = moneyRound(existing.saldo_pendiente + saldo);
+    existing.saldo_pendiente_centavos += saldoCentavos;
     existing.ventas_asociadas += 1;
     if (!existing.proximo_vencimiento || row.fecha_vencimiento < existing.proximo_vencimiento) {
       existing.proximo_vencimiento = row.fecha_vencimiento;
@@ -1398,7 +1460,8 @@ async function cxc() {
       venta_id: row.venta_id,
       numero_documento: row.numero_documento,
       fecha_vencimiento: row.fecha_vencimiento,
-      saldo
+      saldo_centavos: saldoCentavos,
+      saldo: centsToMoney(saldoCentavos)
     });
 
     grouped.set(row.cliente_id, existing);
@@ -1407,15 +1470,17 @@ async function cxc() {
   const items = Array.from(grouped.values())
     .map((item) => ({
       ...item,
+      saldo_pendiente: centsToMoney(item.saldo_pendiente_centavos),
       ventas_referencia: item.documentos.map((documento) => documento.numero_documento).join(', ')
     }))
-    .sort((a, b) => Number(b.saldo_pendiente) - Number(a.saldo_pendiente));
+    .sort((a, b) => Number(b.saldo_pendiente_centavos) - Number(a.saldo_pendiente_centavos));
 
   return {
     ok: true,
     data: {
       resumen: {
-        saldo_total_pendiente: summarizeMoney(items, 'saldo_pendiente'),
+        saldo_total_pendiente_centavos: summarizeCentavos(items, 'saldo_pendiente_centavos'),
+        saldo_total_pendiente: centsToMoney(summarizeCentavos(items, 'saldo_pendiente_centavos')),
         clientes_con_deuda: items.length,
         ventas_pendientes: documentos.length
       },
@@ -1429,17 +1494,17 @@ async function cxp() {
   const grouped = new Map();
 
   for (const row of documentos) {
-    const saldo = moneyRound(row.saldo);
+    const saldoCentavos = Number(row.saldo_centavos || 0);
     const existing = grouped.get(row.proveedor_id) || {
       proveedor_id: row.proveedor_id,
       proveedor: row.proveedor_nombre,
-      saldo_pendiente: 0,
+      saldo_pendiente_centavos: 0,
       facturas_asociadas: 0,
       proximo_vencimiento: row.fecha_vencimiento,
       documentos: []
     };
 
-    existing.saldo_pendiente = moneyRound(existing.saldo_pendiente + saldo);
+    existing.saldo_pendiente_centavos += saldoCentavos;
     existing.facturas_asociadas += 1;
     if (!existing.proximo_vencimiento || row.fecha_vencimiento < existing.proximo_vencimiento) {
       existing.proximo_vencimiento = row.fecha_vencimiento;
@@ -1448,7 +1513,8 @@ async function cxp() {
       factura_id: row.factura_id,
       numero_documento: row.numero_documento,
       fecha_vencimiento: row.fecha_vencimiento,
-      saldo
+      saldo_centavos: saldoCentavos,
+      saldo: centsToMoney(saldoCentavos)
     });
 
     grouped.set(row.proveedor_id, existing);
@@ -1457,15 +1523,17 @@ async function cxp() {
   const items = Array.from(grouped.values())
     .map((item) => ({
       ...item,
+      saldo_pendiente: centsToMoney(item.saldo_pendiente_centavos),
       facturas_referencia: item.documentos.map((documento) => documento.numero_documento).join(', ')
     }))
-    .sort((a, b) => Number(b.saldo_pendiente) - Number(a.saldo_pendiente));
+    .sort((a, b) => Number(b.saldo_pendiente_centavos) - Number(a.saldo_pendiente_centavos));
 
   return {
     ok: true,
     data: {
       resumen: {
-        saldo_total_pendiente: summarizeMoney(items, 'saldo_pendiente'),
+        saldo_total_pendiente_centavos: summarizeCentavos(items, 'saldo_pendiente_centavos'),
+        saldo_total_pendiente: centsToMoney(summarizeCentavos(items, 'saldo_pendiente_centavos')),
         proveedores_con_deuda: items.length,
         facturas_pendientes: documentos.length
       },
@@ -1484,8 +1552,12 @@ async function compras(query = {}) {
     proveedor: row.proveedor_nombre || '-',
     numero_factura: row.numero_factura,
     fecha: row.fecha,
-    total_compra: moneyRound(row.total),
-    metodo_pago: String(row.metodo_pago || '').toUpperCase() || 'CONTADO',
+    total_compra_centavos: Number(row.total_centavos || toCentavos(row.total || 0)),
+    total_compra: centsToMoney(Number(row.total_centavos || toCentavos(row.total || 0))),
+    condicion_pago: String(row.metodo_pago || '').toUpperCase() || 'CONTADO',
+    metodo_pago: String(row.metodo_pago_real || row.metodo_pago || '').toUpperCase() || 'EFECTIVO',
+    saldo_pendiente_centavos: Math.max(0, Number(row.cargos_centavos || 0) - Number(row.abonos_centavos || 0)),
+    saldo_pendiente: centsToMoney(Math.max(0, Number(row.cargos_centavos || 0) - Number(row.abonos_centavos || 0))),
     orden_id: row.orden_id || null,
     estado: row.estado_orden || 'RECIBIDA'
   }));
@@ -1507,9 +1579,11 @@ async function compras(query = {}) {
         estado: filters.estado || null
       },
       resumen: {
-        total_compras: summarizeMoney(items, 'total_compra'),
+        total_compras_centavos: summarizeCentavos(items, 'total_compra_centavos'),
+        total_compras: centsToMoney(summarizeCentavos(items, 'total_compra_centavos')),
         cantidad_compras: items.length,
-        ticket_promedio_compra: items.length > 0 ? moneyRound(summarizeMoney(items, 'total_compra') / items.length) : 0,
+        ticket_promedio_compra_centavos: items.length > 0 ? Math.round(summarizeCentavos(items, 'total_compra_centavos') / items.length) : 0,
+        ticket_promedio_compra: items.length > 0 ? centsToMoney(Math.round(summarizeCentavos(items, 'total_compra_centavos') / items.length)) : 0,
         proveedor_top: topProveedor ? topProveedor.proveedor : null
       },
       items
@@ -1530,7 +1604,8 @@ async function comprasProductos(query = {}) {
     proveedor: row.proveedor_nombre || null,
     unidad_medida: row.unidad_medida || row.unidad || 'UND',
     cantidad_comprada: Number(row.cantidad_comprada || 0),
-    total_comprado: moneyRound(row.total_comprado),
+    total_comprado_centavos: Number(row.total_comprado_centavos || 0),
+    total_comprado: centsToMoney(Number(row.total_comprado_centavos || 0)),
     facturas: Number(row.facturas || 0)
   }));
 
@@ -1546,7 +1621,8 @@ async function comprasProductos(query = {}) {
       resumen: {
         productos: items.length,
         cantidad_total_comprada: roundQty(items.reduce((acc, item) => acc + Number(item.cantidad_comprada || 0), 0)),
-        total_comprado: summarizeMoney(items, 'total_comprado')
+        total_comprado_centavos: summarizeCentavos(items, 'total_comprado_centavos'),
+        total_comprado: centsToMoney(summarizeCentavos(items, 'total_comprado_centavos'))
       },
       items
     }
@@ -1889,6 +1965,63 @@ async function cajaDiaria(query = {}) {
     usuario: row.usuario_nombre || 'Sin usuario',
     monto_centavos: Number(row.monto_centavos || 0)
   }));
+  const movementTotals = {
+    ventas_efectivo_centavos: 0,
+    ventas_transferencia_centavos: 0,
+    ventas_credito_centavos: 0,
+    abonos_efectivo_centavos: 0,
+    abonos_transferencia_centavos: 0,
+    compras_efectivo_centavos: 0,
+    compras_transferencia_centavos: 0,
+    pagos_proveedor_efectivo_centavos: 0,
+    pagos_proveedor_transferencia_centavos: 0,
+    devoluciones_efectivo_centavos: 0,
+    anulaciones_efectivo_centavos: 0,
+    ingresos_manuales_centavos: 0,
+    egresos_manuales_centavos: 0
+  };
+
+  for (const movimiento of movimientos) {
+    const amount = Number(movimiento.monto_centavos || 0);
+    const metodo = String(movimiento.metodo_pago || '').trim().toUpperCase();
+    switch (movimiento.tipo) {
+      case 'VENTA_CONTADO':
+        movementTotals.ventas_efectivo_centavos += amount;
+        break;
+      case 'VENTA_TRANSFERENCIA':
+        movementTotals.ventas_transferencia_centavos += amount;
+        break;
+      case 'VENTA_CREDITO':
+        movementTotals.ventas_credito_centavos += amount;
+        break;
+      case 'ABONO_CLIENTE':
+        if (metodo === 'TRANSFERENCIA') movementTotals.abonos_transferencia_centavos += amount;
+        else movementTotals.abonos_efectivo_centavos += amount;
+        break;
+      case 'COMPRA_CONTADO':
+        if (metodo === 'TRANSFERENCIA') movementTotals.compras_transferencia_centavos += amount;
+        else movementTotals.compras_efectivo_centavos += amount;
+        break;
+      case 'PAGO_PROVEEDOR':
+        if (metodo === 'TRANSFERENCIA') movementTotals.pagos_proveedor_transferencia_centavos += amount;
+        else movementTotals.pagos_proveedor_efectivo_centavos += amount;
+        break;
+      case 'DEVOLUCION_EFECTIVO':
+        movementTotals.devoluciones_efectivo_centavos += amount;
+        break;
+      case 'ANULACION_VENTA_EFECTIVO':
+        movementTotals.anulaciones_efectivo_centavos += amount;
+        break;
+      case 'INGRESO':
+        movementTotals.ingresos_manuales_centavos += amount;
+        break;
+      case 'EGRESO':
+        movementTotals.egresos_manuales_centavos += amount;
+        break;
+      default:
+        break;
+    }
+  }
 
   return {
     ok: true,
@@ -1902,7 +2035,8 @@ async function cajaDiaria(query = {}) {
         saldo_final_centavos: saldoInicialCentavos + ingresosCentavos - egresosCentavos,
         saldo_real_centavos: (saldoInicialCentavos + ingresosCentavos - egresosCentavos) + Number(resumen.diferencia_centavos || 0),
         diferencia_centavos: Number(resumen.diferencia_centavos || 0),
-        turnos: Number(resumen.turnos || 0)
+        turnos: Number(resumen.turnos || 0),
+        ...movementTotals
       },
       turnos: (snapshot.turnos || []).map((row) => ({
         turno_id: Number(row.id),

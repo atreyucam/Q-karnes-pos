@@ -5,7 +5,7 @@ const { authorizeRoles } = require('../../middlewares/authorizeRoles');
 
 const router = express.Router();
 
-router.use(authenticate, authorizeRoles('ADMIN', 'CAJERO'));
+router.use(authenticate, authorizeRoles('ADMIN'));
 
 router.get('/', controller.list);
 router.post('/', controller.create);

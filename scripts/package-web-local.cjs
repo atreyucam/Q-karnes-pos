@@ -165,17 +165,15 @@ process.env.JWT_SECRET = ensureJwtSecret();
 async function ensureDatabaseReady() {
   const knexConfig = require(path.join(apiRoot, 'knexfile.js'));
   const knex = require('knex')(knexConfig.production);
+  const { ensureUsersReadyForRuntime } = require(path.join(apiRoot, 'src', 'config', 'runtimeSecurity.js'));
 
   try {
     await knex.migrate.latest();
-
-    const hasUsuariosTable = await knex.schema.hasTable('usuarios');
-    if (!hasUsuariosTable) throw new Error('La tabla usuarios no existe luego de ejecutar migraciones');
-
-    const [{ totalUsuarios }] = await knex('usuarios').count({ totalUsuarios: '*' });
-    if (Number(totalUsuarios || 0) === 0) {
-      await knex.seed.run({ specific: '001_demo.js' });
-    }
+    await ensureUsersReadyForRuntime({
+      knex,
+      nodeEnv: process.env.NODE_ENV,
+      context: 'Web Local portable'
+    });
   } finally {
     await knex.destroy();
   }

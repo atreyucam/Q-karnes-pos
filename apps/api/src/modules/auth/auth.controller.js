@@ -12,7 +12,19 @@ const me = asyncHandler(async (req, res) => {
   return successResponse(res, result);
 });
 
+const bootstrapStatus = asyncHandler(async (req, res) => {
+  const result = await service.bootstrapStatus();
+  return successResponse(res, result);
+});
+
+const bootstrapAdmin = asyncHandler(async (req, res) => {
+  const result = await service.bootstrapAdmin(req.body);
+  return successResponse(res, result);
+});
+
 module.exports = {
   login,
-  me
+  me,
+  bootstrapStatus,
+  bootstrapAdmin
 };

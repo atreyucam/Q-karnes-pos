@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Panel, PanelHeader } from '../../shared/ui';
+import { useAuthStore } from '../../stores/authStore';
 import {
   PiArrowUpRight,
   PiCashRegister,
@@ -50,6 +51,10 @@ const secondaryActions = [
 
 export default function DashboardQuickActions() {
   const navigate = useNavigate();
+  const role = useAuthStore((state) => state.user?.rol?.nombre);
+  const visibleSecondaryActions = role === 'ADMIN'
+    ? secondaryActions
+    : secondaryActions.filter((action) => action.id === 'caja' || action.id === 'ventas');
 
   return (
     <Panel className="p-5">
@@ -74,7 +79,7 @@ export default function DashboardQuickActions() {
       </button>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {secondaryActions.map(({ id, title, description, to, Icon }) => (
+        {visibleSecondaryActions.map(({ id, title, description, to, Icon }) => (
           <button
             key={id}
             type="button"

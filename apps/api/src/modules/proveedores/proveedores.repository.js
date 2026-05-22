@@ -28,6 +28,9 @@ async function list(filters = {}, trx = db) {
     query.where('tiene_credito', filters.tiene_credito ? 1 : 0);
   }
 
+  if (filters.limit) query.limit(filters.limit);
+  if (filters.offset) query.offset(filters.offset);
+
   if (filters.include_cxp) {
     query.select(
       'proveedores.*',
@@ -177,6 +180,22 @@ async function listCashMovementsByCxpOrigins(origenIds = [], trx = db) {
 
 module.exports = {
   list,
+  count: async (filters = {}, trx = db) => {
+    const query = trx('proveedores').count({ total: '*' });
+    if (filters.search) {
+      query.where((qb) => {
+        qb.where('nombre', 'like', `%${filters.search}%`)
+          .orWhere('telefono', 'like', `%${filters.search}%`)
+          .orWhere('direccion', 'like', `%${filters.search}%`)
+          .orWhere('observacion', 'like', `%${filters.search}%`)
+          .orWhere('id', Number(filters.search) || -1);
+      });
+    }
+    if (filters.activo !== undefined) query.where('activo', filters.activo ? 1 : 0);
+    if (filters.tiene_credito !== undefined) query.where('tiene_credito', filters.tiene_credito ? 1 : 0);
+    const row = await query.first();
+    return Number(row?.total || 0);
+  },
   create,
   update,
   getById,

@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { EmptyState, Panel, PanelHeader, StatusChip } from '../../shared/ui';
 import { PiArrowUpRight, PiBellRinging, PiWarningCircle } from 'react-icons/pi';
+import { useAuthStore } from '../../stores/authStore';
 import { formatDateTimeLabel } from './dashboardFormatters';
 
 const toneStyles = {
@@ -18,13 +19,21 @@ const toneStyles = {
   }
 };
 
-function resolveOperationalAlertHref(alert) {
+function resolveOperationalAlertHref(alert, role) {
   const id = String(alert?.id || '').toLowerCase();
   const category = String(alert?.category || '').toLowerCase();
   const title = String(alert?.title || '').toLowerCase();
 
+  if (role !== 'ADMIN' && (category.includes('deuda') || id.includes('cxc'))) {
+    return '/clientes';
+  }
+
   if (id.includes('cxc') || category.includes('deuda') || title.includes('deuda activa')) {
     return '/clientes?credito=con_deuda';
+  }
+
+  if (role !== 'ADMIN' && (id.includes('stock') || category.includes('stock') || category.includes('rotacion'))) {
+    return '/dashboard';
   }
 
   if (id.includes('stock') || category.includes('stock') || title.includes('stock bajo')) {
@@ -44,6 +53,7 @@ function resolveOperationalAlertHref(alert) {
 
 export default function DashboardAlertsCard({ alerts = [] }) {
   const navigate = useNavigate();
+  const role = useAuthStore((state) => state.user?.rol?.nombre);
 
   return (
     <Panel className="p-5">
@@ -68,7 +78,7 @@ export default function DashboardAlertsCard({ alerts = [] }) {
               <button
                 key={alert.id}
                 type="button"
-                onClick={() => navigate(resolveOperationalAlertHref(alert))}
+                onClick={() => navigate(resolveOperationalAlertHref(alert, role))}
                 className={`group flex w-full items-start gap-3 rounded-[22px] border bg-white/90 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-sm)] ${styles.border}`}
               >
                 <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${styles.icon}`}>

@@ -160,7 +160,7 @@ function resolveMarginView(precioVenta, costoVisible) {
 }
 
 export default function ProductosPage() {
-  const { productos, error, loading, listar, crear, actualizar } = useProductosStore();
+  const { productos, meta, error, loading, listar, crear, actualizar } = useProductosStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const [categorias, setCategorias] = useState([]);
   const [allProductos, setAllProductos] = useState([]);
@@ -187,7 +187,10 @@ export default function ProductosPage() {
     listar({
       search: filtros.search || undefined,
       categoria_id: filtros.categoria === 'TODAS' ? undefined : Number(filtros.categoria),
-      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado
+      activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
+      paginado: 1,
+      limit: PAGE_SIZE,
+      offset: (pagina - 1) * PAGE_SIZE
     });
 
   const refreshCategorias = async () => {
@@ -204,7 +207,7 @@ export default function ProductosPage() {
   useEffect(() => {
     const timer = window.setTimeout(refreshList, 250);
     return () => window.clearTimeout(timer);
-  }, [listar, filtros]);
+  }, [listar, filtros, pagina]);
 
   useEffect(() => {
     refreshCategorias();
@@ -251,11 +254,8 @@ export default function ProductosPage() {
     [productosFiltradosPorRol]
   );
 
-  const totalPaginas = Math.max(1, Math.ceil(productosOrdenados.length / PAGE_SIZE));
-  const productosPaginados = useMemo(() => {
-    const start = (pagina - 1) * PAGE_SIZE;
-    return productosOrdenados.slice(start, start + PAGE_SIZE);
-  }, [pagina, productosOrdenados]);
+  const totalPaginas = Math.max(1, Number(meta?.totalPages || 1));
+  const productosPaginados = productosOrdenados;
 
   useEffect(() => {
     if (pagina > totalPaginas) setPagina(totalPaginas);
@@ -747,7 +747,7 @@ export default function ProductosPage() {
               <Paginador
                 paginaActual={pagina}
                 totalPaginas={totalPaginas}
-                totalRegistros={productosOrdenados.length}
+                totalRegistros={Number(meta?.total || productosOrdenados.length)}
                 mostrarSiempre
                 onPageChange={setPagina}
               />

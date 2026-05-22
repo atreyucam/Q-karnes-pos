@@ -88,6 +88,8 @@ async function insertOrderDetails(rows, trx = db) {
 
 async function listOrders(filters = {}, trx = db) {
   const schemaSupport = await resolveSchemaSupport(trx);
+  const receptionSubtotalCentavosExpr = `COALESCE(rd.subtotal_centavos, CAST(ROUND(CAST(COALESCE(rd.subtotal, 0) AS REAL) * 100, 0) AS INTEGER))`;
+  const cxpAmountCentavosExpr = `COALESCE(cm.monto_centavos, CAST(ROUND(CAST(COALESCE(cm.monto, 0) AS REAL) * 100, 0) AS INTEGER))`;
   const cantidadTotalExpr = `COALESCE((
     SELECT SUM(CAST(d.cantidad AS REAL))
     FROM compras_orden_detalle d
@@ -102,8 +104,8 @@ async function listOrders(filters = {}, trx = db) {
 
   const cantidadPendienteExpr = `(${cantidadTotalExpr} - ${cantidadRecibidaExpr})`;
 
-  const totalRecibidoRealExpr = `COALESCE((
-    SELECT SUM(CAST(rd.subtotal AS REAL))
+  const totalRecibidoCentavosExpr = `COALESCE((
+    SELECT SUM(${receptionSubtotalCentavosExpr})
     FROM compras_recepcion_detalle rd
     JOIN compras_recepciones rr ON rr.id = rd.recepcion_id
     WHERE rr.orden_id = o.id
@@ -117,7 +119,7 @@ async function listOrders(filters = {}, trx = db) {
 
   const creditoTotalExpr = `COALESCE((
     SELECT SUM(
-      COALESCE((SELECT SUM(cm.monto) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'), 0)
+      COALESCE((SELECT SUM(${cxpAmountCentavosExpr}) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'), 0)
     )
     FROM compras_recepciones r
     JOIN compras_facturas f ON (f.id = r.factura_compra_id OR (r.factura_compra_id IS NULL AND f.numero_factura = r.factura_id))
@@ -126,7 +128,7 @@ async function listOrders(filters = {}, trx = db) {
 
   const abonosTotalExpr = `COALESCE((
     SELECT SUM(
-      COALESCE((SELECT SUM(cm.monto) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'ABONO'), 0)
+      COALESCE((SELECT SUM(${cxpAmountCentavosExpr}) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'ABONO'), 0)
     )
     FROM compras_recepciones r
     JOIN compras_facturas f ON (f.id = r.factura_compra_id OR (r.factura_compra_id IS NULL AND f.numero_factura = r.factura_id))
@@ -145,10 +147,14 @@ async function listOrders(filters = {}, trx = db) {
     trx.raw('NULL as total_estimado'),
     trx.raw('NULL as total_recibido_estimado'),
     trx.raw('NULL as total_pendiente_estimado'),
-    trx.raw(`${totalRecibidoRealExpr} as total_recibido_real`),
-    trx.raw(`${creditoTotalExpr} as credito_total`),
-    trx.raw(`${abonosTotalExpr} as abonos_credito`),
-    trx.raw(`${creditoPendienteExpr} as credito_pendiente`)
+    trx.raw(`ROUND(${totalRecibidoCentavosExpr} / 100.0, 2) as total_recibido_real`),
+    trx.raw(`${totalRecibidoCentavosExpr} as total_recibido_centavos`),
+    trx.raw(`ROUND(${creditoTotalExpr} / 100.0, 2) as credito_total`),
+    trx.raw(`${creditoTotalExpr} as credito_total_centavos`),
+    trx.raw(`ROUND(${abonosTotalExpr} / 100.0, 2) as abonos_credito`),
+    trx.raw(`${abonosTotalExpr} as abonos_credito_centavos`),
+    trx.raw(`ROUND(${creditoPendienteExpr} / 100.0, 2) as credito_pendiente`),
+    trx.raw(`${creditoPendienteExpr} as credito_pendiente_centavos`)
   ];
 
   if (schemaSupport.hasUsuarioCreadorId) {
@@ -183,7 +189,48 @@ async function listOrders(filters = {}, trx = db) {
     })
     .orderBy('o.id', 'desc');
 
+  if (filters.limit) query.limit(filters.limit);
+  if (filters.offset) query.offset(filters.offset);
+
   return query;
+}
+
+async function countOrders(filters = {}, trx = db) {
+  const creditoTotalExpr = `COALESCE((
+    SELECT SUM(
+      COALESCE((SELECT SUM(COALESCE(cm.monto_centavos, CAST(ROUND(CAST(COALESCE(cm.monto, 0) AS REAL) * 100, 0) AS INTEGER))) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'CARGO'), 0)
+    )
+    FROM compras_recepciones r
+    JOIN compras_facturas f ON (f.id = r.factura_compra_id OR (r.factura_compra_id IS NULL AND f.numero_factura = r.factura_id))
+    WHERE r.orden_id = o.id AND f.metodo_pago = 'CREDITO'
+  ), 0)`;
+  const abonosTotalExpr = `COALESCE((
+    SELECT SUM(
+      COALESCE((SELECT SUM(COALESCE(cm.monto_centavos, CAST(ROUND(CAST(COALESCE(cm.monto, 0) AS REAL) * 100, 0) AS INTEGER))) FROM cxp_movimientos cm WHERE cm.factura_id = f.id AND cm.tipo = 'ABONO'), 0)
+    )
+    FROM compras_recepciones r
+    JOIN compras_facturas f ON (f.id = r.factura_compra_id OR (r.factura_compra_id IS NULL AND f.numero_factura = r.factura_id))
+    WHERE r.orden_id = o.id AND f.metodo_pago = 'CREDITO'
+  ), 0)`;
+  const creditoPendienteExpr = `(${creditoTotalExpr} - ${abonosTotalExpr})`;
+
+  const query = trx('compras_ordenes as o').leftJoin('proveedores as p', 'o.proveedor_id', 'p.id');
+  if (filters.estado) query.where('o.estado', filters.estado);
+  if (filters.search) {
+    query.where((sqb) => {
+      sqb.where('p.nombre', 'like', `%${filters.search}%`)
+        .orWhere('o.id', Number(filters.search) || -1)
+        .orWhere('o.observacion', 'like', `%${filters.search}%`);
+    });
+  }
+  if (filters.credito_parcial) {
+    query.whereRaw(`${creditoPendienteExpr} > 0`).andWhereRaw(`${abonosTotalExpr} > 0`);
+  } else if (filters.con_credito) {
+    query.whereRaw(`${creditoPendienteExpr} > 0`);
+  }
+
+  const row = await query.count({ total: '*' }).first();
+  return Number(row?.total || 0);
 }
 
 async function getOrderById(id, trx = db) {
@@ -373,6 +420,7 @@ module.exports = {
   createCashMovement,
   createCxpMovement,
   listReceptionsByOrder,
+  countOrders,
   resolveSchemaSupport,
   ensureLegacySchema
 };

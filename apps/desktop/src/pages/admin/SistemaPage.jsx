@@ -107,7 +107,11 @@ function SistemaMantenimientoTab({ success, setSuccess }) {
     working,
     error,
     cargarTodo,
+    backupAuto,
+    guardarBackupAutomatico,
+    ejecutarBackupAutomatico,
     ejecutarIntegridad,
+    ejecutarMantenimientoSqlite,
     crearBackup,
     programarRestauracion,
     eliminarBackup
@@ -118,6 +122,15 @@ function SistemaMantenimientoTab({ success, setSuccess }) {
   const [restoreDialog, setRestoreDialog] = useState(null);
   const [restoreConfirmation, setRestoreConfirmation] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [backupAutoForm, setBackupAutoForm] = useState({
+    enabled: false,
+    frecuencia: 'DIARIO',
+    hora: '03:00',
+    retencion: 15
+  });
+  const [sqliteActionResult, setSqliteActionResult] = useState(null);
+  const [vacuumDialogOpen, setVacuumDialogOpen] = useState(false);
+  const [vacuumConfirm, setVacuumConfirm] = useState('');
 
   useEffect(() => {
     cargarTodo().catch(() => {});
@@ -135,6 +148,16 @@ function SistemaMantenimientoTab({ success, setSuccess }) {
   useEffect(() => {
     if (pagina > totalPaginas) setPagina(totalPaginas);
   }, [pagina, totalPaginas]);
+
+  useEffect(() => {
+    if (!backupAuto) return;
+    setBackupAutoForm({
+      enabled: Boolean(backupAuto.enabled),
+      frecuencia: String(backupAuto.frecuencia || 'DIARIO'),
+      hora: String(backupAuto.hora || '03:00'),
+      retencion: Number(backupAuto.retencion || 15)
+    });
+  }, [backupAuto]);
 
   const onCreateBackup = async () => {
     const result = await crearBackup(backupLabel || 'manual');
@@ -159,6 +182,28 @@ function SistemaMantenimientoTab({ success, setSuccess }) {
     const result = await eliminarBackup(deleteTarget);
     setDeleteTarget(null);
     setSuccess(`Backup eliminado: ${result.filename}`);
+  };
+  const onSaveBackupAuto = async () => {
+    await guardarBackupAutomatico({
+      enabled: Boolean(backupAutoForm.enabled),
+      frecuencia: backupAutoForm.frecuencia,
+      hora: backupAutoForm.hora,
+      retencion: Number(backupAutoForm.retencion || 15)
+    });
+    setSuccess('Configuración de backup automático guardada');
+  };
+
+  const runSqliteAction = async (accion, confirmacion = '') => {
+    const response = await ejecutarMantenimientoSqlite(accion, confirmacion);
+    const actionData = response?.data || response || null;
+    setSqliteActionResult(actionData);
+    setSuccess(`Mantenimiento ejecutado: ${accion}`);
+  };
+
+  const onConfirmVacuum = async () => {
+    await runSqliteAction('VACUUM', 'VACUUM');
+    setVacuumDialogOpen(false);
+    setVacuumConfirm('');
   };
 
   return (
@@ -259,10 +304,83 @@ function SistemaMantenimientoTab({ success, setSuccess }) {
         )}
       </Card>
 
+      <Card className="space-y-4 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-[var(--color-text)]">Backup automático</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Programación diaria/semanal y retención de respaldos.</p>
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="Activo">
+            <Select value={backupAutoForm.enabled ? 'true' : 'false'} onChange={(e) => setBackupAutoForm((v) => ({ ...v, enabled: e.target.value === 'true' }))}>
+              <option value="false">No</option>
+              <option value="true">Sí</option>
+            </Select>
+          </Field>
+          <Field label="Frecuencia">
+            <Select value={backupAutoForm.frecuencia} onChange={(e) => setBackupAutoForm((v) => ({ ...v, frecuencia: e.target.value }))}>
+              <option value="DIARIO">Diario</option>
+              <option value="SEMANAL">Semanal</option>
+            </Select>
+          </Field>
+          <Field label="Hora">
+            <Input type="time" value={backupAutoForm.hora} onChange={(e) => setBackupAutoForm((v) => ({ ...v, hora: e.target.value }))} />
+          </Field>
+          <Field label="Retención">
+            <Input type="number" min="1" max="120" value={backupAutoForm.retencion} onChange={(e) => setBackupAutoForm((v) => ({ ...v, retencion: Number(e.target.value || 15) }))} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={onSaveBackupAuto} disabled={working}>{working ? 'Guardando...' : 'Guardar programación'}</Button>
+          <Button variant="secondary" onClick={async () => { await ejecutarBackupAutomatico(); setSuccess('Backup automático ejecutado'); }} disabled={working}>
+            {working ? 'Ejecutando...' : 'Ejecutar ahora'}
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="space-y-4 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-[var(--color-text)]">Mantenimiento SQLite administrado</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Solo ADMIN. VACUUM puede tardar y debe ejecutarse fuera de horario operativo.</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => runSqliteAction('INTEGRITY_CHECK')} disabled={working}>integrity_check</Button>
+          <Button variant="secondary" onClick={() => runSqliteAction('FOREIGN_KEY_CHECK')} disabled={working}>foreign_key_check</Button>
+          <Button variant="secondary" onClick={() => runSqliteAction('WAL_CHECKPOINT')} disabled={working}>wal_checkpoint</Button>
+          <Button variant="secondary" onClick={() => runSqliteAction('ANALYZE')} disabled={working}>analyze</Button>
+          <Button variant="danger" onClick={() => setVacuumDialogOpen(true)} disabled={working}>vacuum</Button>
+        </div>
+        {sqliteActionResult ? (
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm text-[var(--color-text)]">
+            <p><span className="font-semibold">Acción:</span> {sqliteActionResult.accion || '-'}</p>
+            <p><span className="font-semibold">Duración:</span> {sqliteActionResult.duracion_ms ?? 0} ms</p>
+            <p><span className="font-semibold">Resultado:</span> {JSON.stringify(sqliteActionResult.resultado || {})}</p>
+          </div>
+        ) : null}
+      </Card>
+
       <ConfirmDialog open={Boolean(restoreDialog)} onClose={() => { setRestoreDialog(null); setRestoreConfirmation(''); }} onConfirm={onConfirmRestore} title="Programar restauración" description={restoreDialog ? `Para restaurar desde ${restoreDialog}, escriba RESTAURAR.` : ''} confirmLabel={working ? 'Programando...' : 'Programar restauración'} confirmVariant="primary" confirmDisabled={restoreConfirmation !== 'RESTAURAR'} confirmLoading={working}>
         <Field label="Confirmación requerida"><Input value={restoreConfirmation} onChange={(event) => setRestoreConfirmation(event.target.value.toUpperCase())} placeholder="RESTAURAR" /></Field>
       </ConfirmDialog>
       <ConfirmDialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onConfirm={onConfirmDeleteBackup} title="Eliminar backup" description={deleteTarget ? `¿Eliminar el backup ${deleteTarget}?` : ''} confirmLabel={working ? 'Eliminando...' : 'Eliminar'} confirmVariant="danger" confirmLoading={working} />
+      <ConfirmDialog
+        open={vacuumDialogOpen}
+        onClose={() => { setVacuumDialogOpen(false); setVacuumConfirm(''); }}
+        onConfirm={onConfirmVacuum}
+        title="Confirmar VACUUM"
+        description="VACUUM puede tardar y bloquear escritura temporalmente. Ejecútelo fuera de horario. Escriba VACUUM para continuar."
+        confirmLabel={working ? 'Ejecutando...' : 'Ejecutar VACUUM'}
+        confirmVariant="danger"
+        confirmLoading={working}
+        confirmDisabled={vacuumConfirm !== 'VACUUM'}
+      >
+        <Field label="Confirmación requerida">
+          <Input value={vacuumConfirm} onChange={(event) => setVacuumConfirm(event.target.value.toUpperCase())} placeholder="VACUUM" />
+        </Field>
+      </ConfirmDialog>
     </>
   );
 }

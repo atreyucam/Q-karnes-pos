@@ -1,10 +1,18 @@
 const db = require('../../db/knex');
 
+function amountCentsExpr(alias = 'cxc_movimientos') {
+  return `COALESCE(${alias}.monto_centavos, CAST(ROUND(CAST(COALESCE(${alias}.monto, 0) AS REAL) * 100, 0) AS INTEGER))`;
+}
+
+function salePaymentAmountExpr(alias = 'vp') {
+  return `COALESCE(${alias}.monto_centavos, CAST(ROUND(CAST(COALESCE(${alias}.monto, 0) AS REAL) * 100, 0) AS INTEGER))`;
+}
+
 function buildSaldoExpr() {
   return `(
-    COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'CARGO'), 0) -
-    COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'ABONO'), 0)
-  )`;
+    COALESCE((SELECT SUM(${amountCentsExpr('cm_cargo')}) FROM cxc_movimientos cm_cargo WHERE cm_cargo.cliente_id = clientes.id AND cm_cargo.tipo = 'CARGO'), 0) -
+    COALESCE((SELECT SUM(${amountCentsExpr('cm_abono')}) FROM cxc_movimientos cm_abono WHERE cm_abono.cliente_id = clientes.id AND cm_abono.tipo = 'ABONO'), 0)
+  ) / 100.0`;
 }
 
 function buildClienteDebtDocumentsQuery(clienteId, trx = db) {
@@ -33,15 +41,18 @@ function buildClienteDebtDocumentsQuery(clienteId, trx = db) {
       'v.total',
       'v.subtotal',
       'v.descuento_total',
+      'v.total_centavos',
+      'v.subtotal_centavos',
+      'v.descuento_total_centavos',
       'v.referencia',
       'c.dias_credito',
-      trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as contado_original"),
-      trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as credito_original"),
+      trx.raw(`COALESCE((SELECT SUM(${salePaymentAmountExpr('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as contado_original_centavos`),
+      trx.raw(`COALESCE((SELECT SUM(${salePaymentAmountExpr('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as credito_original_centavos`),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.numero_documento END), COALESCE(NULLIF(TRIM(v.referencia), ''), 'VENTA:' || v.id)) as numero_documento"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_emision END), DATE(v.fecha)) as fecha_emision"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_vencimiento END), DATE(v.fecha, '+' || COALESCE(c.dias_credito, 0) || ' day')) as fecha_vencimiento"),
-      trx.raw("COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN cm.monto ELSE 0 END), 0) as cargos"),
-      trx.raw("COALESCE(SUM(CASE WHEN cm.tipo = 'ABONO' THEN cm.monto ELSE 0 END), 0) as abonos")
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpr('cm')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'ABONO' THEN ${amountCentsExpr('cm')} ELSE 0 END), 0) as abonos_centavos`)
     );
 }
 
@@ -63,15 +74,15 @@ function applyListFilters(query, filters) {
 
   if (filters.credito === 'CON') {
     query.whereRaw(`(
-      COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'CARGO'), 0) -
-      COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'ABONO'), 0)
+      COALESCE((SELECT SUM(${amountCentsExpr('cm_cargo')}) FROM cxc_movimientos cm_cargo WHERE cm_cargo.cliente_id = clientes.id AND cm_cargo.tipo = 'CARGO'), 0) -
+      COALESCE((SELECT SUM(${amountCentsExpr('cm_abono')}) FROM cxc_movimientos cm_abono WHERE cm_abono.cliente_id = clientes.id AND cm_abono.tipo = 'ABONO'), 0)
     ) > 0`);
   }
 
   if (filters.credito === 'SIN') {
     query.whereRaw(`(
-      COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'CARGO'), 0) -
-      COALESCE((SELECT SUM(monto) FROM cxc_movimientos WHERE cliente_id = clientes.id AND tipo = 'ABONO'), 0)
+      COALESCE((SELECT SUM(${amountCentsExpr('cm_cargo')}) FROM cxc_movimientos cm_cargo WHERE cm_cargo.cliente_id = clientes.id AND cm_cargo.tipo = 'CARGO'), 0) -
+      COALESCE((SELECT SUM(${amountCentsExpr('cm_abono')}) FROM cxc_movimientos cm_abono WHERE cm_abono.cliente_id = clientes.id AND cm_abono.tipo = 'ABONO'), 0)
     ) <= 0`);
   }
 }
@@ -129,14 +140,14 @@ async function saldoCliente(clienteId, trx = db) {
   const row = await trx('cxc_movimientos')
     .where({ cliente_id: clienteId })
     .select(
-      trx.raw("SUM(CASE WHEN tipo='CARGO' THEN monto ELSE 0 END) as cargos"),
-      trx.raw("SUM(CASE WHEN tipo='ABONO' THEN monto ELSE 0 END) as abonos")
+      trx.raw(`COALESCE(SUM(CASE WHEN tipo='CARGO' THEN ${amountCentsExpr('cxc_movimientos')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN tipo='ABONO' THEN ${amountCentsExpr('cxc_movimientos')} ELSE 0 END), 0) as abonos_centavos`)
     )
     .first();
 
   return {
-    cargos: Number(row?.cargos || 0),
-    abonos: Number(row?.abonos || 0)
+    cargos_centavos: Number(row?.cargos_centavos || 0),
+    abonos_centavos: Number(row?.abonos_centavos || 0)
   };
 }
 
@@ -168,13 +179,13 @@ async function getVentaCreditoDocumento(clienteId, ventaId, trx = db) {
 
 async function listFacturasByCliente(clienteId, trx = db) {
   return buildClienteDebtDocumentsQuery(clienteId, trx)
-    .havingRaw("COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN cm.monto ELSE 0 END), 0) > 0")
+    .havingRaw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpr('cm')} ELSE 0 END), 0) > 0`)
     .orderBy('v.id', 'desc');
 }
 
 async function listDeudasByCliente(clienteId, trx = db) {
   return buildClienteDebtDocumentsQuery(clienteId, trx)
-    .havingRaw("COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN cm.monto ELSE 0 END), 0) > 0")
+    .havingRaw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpr('cm')} ELSE 0 END), 0) > 0`)
     .orderBy('fecha_vencimiento', 'asc')
     .orderBy('v.id', 'desc');
 }

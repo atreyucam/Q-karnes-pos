@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const { isDemoSeedAllowed } = require('../src/config/runtimeSecurity');
 const {
   buildPaymentMethodsRows,
   buildSystemConfigRow
@@ -51,6 +52,10 @@ const CLEAN_TABLES = [
  * @param { import('knex').Knex } knex
  */
 exports.seed = async function seed(knex) {
+  if (!isDemoSeedAllowed()) {
+    throw new Error('001_demo.js está bloqueado fuera de development/test con ALLOW_DEMO_SEED=true.');
+  }
+
   for (const table of CLEAN_TABLES) {
     await knex(table).del();
   }

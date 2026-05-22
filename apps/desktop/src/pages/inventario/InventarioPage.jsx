@@ -221,10 +221,13 @@ function InventoryProductPickerTable({
 export default function InventarioPage() {
   const {
     disponible,
+    disponibleMeta,
     alertas,
+    alertasMeta,
     conteos,
     mermas,
     movimientos,
+    movimientosMeta,
     loading,
     error,
     cargarDisponible,
@@ -293,12 +296,24 @@ export default function InventarioPage() {
   const [formError, setFormError] = useState('');
 
   const refreshInventoryData = async () => {
+    const remoteOffset = (pagina - 1) * PAGE_SIZE;
+    if (tab === 'movimientos') {
+      await Promise.all([
+        cargarDisponible({ paginado: 1, limit: PAGE_SIZE, offset: 0 }),
+        cargarAlertas({ paginado: 1, limit: PAGE_SIZE, offset: 0 }),
+        cargarConteos(),
+        cargarMermas(),
+        cargarMovimientos({ paginado: 1, limit: PAGE_SIZE, offset: remoteOffset })
+      ]);
+      return;
+    }
+
     await Promise.all([
-      cargarDisponible(),
-      cargarAlertas(),
+      cargarDisponible({ paginado: 1, limit: PAGE_SIZE, offset: remoteOffset }),
+      cargarAlertas({ paginado: 1, limit: PAGE_SIZE, offset: 0 }),
       cargarConteos(),
       cargarMermas(),
-      cargarMovimientos()
+      cargarMovimientos({ paginado: 1, limit: PAGE_SIZE, offset: 0 })
     ]);
   };
 
@@ -314,7 +329,7 @@ export default function InventarioPage() {
         setCategorias([]);
         setCatalogoError(parseApiError(catalogError));
       });
-  }, [cargarDisponible, cargarAlertas, cargarConteos, cargarMermas, cargarMovimientos]);
+  }, [cargarDisponible, cargarAlertas, cargarConteos, cargarMermas, cargarMovimientos, pagina, tab]);
 
   useEffect(() => {
     setPagina(1);
@@ -425,11 +440,15 @@ export default function InventarioPage() {
     });
   }, [rowsByTab, tab, categoriaFiltro, searchFiltro, alertaFiltro]);
 
-  const totalPaginas = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-  const pagedRows = useMemo(
-    () => filteredRows.slice((pagina - 1) * PAGE_SIZE, (pagina - 1) * PAGE_SIZE + PAGE_SIZE),
-    [filteredRows, pagina]
-  );
+  const totalPaginas = useMemo(() => {
+    if (tab === 'stock') return Math.max(1, Number(disponibleMeta?.totalPages || 1));
+    if (tab === 'movimientos') return Math.max(1, Number(movimientosMeta?.totalPages || 1));
+    return Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  }, [tab, disponibleMeta?.totalPages, movimientosMeta?.totalPages, filteredRows.length]);
+  const pagedRows = useMemo(() => {
+    if (tab === 'stock' || tab === 'movimientos') return filteredRows;
+    return filteredRows.slice((pagina - 1) * PAGE_SIZE, (pagina - 1) * PAGE_SIZE + PAGE_SIZE);
+  }, [filteredRows, pagina, tab]);
 
   const totalValorInventario = useMemo(
     () => (disponible || []).reduce((acc, row) => acc + getInventoryValue(row), 0),
@@ -986,7 +1005,19 @@ export default function InventarioPage() {
           </TablaCuerpo>
         </Tabla>
 
-        <Paginador paginaActual={pagina} totalPaginas={totalPaginas} totalRegistros={filteredRows.length} mostrarSiempre onPageChange={setPagina} />
+        <Paginador
+          paginaActual={pagina}
+          totalPaginas={totalPaginas}
+          totalRegistros={
+            tab === 'stock'
+              ? Number(disponibleMeta?.total || filteredRows.length)
+              : tab === 'movimientos'
+                ? Number(movimientosMeta?.total || filteredRows.length)
+                : filteredRows.length
+          }
+          mostrarSiempre
+          onPageChange={setPagina}
+        />
       </Card>
 
       {loading && <LoadingState label="Actualizando inventario..." />}

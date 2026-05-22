@@ -4,11 +4,11 @@ const { asyncHandler } = require('../../helpers/asyncHandler');
 
 const createVenta = asyncHandler(async (req, res) => successResponse(res, await service.createVenta(req.body, req.user)));
 
-const listVentas = asyncHandler(async (req, res) => successResponse(res, await service.listVentas(req.query)));
+const listVentas = asyncHandler(async (req, res) => successResponse(res, await service.listVentas(req.query, req.user)));
 
-const getVenta = asyncHandler(async (req, res) => successResponse(res, await service.getVenta(Number(req.params.id))));
+const getVenta = asyncHandler(async (req, res) => successResponse(res, await service.getVenta(Number(req.params.id), req.user)));
 
-const getTicket = asyncHandler(async (req, res) => successResponse(res, await service.getTicket(Number(req.params.id))));
+const getTicket = asyncHandler(async (req, res) => successResponse(res, await service.getTicket(Number(req.params.id), req.user)));
 
 const createDevolucion = asyncHandler(async (req, res) => (
   successResponse(res, await service.createDevolucion(Number(req.params.id), req.body, req.user))
@@ -19,11 +19,11 @@ const anular = asyncHandler(async (req, res) => (
 ));
 
 const listDevoluciones = asyncHandler(async (req, res) => (
-  successResponse(res, await service.listDevoluciones(Number(req.params.id)))
+  successResponse(res, await service.listDevoluciones(Number(req.params.id), req.user))
 ));
 
 const auditoria = asyncHandler(async (req, res) => (
-  successResponse(res, await service.getAuditoria(Number(req.params.id)))
+  successResponse(res, await service.getAuditoria(Number(req.params.id), req.user))
 ));
 
 const editar = asyncHandler(async (req, res) => (

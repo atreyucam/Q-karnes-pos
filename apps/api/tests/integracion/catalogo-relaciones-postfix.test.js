@@ -11,6 +11,7 @@ const configuracionService = require('../../src/modules/configuracion/configurac
 const productosService = require('../../src/modules/productos/productos.service');
 const proveedoresService = require('../../src/modules/proveedores/proveedores.service');
 const ventasService = require('../../src/modules/ventas/ventas.service');
+const cajaService = require('../../src/modules/caja/caja.service');
 const { prepareDatabase } = require('../support/database');
 const { createCategoria } = require('../support/factories');
 const { assert, printSuiteReport } = require('../support/testHarness');
@@ -78,7 +79,7 @@ async function runSuite(options = {}) {
           codigo: 'PROD-KG',
           nombre: 'Producto inválido',
           categoria_id: categoriaEmbutidos.id,
-          unidad_medida: 'KG',
+          unidad_medida: 'CAJA',
           precio_venta: 1
         });
       } catch (error) {
@@ -152,6 +153,8 @@ async function runSuite(options = {}) {
         activo: true
       });
 
+      await cajaService.abrirTurno({ fondo_inicial: 100, observacion: 'Turno catalogo postfix' }, cajero.id);
+
       const venta = await ventasService.createVenta(
         {
           cliente_id: cliente.id,
@@ -162,7 +165,7 @@ async function runSuite(options = {}) {
         cajero
       );
 
-      const ticket = await ventasService.getTicket(venta.data.venta.id);
+      const ticket = await ventasService.getTicket(venta.data.venta.id, cajero);
       const saldoStock = await db('productos').where({ id: producto.id }).first();
 
       assert(ticket.data.cliente && ticket.data.cliente.nombre === cliente.nombre, 'El ticket no vinculó el cliente');

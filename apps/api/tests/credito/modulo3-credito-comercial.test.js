@@ -11,12 +11,17 @@ const comprasService = require('../../src/modules/compras/compras.service');
 const clientesService = require('../../src/modules/clientes/clientes.service');
 const cxpService = require('../../src/modules/cxp/cxp.service');
 const productosService = require('../../src/modules/productos/productos.service');
+const inventarioService = require('../../src/modules/inventario/inventario.service');
 const { prepareDatabase } = require('../support/database');
 const { assert, expectThrows, printSuiteReport } = require('../support/testHarness');
 const { addDays, toDateOnly } = require('../../src/helpers/credit');
 
 async function loginCajero() {
   return (await authService.login({ usuario: 'cajero', password: 'cajero123' })).user;
+}
+
+async function loginAdmin() {
+  return (await authService.login({ usuario: 'admin', password: 'admin123' })).user;
 }
 
 async function openTurno(cajero, observacion = 'Turno modulo 3') {
@@ -45,14 +50,27 @@ async function createCreditSale(cajero, options = {}) {
     if (existing) {
       productoId = existing.id;
     } else {
+      const admin = await loginAdmin();
       const created = await productosService.create({
         codigo: `TST-CRED-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         nombre: `Producto credito ${monto}`,
         unidad_medida: 'UND',
         precio_venta: precioVenta,
-        stock_actual: Math.max(20, cantidad),
         activo: true
       });
+      await inventarioService.ajustesMasivo(
+        {
+          observacion: 'Stock inicial prueba crédito',
+          items: [{
+            producto_id: created.id,
+            cantidad: Math.max(20, cantidad),
+            referencia: `AJ-M3-${created.id}`,
+            costo_origen_tipo: 'MANUAL',
+            costo_unitario_manual: Math.max(precioVenta / 2, 0.5)
+          }]
+        },
+        admin
+      );
       productoId = created.id;
     }
   }
@@ -117,6 +135,7 @@ async function runSuite(options = {}) {
 
   try {
     const cajero = await prepareScenario();
+    await openTurno(cajero, 'Venta crédito inicial');
     const venta = await createCreditSale(cajero, { monto: 6, referencia: 'M3-VTA-001' });
     const cargo = await db('cxc_movimientos').where({ venta_id: venta.data.venta.id, tipo: 'CARGO' }).first();
     const deudas = await clientesService.deudas(1);
@@ -161,6 +180,7 @@ async function runSuite(options = {}) {
 
   try {
     const cajero = await prepareScenario();
+    await openTurno(cajero, 'Venta crédito vencida');
     const venta = await createCreditSale(cajero, { monto: 7, referencia: 'M3-VTA-004' });
     await db('cxc_movimientos')
       .where({ venta_id: venta.data.venta.id, tipo: 'CARGO' })
@@ -333,6 +353,7 @@ async function runSuite(options = {}) {
 
   try {
     const cajero = await prepareScenario();
+    await openTurno(cajero, 'Trazabilidad CxC');
     const venta = await createCreditSale(cajero, { monto: 6, referencia: 'M3-VTA-007' });
     const ventaFecha = await db('ventas').where({ id: venta.data.venta.id }).first();
     const cargo = await db('cxc_movimientos').where({ venta_id: venta.data.venta.id, tipo: 'CARGO' }).first();

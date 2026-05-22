@@ -86,7 +86,7 @@ async function runSuite(options = {}) {
         cajero
       );
       const cajaMov = await db('caja_movimientos').where({ modulo_origen: 'VENTAS', origen_id: venta.data.venta.id, tipo: 'VENTA_CONTADO' }).first();
-      const ticket = await ventasService.getTicket(venta.data.venta.id);
+      const ticket = await ventasService.getTicket(venta.data.venta.id, cajero);
       assert(cajaMov && Number(cajaMov.monto) === 7, 'Venta contado no impactó caja');
       assert(ticket.data.metodo_pago_codigo === 'EFECTIVO', `Método ticket inesperado: ${ticket.data.metodo_pago_codigo}`);
       assert(Number(ticket.data.credito.saldo_pendiente) === 0, 'Venta contado no debe dejar saldo');
@@ -110,7 +110,7 @@ async function runSuite(options = {}) {
       );
       const cajaMov = await db('caja_movimientos').where({ modulo_origen: 'VENTAS', origen_id: venta.data.venta.id, tipo: 'VENTA_TRANSFERENCIA' }).first();
       const resumen = await cajaService.corteX(cajero);
-      const ticket = await ventasService.getTicket(venta.data.venta.id);
+      const ticket = await ventasService.getTicket(venta.data.venta.id, cajero);
       assert(cajaMov, 'Transferencia debe registrarse como movimiento del turno');
       assert(Number(resumen.ventas_transferencia) === 3.5, `Resumen transferencia inesperado: ${resumen.ventas_transferencia}`);
       assert(Number(resumen.efectivo_esperado) === 120, `Transferencia no debe afectar caja: ${resumen.efectivo_esperado}`);
@@ -137,7 +137,7 @@ async function runSuite(options = {}) {
       const cxc = await db('cxc_movimientos').where({ venta_id: venta.data.venta.id, tipo: 'CARGO' }).first();
       const cajaMov = await db('caja_movimientos').where({ modulo_origen: 'VENTAS', origen_id: venta.data.venta.id, tipo: 'VENTA_CREDITO' }).first();
       const resumen = await cajaService.corteX(cajero);
-      const ticket = await ventasService.getTicket(venta.data.venta.id);
+      const ticket = await ventasService.getTicket(venta.data.venta.id, cajero);
       assert(Number(detalle.precio_unit) === 3.5, `La venta debe usar precio_venta 3.5 y obtuvo ${detalle.precio_unit}`);
       assert(cxc && Number(cxc.monto) === 10.5, 'Venta crédito no generó saldo comercial');
       assert(cajaMov, 'Venta crédito debe registrarse como movimiento del turno');

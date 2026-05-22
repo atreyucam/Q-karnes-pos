@@ -25,6 +25,18 @@ const restore = asyncHandler(async (req, res) => (
 const deleteBackup = asyncHandler(async (req, res) => (
   successResponse(res, await service.eliminarBackup(req.params.filename, req.user))
 ));
+const sqliteMaintenance = asyncHandler(async (req, res) => (
+  successResponse(res, await service.ejecutarMantenimientoSQLite(req.body, req.user))
+));
+const getBackupAutomatico = asyncHandler(async (req, res) => (
+  successResponse(res, await service.getBackupAutomatico(req.user))
+));
+const setBackupAutomatico = asyncHandler(async (req, res) => (
+  successResponse(res, await service.setBackupAutomatico(req.body, req.user))
+));
+const runBackupAutomatico = asyncHandler(async (req, res) => (
+  successResponse(res, await service.ejecutarBackupAutomaticoAhora(req.user))
+));
 
 module.exports = {
   health,
@@ -32,5 +44,9 @@ module.exports = {
   listBackups,
   createBackup,
   restore,
-  deleteBackup
+  deleteBackup,
+  sqliteMaintenance,
+  getBackupAutomatico,
+  setBackupAutomatico,
+  runBackupAutomatico
 };

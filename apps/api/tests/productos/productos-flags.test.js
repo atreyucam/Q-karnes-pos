@@ -2,6 +2,7 @@
 const { configureTestRuntime, cleanupRuntime } = require('../support/runtime');
 
 configureTestRuntime({ suiteName: 'productos-flags' });
+process.env.ALLOW_DEMO_SEED = 'true';
 
 const db = require('../../src/db/knex');
 const authService = require('../../src/modules/auth/auth.service');
@@ -293,7 +294,7 @@ async function runSuite(options = {}) {
 
       assert(counts.usuarios === 2, 'La limpieza no conservó los usuarios mínimos');
       assert(counts.roles === 2, 'La limpieza no conservó roles mínimos');
-      assert(counts.proveedores === 0, 'La limpieza no vació proveedores para el nuevo arranque');
+      assert(counts.proveedores === 2, 'La limpieza no restauró proveedores base para el nuevo arranque');
       assert(counts.ventas === 0, 'La limpieza no eliminó ventas operativas');
       assert(counts.clientes === 0, 'La limpieza no eliminó clientes operativos');
       assert(counts.configuracion_sistema === 1, 'No se restauró configuración mínima');

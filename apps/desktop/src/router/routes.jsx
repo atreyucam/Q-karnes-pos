@@ -1,31 +1,33 @@
+import { lazy } from 'react';
 import { Navigate } from 'react-router-dom';
 import AppLayout from '../layout/AppLayout';
 import { RequireAuth, RequireRole, RootRedirect } from './guards';
 import LoginPage from '../pages/auth/LoginPage';
-import DashboardPage from '../pages/dashboard/DashboardPage';
-import CajaPage from '../pages/caja/CajaPage';
-import NuevaVentaPage from '../pages/ventas/NuevaVentaPage';
-import VentaDetallePage from '../pages/ventas/VentaDetallePage';
-import VentasListPage from '../pages/ventas/VentasListPage';
-import ClientesPage from '../pages/clientes/ClientesPage';
-import ClienteDetallePage from '../pages/clientes/ClienteDetallePage';
-import ProveedoresPage from '../pages/proveedores/ProveedoresPage';
-import ProveedorDetallePage from '../pages/proveedores/ProveedorDetallePage';
-import ProveedorFacturaDetallePage from '../pages/proveedores/ProveedorFacturaDetallePage';
-import ProductosPage from '../pages/productos/ProductosPage';
-import ComprasPage from '../pages/compras/ComprasPage';
-import CompraNuevaPage from '../pages/compras/CompraNuevaPage';
-import CompraDetallePage from '../pages/compras/CompraDetallePage';
-import CompraCargarPage from '../pages/compras/CompraCargarPage';
-import InventarioPage from '../pages/inventario/InventarioPage';
-import ReportesPage from '../pages/reportes/ReportesPage';
-import ConfiguracionPage from '../pages/admin/ConfiguracionPage';
-import AuditoriaPage from '../pages/admin/AuditoriaPage';
-import SistemaPage from '../pages/admin/SistemaPage';
-import TransformacionesListPage from '../pages/transformaciones/TransformacionesListPage';
-import TransformacionFormPage from '../pages/transformaciones/TransformacionFormPage';
-import TransformacionDetallePage from '../pages/transformaciones/TransformacionDetallePage';
-import DesignSystemPage from '../pages/dev/DesignSystemPage';
+
+const DashboardPage = lazy(() => import('../pages/dashboard/DashboardPage'));
+const CajaPage = lazy(() => import('../pages/caja/CajaPage'));
+const NuevaVentaPage = lazy(() => import('../pages/ventas/NuevaVentaPage'));
+const VentaDetallePage = lazy(() => import('../pages/ventas/VentaDetallePage'));
+const VentasListPage = lazy(() => import('../pages/ventas/VentasListPage'));
+const ClientesPage = lazy(() => import('../pages/clientes/ClientesPage'));
+const ClienteDetallePage = lazy(() => import('../pages/clientes/ClienteDetallePage'));
+const ProveedoresPage = lazy(() => import('../pages/proveedores/ProveedoresPage'));
+const ProveedorDetallePage = lazy(() => import('../pages/proveedores/ProveedorDetallePage'));
+const ProveedorFacturaDetallePage = lazy(() => import('../pages/proveedores/ProveedorFacturaDetallePage'));
+const ProductosPage = lazy(() => import('../pages/productos/ProductosPage'));
+const ComprasPage = lazy(() => import('../pages/compras/ComprasPage'));
+const CompraNuevaPage = lazy(() => import('../pages/compras/CompraNuevaPage'));
+const CompraDetallePage = lazy(() => import('../pages/compras/CompraDetallePage'));
+const CompraCargarPage = lazy(() => import('../pages/compras/CompraCargarPage'));
+const InventarioPage = lazy(() => import('../pages/inventario/InventarioPage'));
+const ReportesPage = lazy(() => import('../pages/reportes/ReportesPage'));
+const ConfiguracionPage = lazy(() => import('../pages/admin/ConfiguracionPage'));
+const AuditoriaPage = lazy(() => import('../pages/admin/AuditoriaPage'));
+const SistemaPage = lazy(() => import('../pages/admin/SistemaPage'));
+const TransformacionesListPage = lazy(() => import('../pages/transformaciones/TransformacionesListPage'));
+const TransformacionFormPage = lazy(() => import('../pages/transformaciones/TransformacionFormPage'));
+const TransformacionDetallePage = lazy(() => import('../pages/transformaciones/TransformacionDetallePage'));
+const DesignSystemPage = lazy(() => import('../pages/dev/DesignSystemPage'));
 
 export const appRoutes = [
   { path: '/', element: <RootRedirect /> },
@@ -50,7 +52,7 @@ export const appRoutes = [
             ]
           },
           {
-            element: <RequireRole roles={['ADMIN', 'CAJERO']} />,
+            element: <RequireRole roles={['ADMIN']} />,
             children: [
               { path: '/proveedores', element: <ProveedoresPage /> },
               { path: '/proveedores/:id', element: <ProveedorDetallePage /> },

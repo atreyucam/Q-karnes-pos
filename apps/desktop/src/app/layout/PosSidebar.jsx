@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import logoEmpresa from '../../public/logoFrigo.png';
 import { SidebarItem, SidebarSection } from '../../shared/ui';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { hasActiveGroupDescendant, isNavigationItemActive, navigationItems } from './posNavigation';
@@ -62,7 +61,9 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
             }}
             className={clsx('sidebar-brand !m-0 h-full', collapsed && 'sidebar-brand-collapsed')}
           >
-            <img src={logoEmpresa} alt={negocioNombre} className="sidebar-brand-logo" />
+            <div className="sidebar-brand-logo flex items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-xs font-extrabold text-[var(--color-text)]">
+              QK
+            </div>
 
             {!collapsed && (
               <div className="sidebar-brand-text min-w-0 overflow-hidden text-left">

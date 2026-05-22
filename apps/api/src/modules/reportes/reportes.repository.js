@@ -15,6 +15,18 @@ function paymentAmountExpression(alias = 'vp') {
   return `COALESCE(${alias}.monto_centavos, CAST(ROUND(CAST(COALESCE(${alias}.monto, 0) AS REAL) * 100, 0) AS INTEGER))`;
 }
 
+function amountCentsExpression(alias) {
+  return `COALESCE(${alias}.monto_centavos, CAST(ROUND(CAST(COALESCE(${alias}.monto, 0) AS REAL) * 100, 0) AS INTEGER))`;
+}
+
+function totalCentsExpression(alias, field = 'total') {
+  return `COALESCE(${alias}.total_centavos, CAST(ROUND(CAST(COALESCE(${alias}.${field}, 0) AS REAL) * 100, 0) AS INTEGER))`;
+}
+
+function subtotalCentsExpression(alias, field = 'subtotal') {
+  return `COALESCE(${alias}.subtotal_centavos, CAST(ROUND(CAST(COALESCE(${alias}.${field}, 0) AS REAL) * 100, 0) AS INTEGER))`;
+}
+
 function inventoryBalanceSubquery(trx = db) {
   return trx('inventario_movimientos as im')
     .select('im.producto_id')
@@ -35,7 +47,14 @@ function inventoryBalanceUntilSubquery(endExpression, trx = db) {
 function devolucionesPorVentaSubquery(trx = db) {
   return trx('devoluciones as d')
     .select('d.venta_id')
-    .sum({ total_devuelto: 'd.total_devuelto' })
+    .select(
+      trx.raw(`
+        COALESCE(
+          SUM(COALESCE(d.total_devuelto_centavos, CAST(ROUND(CAST(COALESCE(d.total_devuelto, 0) AS REAL) * 100, 0) AS INTEGER))),
+          0
+        ) as total_devuelto_centavos
+      `)
+    )
     .groupBy('d.venta_id')
     .as('dv');
 }
@@ -44,7 +63,7 @@ function devolucionesPorDetalleSubquery(trx = db) {
   return trx('devolucion_detalle as dd')
     .select('dd.venta_detalle_id')
     .sum({ cantidad_devuelta: 'dd.cantidad' })
-    .sum({ total_devuelto: 'dd.subtotal' })
+    .select(trx.raw(`COALESCE(SUM(${subtotalCentsExpression('dd', 'subtotal')}), 0) as total_devuelto_centavos`))
     .groupBy('dd.venta_detalle_id')
     .as('ddv');
 }
@@ -83,7 +102,7 @@ async function dashboard(trx = db) {
       .whereRaw(`date(v.fecha) = ${today}`)
       .select(
         trx.raw('COUNT(*) as transacciones'),
-        trx.raw('ROUND(COALESCE(SUM(CAST(v.total AS REAL) - COALESCE(CAST(dv.total_devuelto AS REAL), 0)), 0), 2) as total')
+        trx.raw(`COALESCE(SUM(${totalCentsExpression('v')} - COALESCE(dv.total_devuelto_centavos, 0)), 0) as total_centavos`)
       )
       .first(),
     trx('ventas as v')
@@ -92,7 +111,7 @@ async function dashboard(trx = db) {
       .whereRaw(`date(v.fecha) = ${yesterday}`)
       .select(
         trx.raw('COUNT(*) as transacciones'),
-        trx.raw('ROUND(COALESCE(SUM(CAST(v.total AS REAL) - COALESCE(CAST(dv.total_devuelto AS REAL), 0)), 0), 2) as total')
+        trx.raw(`COALESCE(SUM(${totalCentsExpression('v')} - COALESCE(dv.total_devuelto_centavos, 0)), 0) as total_centavos`)
       )
       .first(),
     trx('productos as p')
@@ -109,7 +128,7 @@ async function dashboard(trx = db) {
     trx('cxc_movimientos as cm')
       .whereRaw("datetime(cm.fecha) <= datetime('now', 'localtime', 'start of day', '-1 second')")
       .select(
-        trx.raw("ROUND(COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN CAST(cm.monto AS REAL) ELSE -CAST(cm.monto AS REAL) END), 0), 2) as total")
+        trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE -${amountCentsExpression('cm')} END), 0) as total_centavos`)
       )
       .first(),
     trx('ventas as v')
@@ -119,7 +138,7 @@ async function dashboard(trx = db) {
       .select(
         trx.raw("strftime('%H', v.fecha) as hora"),
         trx.raw('COUNT(*) as transacciones'),
-        trx.raw('ROUND(COALESCE(SUM(CAST(v.total AS REAL) - COALESCE(CAST(dv.total_devuelto AS REAL), 0)), 0), 2) as total')
+        trx.raw(`COALESCE(SUM(${totalCentsExpression('v')} - COALESCE(dv.total_devuelto_centavos, 0)), 0) as total_centavos`)
       )
       .groupByRaw("strftime('%H', v.fecha)")
       .orderBy('hora', 'asc'),
@@ -185,10 +204,10 @@ async function dashboard(trx = db) {
         'c.nombre as cliente_nombre',
         'u.nombre as usuario_nombre',
         trx.raw("COALESCE(NULLIF(TRIM(v.referencia), ''), 'VENTA:' || v.id) as numero_venta"),
-        trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as monto_contado"),
-        trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'TRANSFERENCIA'), 0) as monto_transferencia"),
-        trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as monto_credito"),
-        trx.raw('ROUND(CAST(v.total AS REAL) - COALESCE(CAST(dv.total_devuelto AS REAL), 0), 2) as total')
+        trx.raw(`COALESCE((SELECT SUM(${paymentAmountExpression('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as monto_contado_centavos`),
+        trx.raw(`COALESCE((SELECT SUM(${paymentAmountExpression('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'TRANSFERENCIA'), 0) as monto_transferencia_centavos`),
+        trx.raw(`COALESCE((SELECT SUM(${paymentAmountExpression('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as monto_credito_centavos`),
+        trx.raw(`${totalCentsExpression('v')} - COALESCE(dv.total_devuelto_centavos, 0) as total_centavos`)
       )
       .orderBy('v.fecha', 'desc')
       .orderBy('v.id', 'desc')
@@ -230,11 +249,11 @@ async function ventasReporte(bounds = {}, trx = db) {
       'c.nombre as cliente_nombre',
       'u.nombre as usuario_nombre',
       trx.raw("COALESCE(NULLIF(TRIM(v.referencia), ''), 'VENTA:' || v.id) as numero_venta"),
-      trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as monto_contado"),
-      trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'TRANSFERENCIA'), 0) as monto_transferencia"),
-      trx.raw("COALESCE((SELECT SUM(vp.monto) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as monto_credito"),
-      trx.raw('CAST(v.total AS REAL) as total_documento'),
-      trx.raw('COALESCE(CAST(dv.total_devuelto AS REAL), 0) as total_devuelto')
+      trx.raw(`COALESCE((SELECT SUM(${paymentAmountExpression('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CONTADO'), 0) as monto_contado_centavos`),
+      trx.raw(`COALESCE((SELECT SUM(${paymentAmountExpression('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'TRANSFERENCIA'), 0) as monto_transferencia_centavos`),
+      trx.raw(`COALESCE((SELECT SUM(${paymentAmountExpression('vp')}) FROM venta_pagos vp WHERE vp.venta_id = v.id AND vp.tipo = 'CREDITO'), 0) as monto_credito_centavos`),
+      trx.raw(`${totalCentsExpression('v')} as total_documento_centavos`),
+      trx.raw(`COALESCE(dv.total_devuelto_centavos, 0) as total_devuelto_centavos`)
     )
     .orderBy('v.fecha', 'desc')
     .orderBy('v.id', 'desc');
@@ -250,7 +269,7 @@ async function ventasDiarias(bounds = {}, trx = db) {
     .select(
       trx.raw('DATE(v.fecha) as fecha'),
       trx.raw('COUNT(*) as cantidad'),
-      trx.raw('ROUND(SUM(CAST(v.total AS REAL) - COALESCE(CAST(dv.total_devuelto AS REAL), 0)), 2) as total')
+      trx.raw(`COALESCE(SUM(${totalCentsExpression('v')} - COALESCE(dv.total_devuelto_centavos, 0)), 0) as total_centavos`)
     )
     .groupByRaw('DATE(v.fecha)')
     .orderBy('fecha', 'asc');
@@ -273,7 +292,7 @@ async function ventasProductoReporte(bounds = {}, trx = db) {
       'p.unidad',
       'p.unidad_medida',
       trx.raw('ROUND(SUM(CAST(vd.cantidad AS REAL) - COALESCE(CAST(ddv.cantidad_devuelta AS REAL), 0)), 3) as cantidad_vendida'),
-      trx.raw('ROUND(SUM(CAST(vd.total_linea AS REAL) - COALESCE(CAST(ddv.total_devuelto AS REAL), 0)), 2) as total_vendido')
+      trx.raw(`COALESCE(SUM(${totalCentsExpression('vd', 'total_linea')} - COALESCE(ddv.total_devuelto_centavos, 0)), 0) as total_vendido_centavos`)
     )
     .havingRaw('SUM(CAST(vd.cantidad AS REAL) - COALESCE(CAST(ddv.cantidad_devuelta AS REAL), 0)) > 0')
     .orderBy('cantidad_vendida', 'desc')
@@ -358,7 +377,8 @@ async function cajaReporte(bounds = {}, trx = db) {
       'cm.modulo_origen',
       'u.nombre as usuario_nombre',
       trx.raw("COALESCE(NULLIF(TRIM(cm.observacion), ''), cm.concepto) as descripcion"),
-      trx.raw("COALESCE(ct.estado, 'SIN_TURNO') as estado_turno")
+      trx.raw("COALESCE(ct.estado, 'SIN_TURNO') as estado_turno"),
+      trx.raw(`COALESCE(cm.monto_centavos, CAST(ROUND(CAST(COALESCE(cm.monto, 0) AS REAL) * 100, 0) AS INTEGER)) as monto_centavos`)
     )
     .orderBy('cm.fecha', 'desc')
     .orderBy('cm.id', 'desc');
@@ -367,6 +387,7 @@ async function cajaReporte(bounds = {}, trx = db) {
 async function comprasReporte(filters = {}, trx = db) {
   return trx('compras_facturas as f')
     .leftJoin('proveedores as p', 'f.proveedor_id', 'p.id')
+    .leftJoin('cxp_movimientos as cm', 'cm.factura_id', 'f.id')
     .modify((qb) => {
       applyDateRange(qb, 'f.fecha', filters);
       if (filters.proveedor_id) qb.where('f.proveedor_id', Number(filters.proveedor_id));
@@ -387,10 +408,14 @@ async function comprasReporte(filters = {}, trx = db) {
       'f.id',
       'f.numero_factura',
       'f.metodo_pago',
+      'f.metodo_pago_real',
       'f.total',
+      'f.total_centavos',
       'f.fecha',
       'p.id as proveedor_id',
       'p.nombre as proveedor_nombre',
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'ABONO' THEN ${amountCentsExpression('cm')} ELSE 0 END), 0) as abonos_centavos`),
       trx.raw(`(
         SELECT r.orden_id
         FROM compras_recepciones r
@@ -407,6 +432,7 @@ async function comprasReporte(filters = {}, trx = db) {
         LIMIT 1
       ) as estado_orden`)
     )
+    .groupBy('f.id', 'p.id', 'p.nombre')
     .orderBy('f.fecha', 'desc')
     .orderBy('f.id', 'desc');
 }
@@ -453,9 +479,9 @@ async function comprasProductosReporte(filters = {}, trx = db) {
       'pr.nombre as proveedor_nombre'
     )
     .select(trx.raw('ROUND(COALESCE(SUM(CAST(rd.cantidad AS REAL)), 0), 3) as cantidad_comprada'))
-    .select(trx.raw('ROUND(COALESCE(SUM(CAST(rd.subtotal AS REAL)), 0), 2) as total_comprado'))
+    .select(trx.raw(`COALESCE(SUM(${subtotalCentsExpression('rd')}), 0) as total_comprado_centavos`))
     .select(trx.raw('COUNT(DISTINCT COALESCE(f.id, r.id)) as facturas'))
-    .orderBy('total_comprado', 'desc')
+    .orderBy('total_comprado_centavos', 'desc')
     .orderBy('p.nombre', 'asc');
 }
 
@@ -471,11 +497,11 @@ async function cxcDocumentosPendientes(trx = db) {
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.numero_documento END), COALESCE(NULLIF(TRIM(v.referencia), ''), 'VENTA:' || v.id)) as numero_documento"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_emision END), DATE(v.fecha)) as fecha_emision"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_vencimiento END), DATE(v.fecha)) as fecha_vencimiento"),
-      trx.raw("ROUND(SUM(CASE WHEN cm.tipo = 'CARGO' THEN CAST(cm.monto AS REAL) ELSE 0 END), 2) as cargos"),
-      trx.raw("ROUND(SUM(CASE WHEN cm.tipo = 'ABONO' THEN CAST(cm.monto AS REAL) ELSE 0 END), 2) as abonos"),
-      trx.raw("ROUND(SUM(CASE WHEN cm.tipo = 'CARGO' THEN CAST(cm.monto AS REAL) ELSE -CAST(cm.monto AS REAL) END), 2) as saldo")
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'ABONO' THEN ${amountCentsExpression('cm')} ELSE 0 END), 0) as abonos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE -${amountCentsExpression('cm')} END), 0) as saldo_centavos`)
     )
-    .havingRaw("SUM(CASE WHEN cm.tipo = 'CARGO' THEN CAST(cm.monto AS REAL) ELSE -CAST(cm.monto AS REAL) END) > 0")
+    .havingRaw(`SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE -${amountCentsExpression('cm')} END) > 0`)
     .orderBy('cliente_nombre', 'asc')
     .orderBy('fecha_vencimiento', 'asc');
 }
@@ -492,11 +518,11 @@ async function cxpDocumentosPendientes(trx = db) {
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.numero_documento END), f.numero_factura, cm.documento_origen) as numero_documento"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_emision END), DATE(f.fecha), DATE(cm.fecha)) as fecha_emision"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_vencimiento END), DATE(f.fecha), DATE(cm.fecha)) as fecha_vencimiento"),
-      trx.raw("ROUND(SUM(CASE WHEN cm.tipo = 'CARGO' THEN CAST(cm.monto AS REAL) ELSE 0 END), 2) as cargos"),
-      trx.raw("ROUND(SUM(CASE WHEN cm.tipo = 'ABONO' THEN CAST(cm.monto AS REAL) ELSE 0 END), 2) as abonos"),
-      trx.raw("ROUND(SUM(CASE WHEN cm.tipo = 'CARGO' THEN CAST(cm.monto AS REAL) ELSE -CAST(cm.monto AS REAL) END), 2) as saldo")
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'ABONO' THEN ${amountCentsExpression('cm')} ELSE 0 END), 0) as abonos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE -${amountCentsExpression('cm')} END), 0) as saldo_centavos`)
     )
-    .havingRaw("SUM(CASE WHEN cm.tipo = 'CARGO' THEN CAST(cm.monto AS REAL) ELSE -CAST(cm.monto AS REAL) END) > 0")
+    .havingRaw(`SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpression('cm')} ELSE -${amountCentsExpression('cm')} END) > 0`)
     .orderBy('proveedor_nombre', 'asc')
     .orderBy('fecha_vencimiento', 'asc');
 }

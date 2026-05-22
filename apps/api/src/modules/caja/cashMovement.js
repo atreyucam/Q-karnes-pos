@@ -64,11 +64,24 @@ function inferCashDirection(type) {
   return CASH_DIRECTION.INGRESO;
 }
 
-function affectsCashBalance(type) {
+function normalizePaymentMethodCode(metodoPago = 'EFECTIVO') {
+  return String(metodoPago || 'EFECTIVO').trim().toUpperCase();
+}
+
+function affectsCashBalance(type, metodoPago = 'EFECTIVO') {
   const resolvedType = normalizeCashMovementType(type);
+  const paymentCode = normalizePaymentMethodCode(metodoPago);
   return !(
     resolvedType === CASH_MOVEMENT_TYPES.VENTA_TRANSFERENCIA
     || resolvedType === CASH_MOVEMENT_TYPES.VENTA_CREDITO
+    || (
+      paymentCode === 'TRANSFERENCIA'
+      && [
+        CASH_MOVEMENT_TYPES.ABONO_CLIENTE,
+        CASH_MOVEMENT_TYPES.COMPRA_CONTADO,
+        CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR
+      ].includes(resolvedType)
+    )
   );
 }
 
@@ -119,7 +132,7 @@ function buildCashMovementPayload({
     origen_id: origenId || null,
     usuario_id: actorId || null,
     observacion: observacion || null,
-    afecta_saldo: affectsCashBalance(resolvedType) ? 1 : 0,
+    afecta_saldo: affectsCashBalance(resolvedType, metodoPago) ? 1 : 0,
     movimiento_relacionado_id: movimientoRelacionadoId || null
   };
 }
@@ -129,6 +142,7 @@ function summarizeTreasuryMovements(movimientos = []) {
     (acc, movimiento) => {
       const tipo = normalizeCashMovementType(movimiento.tipo);
       const sentido = movimiento.sentido || inferCashDirection(tipo);
+      const metodoPago = normalizePaymentMethodCode(movimiento.metodo_pago);
       const montoCentavos = movimiento?.monto_centavos !== undefined && movimiento?.monto_centavos !== null
         ? Number(movimiento.monto_centavos || 0)
         : moneyToCents(Number(movimiento.monto || 0), 'monto');
@@ -136,10 +150,19 @@ function summarizeTreasuryMovements(movimientos = []) {
       if (tipo === CASH_MOVEMENT_TYPES.VENTA_CONTADO) acc.ventas_efectivo += montoCentavos;
       else if (tipo === CASH_MOVEMENT_TYPES.VENTA_TRANSFERENCIA) acc.ventas_transferencia += montoCentavos;
       else if (tipo === CASH_MOVEMENT_TYPES.VENTA_CREDITO) acc.ventas_credito += montoCentavos;
-      else if (tipo === CASH_MOVEMENT_TYPES.ABONO_CLIENTE) acc.cobranzas_clientes += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.ABONO_CLIENTE) {
+        if (metodoPago === 'TRANSFERENCIA') acc.cobranzas_clientes_transferencia += montoCentavos;
+        else acc.cobranzas_clientes += montoCentavos;
+      }
       else if (tipo === CASH_MOVEMENT_TYPES.INGRESO_MANUAL) acc.ingresos_manuales += montoCentavos;
-      else if (tipo === CASH_MOVEMENT_TYPES.COMPRA_CONTADO) acc.compras_efectivo += montoCentavos;
-      else if (tipo === CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR) acc.pagos_proveedores += montoCentavos;
+      else if (tipo === CASH_MOVEMENT_TYPES.COMPRA_CONTADO) {
+        if (metodoPago === 'TRANSFERENCIA') acc.compras_transferencia += montoCentavos;
+        else acc.compras_efectivo += montoCentavos;
+      }
+      else if (tipo === CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR) {
+        if (metodoPago === 'TRANSFERENCIA') acc.pagos_proveedores_transferencia += montoCentavos;
+        else acc.pagos_proveedores += montoCentavos;
+      }
       else if (tipo === CASH_MOVEMENT_TYPES.EGRESO_MANUAL) acc.egresos_manuales += montoCentavos;
       else if (tipo === CASH_MOVEMENT_TYPES.DEVOLUCION_EFECTIVO) acc.devoluciones_efectivo += montoCentavos;
       else if (tipo === CASH_MOVEMENT_TYPES.ANULACION_VENTA_EFECTIVO) acc.anulaciones_efectivo += montoCentavos;
@@ -155,9 +178,12 @@ function summarizeTreasuryMovements(movimientos = []) {
       ventas_transferencia: 0,
       ventas_credito: 0,
       cobranzas_clientes: 0,
+      cobranzas_clientes_transferencia: 0,
       ingresos_manuales: 0,
       compras_efectivo: 0,
+      compras_transferencia: 0,
       pagos_proveedores: 0,
+      pagos_proveedores_transferencia: 0,
       egresos_manuales: 0,
       devoluciones_efectivo: 0,
       anulaciones_efectivo: 0,

@@ -16,6 +16,7 @@ export const useSistemaStore = create((set, get) => ({
     resumen: {},
     pending_restore: null
   },
+  backupAuto: null,
   loadingHealth: false,
   loadingBackups: false,
   runningIntegrity: false,
@@ -66,11 +67,51 @@ export const useSistemaStore = create((set, get) => ({
     }
   },
   async cargarTodo() {
-    const [health, backups] = await Promise.all([
+    const [health, backups, backupAuto] = await Promise.all([
       get().cargarHealth(),
-      get().cargarBackups()
+      get().cargarBackups(),
+      get().cargarBackupAutomatico()
     ]);
-    return { health, backups };
+    return { health, backups, backupAuto };
+  },
+  async cargarBackupAutomatico() {
+    try {
+      const response = await apiClient.get('/api/sistema/backups/automatico');
+      const data = normalizeResponse(response.data);
+      set({ backupAuto: data });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ error: message });
+      return get().backupAuto;
+    }
+  },
+  async guardarBackupAutomatico(payload) {
+    set({ working: true, error: null });
+    try {
+      const response = await apiClient.put('/api/sistema/backups/automatico', payload);
+      const data = normalizeResponse(response.data);
+      set({ backupAuto: data, working: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ working: false, error: message });
+      throw new Error(message);
+    }
+  },
+  async ejecutarBackupAutomatico() {
+    set({ working: true, error: null });
+    try {
+      const response = await apiClient.post('/api/sistema/backups/automatico/ejecutar');
+      const data = normalizeResponse(response.data);
+      await Promise.all([get().cargarBackups(), get().cargarBackupAutomatico()]);
+      set({ working: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ working: false, error: message });
+      throw new Error(message);
+    }
   },
   async crearBackup(label = 'manual') {
     set({ working: true, error: null });
@@ -78,6 +119,23 @@ export const useSistemaStore = create((set, get) => ({
       const response = await apiClient.post('/api/sistema/backups', { label });
       const data = normalizeResponse(response.data);
       await Promise.all([get().cargarBackups(), get().cargarHealth()]);
+      set({ working: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ working: false, error: message });
+      throw new Error(message);
+    }
+  },
+  async ejecutarMantenimientoSqlite(accion, confirmacion) {
+    set({ working: true, error: null });
+    try {
+      const response = await apiClient.post('/api/sistema/sqlite/mantenimiento', {
+        accion,
+        confirmacion
+      });
+      const data = normalizeResponse(response.data);
+      await Promise.all([get().cargarHealth(), get().cargarBackups()]);
       set({ working: false });
       return data;
     } catch (error) {

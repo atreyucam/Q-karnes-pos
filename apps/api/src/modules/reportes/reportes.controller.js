@@ -2,7 +2,7 @@ const service = require('./reportes.service');
 const { asyncHandler } = require('../../helpers/asyncHandler');
 const { successResponse } = require('../../helpers/apiResponse');
 
-const dashboard = asyncHandler(async (req, res) => successResponse(res, await service.dashboard()));
+const dashboard = asyncHandler(async (req, res) => successResponse(res, await service.dashboard(req.user)));
 const resumenOperativo = asyncHandler(async (req, res) => successResponse(res, await service.resumenOperativo(req.query)));
 const ventasPanel = asyncHandler(async (req, res) => successResponse(res, await service.ventasPanel(req.query)));
 const cajaPanel = asyncHandler(async (req, res) => successResponse(res, await service.cajaPanel(req.query)));
@@ -26,6 +26,57 @@ const inventarioActual = asyncHandler(async (req, res) => successResponse(res, a
 const kardex = asyncHandler(async (req, res) => successResponse(res, await service.kardex(req.query)));
 const transformaciones = asyncHandler(async (req, res) => successResponse(res, await service.transformaciones(req.query)));
 const cajaDiaria = asyncHandler(async (req, res) => successResponse(res, await service.cajaDiaria(req.query)));
+
+function toCsv(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) return '';
+  const headers = Object.keys(rows[0]);
+  const esc = (value) => {
+    const raw = value === null || value === undefined ? '' : String(value);
+    if (raw.includes(',') || raw.includes('"') || raw.includes('\n')) {
+      return `"${raw.replace(/"/g, '""')}"`;
+    }
+    return raw;
+  };
+  const lines = [headers.join(',')];
+  for (const row of rows) {
+    lines.push(headers.map((key) => esc(row[key])).join(','));
+  }
+  return lines.join('\n');
+}
+
+const exportMap = {
+  ventas_periodo: (query) => service.ventasPeriodo(query),
+  caja_diaria: (query) => service.cajaDiaria(query),
+  cxc: (query) => service.cxc(query),
+  cxp: (query) => service.cxp(query),
+  inventario_valorizado: (query) => service.inventarioActual(query),
+  kardex: (query) => service.kardex(query)
+};
+
+const exportReport = asyncHandler(async (req, res) => {
+  const reportKey = String(req.params.reportKey || '').trim().toLowerCase();
+  const handler = exportMap[reportKey];
+  if (!handler) {
+    return res.status(404).json({ ok: false, error: 'Reporte no soportado para exportación' });
+  }
+  const payload = await handler(req.query);
+  const data = payload?.data || {};
+  const rows = Array.isArray(data.items) ? data.items : (Array.isArray(data.ventas) ? data.ventas : []);
+  const format = String(req.query.format || 'csv').trim().toLowerCase();
+  const filename = `${reportKey}-${new Date().toISOString().slice(0, 10)}.${format === 'pdf' ? 'txt' : 'csv'}`;
+  const csv = toCsv(rows);
+
+  if (format === 'pdf') {
+    const summary = `REPORTE: ${reportKey}\nGENERADO: ${new Date().toISOString()}\nUSUARIO: ${req.user?.usuario || 'admin'}\n\n${csv}`;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(summary);
+  }
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.send(csv);
+});
 
 module.exports = {
   dashboard,
@@ -51,5 +102,6 @@ module.exports = {
   inventarioActual,
   kardex,
   transformaciones,
-  cajaDiaria
+  cajaDiaria,
+  exportReport
 };

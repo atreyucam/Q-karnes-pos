@@ -3,6 +3,7 @@ import apiClient, { normalizeResponse, parseApiError } from '../lib/apiClient';
 
 export const useProductosStore = create((set) => ({
   productos: [],
+  meta: null,
   productoDetalle: null,
   loading: false,
   error: null,
@@ -11,7 +12,14 @@ export const useProductosStore = create((set) => ({
     try {
       const response = await apiClient.get('/api/productos', { params });
       const data = normalizeResponse(response.data) || [];
-      set({ productos: data, loading: false });
+      const items = Array.isArray(data) ? data : (data.items || []);
+      const meta = Array.isArray(data) ? null : {
+        total: Number(data.total || items.length || 0),
+        page: Number(data.page || 1),
+        limit: Number(data.limit || params.limit || items.length || 0),
+        totalPages: Number(data.totalPages || 1)
+      };
+      set({ productos: items, meta, loading: false });
       return data;
     } catch (error) {
       const message = parseApiError(error);

@@ -13,10 +13,11 @@ const { assert, expectThrows, printSuiteReport } = require('../support/testHarne
 async function prepareScenario({ abrirCaja = true, fondo = 100 } = {}) {
   await prepareDatabase(db, { seedProfile: 'minimal' });
   const cajero = (await authService.login({ usuario: 'cajero', password: 'cajero123' })).user;
+  const admin = (await authService.login({ usuario: 'admin', password: 'admin123' })).user;
   if (abrirCaja) {
     await cajaService.abrirTurno({ fondo_inicial: fondo, observacion: 'Turno modulo 4 ventas' }, cajero.id);
   }
-  return cajero;
+  return { cajero, admin };
 }
 
 async function closeScenario(cajero) {
@@ -36,7 +37,7 @@ async function runSuite(options = {}) {
   const add = (id, name, ok, detail = '') => results.push({ id, name, ok, detail });
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     const venta = await ventasService.createVenta(
       {
         cliente_id: null,
@@ -66,7 +67,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     const venta = await ventasService.createVenta(
       {
         cliente_id: null,
@@ -94,7 +95,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     const venta = await ventasService.createVenta(
       {
         cliente_id: null,
@@ -132,7 +133,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     const venta = await ventasService.createVenta(
       {
         cliente_id: null,
@@ -170,7 +171,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     await ventasService.createVenta(
       {
         cliente_id: null,
@@ -194,7 +195,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     await ventasService.createVenta(
       {
         cliente_id: null,
@@ -230,7 +231,7 @@ async function runSuite(options = {}) {
   }
 
   {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     const r = await expectThrows(
       () => ventasService.createVenta(
         {
@@ -247,7 +248,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero, admin } = await prepareScenario();
     const venta = await ventasService.createVenta(
       {
         cliente_id: null,
@@ -265,7 +266,7 @@ async function runSuite(options = {}) {
     const valorizacion = await db('inventario_valorizacion')
       .where({ origen_tipo: 'VENTA', origen_id: venta.data.venta.id })
       .first();
-    const auditoria = await ventasService.getAuditoria(venta.data.venta.id);
+    const auditoria = await ventasService.getAuditoria(venta.data.venta.id, admin);
 
     assert(Boolean(kardex), 'Falta kardex de venta');
     assert(Boolean(valorizacion), 'Falta valorización de venta');
@@ -277,7 +278,7 @@ async function runSuite(options = {}) {
   }
 
   try {
-    const cajero = await prepareScenario();
+    const { cajero } = await prepareScenario();
     const venta = await ventasService.createVenta(
       {
         cliente_id: 1,

@@ -66,7 +66,8 @@ const receptionSchema = z.object({
   observacion: z.string().optional(),
   factura: z.object({
     numero_factura: z.string().trim().min(1).optional(),
-    metodo_pago: z.enum(['CONTADO', 'CREDITO'])
+    metodo_pago: z.enum(['CONTADO', 'CREDITO']),
+    metodo_pago_real: z.string().trim().optional()
   }),
   items: z.array(receptionItemSchema).min(1)
 }).superRefine((data, ctx) => {
@@ -75,6 +76,27 @@ const receptionSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['documento_respaldo'],
       message: 'Documento de respaldo es obligatorio'
+    });
+  }
+  if (data.factura?.metodo_pago === 'CREDITO' && data.factura?.metodo_pago_real) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['factura', 'metodo_pago_real'],
+      message: 'metodo_pago_real no aplica a compras a crédito'
+    });
+  }
+  const metodoPagoReal = String(data.factura?.metodo_pago_real || '').trim().toUpperCase();
+  if (metodoPagoReal === 'MIXTO') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['factura', 'metodo_pago_real'],
+      message: 'El pago mixto de compras aún no está disponible. Registre la compra como crédito y luego aplique pagos separados.'
+    });
+  } else if (metodoPagoReal && !['EFECTIVO', 'TRANSFERENCIA'].includes(metodoPagoReal)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['factura', 'metodo_pago_real'],
+      message: 'metodo_pago_real inválido. Use EFECTIVO o TRANSFERENCIA.'
     });
   }
 });
@@ -312,16 +334,32 @@ async function createOrden(body, actorUser) {
 
 async function listOrdenes(query = {}) {
   await repository.ensureLegacySchema();
+  const parsedLimit = Number(query.limit);
+  const parsedOffset = Number(query.offset);
   const filters = {
     search: query.search ? String(query.search).trim() : undefined,
     estado: query.estado ? String(query.estado).trim().toUpperCase() : undefined,
     credito_parcial: query.credito_parcial === '1' || query.credito_parcial === 'true',
-    con_credito: query.con_credito === '1' || query.con_credito === 'true'
+    con_credito: query.con_credito === '1' || query.con_credito === 'true',
+    limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : 20,
+    offset: Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0
   };
 
   const data = await repository.listOrders(filters);
   const decorated = data.map((row) => decorateOrderRow(row));
-  return { ok: true, data: decorated };
+  const usePaginationEnvelope = ['1', 'true'].includes(String(query.paginado || '').toLowerCase());
+  if (!usePaginationEnvelope) return { ok: true, data: decorated };
+  const total = await repository.countOrders(filters);
+  return {
+    ok: true,
+    data: {
+      items: decorated,
+      total,
+      page: Math.floor(filters.offset / filters.limit) + 1,
+      limit: filters.limit,
+      totalPages: Math.max(1, Math.ceil(total / filters.limit))
+    }
+  };
 }
 
 async function getOrden(id) {
@@ -334,6 +372,9 @@ async function getOrden(id) {
 async function receiveOrden(ordenId, body, actorUser) {
   const parsed = receptionSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
+  if (String(parsed.data.factura?.metodo_pago_real || '').trim().toUpperCase() === 'MIXTO') {
+    throw new AppError(400, 'El pago mixto de compras aún no está disponible. Registre la compra como crédito y luego aplique pagos separados.');
+  }
 
   await repository.ensureLegacySchema();
 
@@ -343,6 +384,10 @@ async function receiveOrden(ordenId, body, actorUser) {
     const fechaRecepcion = parseCompraDateTimeInput(parsed.data.fecha_recepcion, 'fecha_recepcion', currentDateTimeInEcuador());
     const schemaSupport = await repository.resolveSchemaSupport(trx);
     const config = await configuracionService.getRuntimeConfig(trx);
+    const condicionPago = parsed.data.factura.metodo_pago;
+    const metodoPagoReal = condicionPago === 'CREDITO'
+      ? 'CREDITO'
+      : String(parsed.data.factura.metodo_pago_real || 'EFECTIVO').trim().toUpperCase();
     const orderData = await repository.getOrderById(ordenId, trx);
     if (!orderData) throw new AppError(404, 'Orden no encontrada');
     if (!['ABIERTA', 'PARCIAL'].includes(orderData.orden.estado)) {
@@ -499,7 +544,8 @@ async function receiveOrden(ordenId, body, actorUser) {
         orden_detalle_id: detail.id,
         cantidad: cantidadRecibida,
         costo_unit_real: n(item.costing.unitCost),
-        subtotal
+        subtotal,
+        subtotal_centavos: costoTotalCentavos
       });
 
       inventoryMoves.push(buildInventoryMovement({
@@ -542,8 +588,10 @@ async function receiveOrden(ordenId, body, actorUser) {
         orden_id: ordenId,
         proveedor_id: proveedorId,
         numero_factura: numeroFactura,
-        metodo_pago: parsed.data.factura.metodo_pago,
+        metodo_pago: condicionPago,
+        metodo_pago_real: metodoPagoReal,
         total,
+        total_centavos: moneyToCents(total, 'total'),
         fecha: fechaRecepcion
       },
       trx
@@ -564,6 +612,7 @@ async function receiveOrden(ordenId, body, actorUser) {
           numero_factura: numeroFactura,
           documento_respaldo: numeroDocumento,
           metodo_pago: factura.metodo_pago,
+          metodo_pago_real: factura.metodo_pago_real || metodoPagoReal,
           total: factura.total
         },
         datos_nuevos: {
@@ -572,17 +621,18 @@ async function receiveOrden(ordenId, body, actorUser) {
           numero_factura: numeroFactura,
           documento_respaldo: numeroDocumento,
           metodo_pago: factura.metodo_pago,
+          metodo_pago_real: factura.metodo_pago_real || metodoPagoReal,
           total: factura.total
         }
       },
       trx
     );
 
-    if (parsed.data.factura.metodo_pago === 'CONTADO') {
-      await configuracionService.assertPaymentMethodEnabled('EFECTIVO', trx);
+    if (condicionPago === 'CONTADO') {
+      await configuracionService.assertPaymentMethodEnabled(metodoPagoReal, trx);
       const shift = await repository.getOpenShift(trx);
       if (!shift) {
-        throw new AppError(400, 'Factura CONTADO requiere turno abierto para salida de caja');
+        throw new AppError(400, 'Se requiere turno abierto para registrar compras');
       }
 
       await repository.createCashMovement(
@@ -591,6 +641,7 @@ async function receiveOrden(ordenId, body, actorUser) {
           tipo: CASH_MOVEMENT_TYPES.COMPRA_CONTADO,
           concepto: `Compra contado OC #${ordenId}`,
           monto: total,
+          metodoPago: metodoPagoReal,
           documentoOrigen: `FACTURA_COMPRA:${factura.id}`,
           moduloOrigen: 'COMPRAS',
           origenId: factura.id,
@@ -601,13 +652,15 @@ async function receiveOrden(ordenId, body, actorUser) {
       );
     }
 
-    if (parsed.data.factura.metodo_pago === 'CREDITO') {
+    if (condicionPago === 'CREDITO') {
       const deudaCxp = await repository.createCxpMovement(
         {
           proveedor_id: proveedorId,
           factura_id: factura.id,
           tipo: 'CARGO',
           monto: total,
+          monto_centavos: moneyToCents(total, 'monto'),
+          metodo_pago: 'CREDITO_PROVEEDOR',
           documento_origen: `FACTURA:${numeroFactura}`,
           numero_documento: numeroFactura,
           fecha_emision: toDateOnly(factura.fecha),
@@ -726,7 +779,8 @@ async function receiveOrden(ordenId, body, actorUser) {
           proveedor_nombre: proveedor.nombre,
           factura: {
             ...parsed.data.factura,
-            numero_factura: numeroFactura
+            numero_factura: numeroFactura,
+            metodo_pago_real: metodoPagoReal
           },
           documento_respaldo: numeroDocumento,
           observacion: parsed.data.observacion?.trim() || null,

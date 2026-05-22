@@ -6,10 +6,13 @@ const path = require('node:path');
 const cors = require('cors');
 const express = require('express');
 const { port: defaultPort } = require('./config/env');
+const db = require('./db/knex');
 const { resolveDbFilePath } = require('./config/dbFile');
+const { buildCorsOptions, resolveBindHost, ensureUsersReadyForRuntime } = require('./config/runtimeSecurity');
 const { ensureSupportDirectories } = require('./config/supportPaths');
 const { createLogger } = require('./helpers/logger');
 const { applyPendingRestoreIfNeeded } = require('./modules/sistema/sistema.runtime');
+const { startBackupAutoScheduler } = require('./modules/sistema/backupAuto.scheduler');
 const { notFound, errorHandler } = require('./middlewares/errorHandlers');
 
 const apiLogger = createLogger({ channel: 'api-runtime' });
@@ -69,11 +72,14 @@ function mountWebLocalFrontend(app) {
   });
 }
 
-function createApp() {
+function createApp(options = {}) {
   const app = express();
   const webLocal = isWebLocalEnabled();
+  const requestedPort = options.port !== undefined ? options.port : (process.env.PORT || defaultPort);
+  const port = Number(requestedPort);
+  const host = options.host || process.env.HOST || '127.0.0.1';
 
-  app.use(cors());
+  app.use(cors(buildCorsOptions({ port, host })));
   app.use(express.json());
   app.use((req, res, next) => {
     const requestId = req.headers['x-request-id'] || crypto.randomUUID();
@@ -83,6 +89,12 @@ function createApp() {
     const startAt = Date.now();
     res.on('finish', () => {
       if (req.path === '/health') return;
+      const shouldLogRequest = (
+        nodeEnv !== 'production'
+        || String(process.env.LOG_HTTP_REQUESTS || '').trim().toLowerCase() === 'true'
+        || res.statusCode >= 400
+      );
+      if (!shouldLogRequest) return;
       apiLogger.info('http_request', 'Request procesada', {
         requestId: req.requestId,
         method: req.method,
@@ -127,10 +139,19 @@ function createApp() {
   return app;
 }
 
-function startServer(options = {}) {
-  const app = createApp();
-  const port = Number(options.port || process.env.PORT || defaultPort);
-  const host = options.host || process.env.HOST || null;
+async function startServer(options = {}) {
+  const requestedPort = options.port !== undefined ? options.port : (process.env.PORT || defaultPort);
+  const port = Number(requestedPort);
+  const host = resolveBindHost({ requestedHost: options.host || process.env.HOST });
+  const app = createApp({ port, host });
+
+  if (!options.skipUserRuntimeCheck) {
+    await ensureUsersReadyForRuntime({
+      knex: db,
+      nodeEnv,
+      context: 'API local'
+    });
+  }
 
   return new Promise((resolve, reject) => {
     const onListening = () => {
@@ -138,7 +159,7 @@ function startServer(options = {}) {
       apiLogger.info('api_start', 'API local iniciada', {
         nodeEnv,
         port,
-        host: host || '(default)',
+        host,
         webLocal: isWebLocalEnabled(),
         webDistDir: isWebLocalEnabled() ? resolveWebDistDir() : null,
         dbFile,
@@ -147,12 +168,11 @@ function startServer(options = {}) {
         supportDir: supportPaths.supportDir,
         startupRestore
       });
+      startBackupAutoScheduler();
       resolve(server);
     };
 
-    const server = host
-      ? app.listen(port, host, onListening)
-      : app.listen(port, onListening);
+    const server = app.listen(port, host, onListening);
 
     server.on('error', reject);
   });

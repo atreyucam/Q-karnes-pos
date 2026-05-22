@@ -107,25 +107,19 @@ function resolvePositiveAdjustmentCost(producto, cantidad, costOriginType, manua
   };
 }
 
-async function disponible() {
-  const rows = await repository.listDisponible();
-  return rows.map((row) => {
-    const precioVenta = Number(row.precio_venta || row.precio_referencia || 0);
-    const costoVisible = Number(row.costo_promedio || 0);
-    const margin = deriveMarginMetrics({ precioVenta, costoVisible });
-    const valorCentavos = Number(row.valor_inventario_centavos || 0);
-    return {
-      ...row,
-      costo_visible: costoVisible,
-      valor_inventario: fromCents(valorCentavos),
-      ...margin
-    };
-  });
+function resolvePagination(query = {}) {
+  const parsedLimit = Number(query.limit);
+  const parsedOffset = Number(query.offset);
+  return {
+    limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : 20,
+    offset: Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0
+  };
 }
 
-async function alertas() {
-  const rows = await repository.listAlertas();
-  return rows.map((row) => {
+async function disponible(query = {}) {
+  const paging = resolvePagination(query);
+  const rows = await repository.listDisponible(paging);
+  const items = rows.map((row) => {
     const precioVenta = Number(row.precio_venta || row.precio_referencia || 0);
     const costoVisible = Number(row.costo_promedio || 0);
     const margin = deriveMarginMetrics({ precioVenta, costoVisible });
@@ -137,6 +131,43 @@ async function alertas() {
       ...margin
     };
   });
+  const usePaginationEnvelope = ['1', 'true'].includes(String(query.paginado || '').toLowerCase());
+  if (!usePaginationEnvelope) return items;
+  const total = await repository.countDisponible();
+  return {
+    items,
+    total,
+    page: Math.floor(paging.offset / paging.limit) + 1,
+    limit: paging.limit,
+    totalPages: Math.max(1, Math.ceil(total / paging.limit))
+  };
+}
+
+async function alertas(query = {}) {
+  const paging = resolvePagination(query);
+  const rows = await repository.listAlertas(paging);
+  const items = rows.map((row) => {
+    const precioVenta = Number(row.precio_venta || row.precio_referencia || 0);
+    const costoVisible = Number(row.costo_promedio || 0);
+    const margin = deriveMarginMetrics({ precioVenta, costoVisible });
+    const valorCentavos = Number(row.valor_inventario_centavos || 0);
+    return {
+      ...row,
+      costo_visible: costoVisible,
+      valor_inventario: fromCents(valorCentavos),
+      ...margin
+    };
+  });
+  const usePaginationEnvelope = ['1', 'true'].includes(String(query.paginado || '').toLowerCase());
+  if (!usePaginationEnvelope) return items;
+  const total = await repository.countAlertas();
+  return {
+    items,
+    total,
+    page: Math.floor(paging.offset / paging.limit) + 1,
+    limit: paging.limit,
+    totalPages: Math.max(1, Math.ceil(total / paging.limit))
+  };
 }
 
 async function conteos() {
@@ -703,8 +734,19 @@ async function createMerma(body, actorUser) {
   });
 }
 
-async function movimientos() {
-  return repository.listMovimientos();
+async function movimientos(query = {}) {
+  const paging = resolvePagination(query);
+  const items = await repository.listMovimientos(paging);
+  const usePaginationEnvelope = ['1', 'true'].includes(String(query.paginado || '').toLowerCase());
+  if (!usePaginationEnvelope) return items;
+  const total = await repository.countMovimientos();
+  return {
+    items,
+    total,
+    page: Math.floor(paging.offset / paging.limit) + 1,
+    limit: paging.limit,
+    totalPages: Math.max(1, Math.ceil(total / paging.limit))
+  };
 }
 
 module.exports = {

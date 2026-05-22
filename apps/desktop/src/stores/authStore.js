@@ -7,6 +7,7 @@ export const useAuthStore = create((set, get) => ({
   loading: false,
   error: null,
   isAuthenticated: Boolean(getStoredToken()),
+  bootstrapStatus: null,
   login: async (usuario, password) => {
     set({ loading: true, error: null });
     try {
@@ -14,6 +15,30 @@ export const useAuthStore = create((set, get) => ({
       const data = normalizeResponse(response.data);
       setStoredToken(data.token);
       set({ token: data.token, user: data.user, isAuthenticated: true, loading: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ loading: false, error: message });
+      throw new Error(message);
+    }
+  },
+  fetchBootstrapStatus: async () => {
+    try {
+      const response = await apiClient.get('/api/auth/bootstrap-status');
+      const data = normalizeResponse(response.data);
+      set({ bootstrapStatus: data });
+      return data;
+    } catch (_) {
+      set({ bootstrapStatus: null });
+      return null;
+    }
+  },
+  bootstrapAdmin: async (payload) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.post('/api/auth/bootstrap-admin', payload);
+      const data = normalizeResponse(response.data);
+      set({ loading: false });
       return data;
     } catch (error) {
       const message = parseApiError(error);

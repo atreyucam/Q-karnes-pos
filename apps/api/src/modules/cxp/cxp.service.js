@@ -10,6 +10,7 @@ const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
 const { computeDebtStatus } = require('../../helpers/credit');
 const { CASH_MOVEMENT_TYPES, buildCashMovementPayload } = require('../caja/cashMovement');
+const { moneyToCents, centsToMoney } = require('../../helpers/unitPolicy');
 
 const pagoSchema = z.object({
   factura_id: z.number().int().positive(),
@@ -66,8 +67,10 @@ function parseReferenceFromObservation(observacion = '') {
 }
 
 function resolvePagoProveedorMethodCode(movimiento, cashMovement) {
+  const persistedCode = toUpper(movimiento?.metodo_pago);
   const taggedCode = toUpper(extractPaymentCodeTag(movimiento?.observacion));
   const cashCode = toUpper(cashMovement?.metodo_pago);
+  if (persistedCode) return persistedCode;
   if (taggedCode) return taggedCode;
   if (cashCode) return cashCode;
 
@@ -82,12 +85,21 @@ function resolvePagoProveedorMethodCode(movimiento, cashMovement) {
 }
 
 function mapDebtDocument(row) {
-  const cargos = moneyRound(row.cargos);
-  const abonos = moneyRound(row.abonos);
-  const saldo = moneyRound(cargos - abonos);
+  const totalCentavos = Number(row.total_centavos || moneyToCents(row.total || 0, 'total'));
+  const cargosCentavos = Number(row.cargos_centavos || 0);
+  const abonosCentavos = Number(row.abonos_centavos || 0);
+  const saldoCentavos = cargosCentavos - abonosCentavos;
+  const cargos = centsToMoney(cargosCentavos);
+  const abonos = centsToMoney(abonosCentavos);
+  const saldo = centsToMoney(saldoCentavos);
 
   return {
     ...row,
+    total_centavos: totalCentavos,
+    total: centsToMoney(totalCentavos),
+    cargos_centavos: cargosCentavos,
+    abonos_centavos: abonosCentavos,
+    saldo_centavos: saldoCentavos > 0 ? saldoCentavos : 0,
     cargos,
     abonos,
     saldo: saldo > 0 ? saldo : 0,
@@ -106,7 +118,7 @@ async function resumenProveedor(proveedorId) {
     repository.saldoByProveedor(proveedorId),
     repository.listFacturasProveedor(proveedorId)
   ]);
-  const saldo = moneyRound(totals.cargos - totals.abonos);
+  const saldoCentavos = Number(totals.cargos_centavos || 0) - Number(totals.abonos_centavos || 0);
   const deudas = deudasRaw.map(mapDebtDocument);
   const resumenDocumentos = deudas.reduce(
     (acc, deuda) => {
@@ -123,9 +135,9 @@ async function resumenProveedor(proveedorId) {
     ok: true,
     data: {
       proveedor,
-      cargos: moneyRound(totals.cargos),
-      abonos: moneyRound(totals.abonos),
-      saldo: saldo > 0 ? saldo : 0,
+      cargos: centsToMoney(Number(totals.cargos_centavos || 0)),
+      abonos: centsToMoney(Number(totals.abonos_centavos || 0)),
+      saldo: saldoCentavos > 0 ? centsToMoney(saldoCentavos) : 0,
       deudas,
       resumen_documentos: resumenDocumentos
     }
@@ -168,7 +180,7 @@ async function pagarProveedor(proveedorId, body, actorUser) {
     await configuracionService.assertPaymentMethodEnabled(metodoPago, trx);
 
     const turno = await cajaRepository.findOpenShift(trx);
-    if (config.exigir_caja_abierta_para_pagos && metodoPago === PAYMENT_CODES.EFECTIVO && !turno) {
+    if (!turno) {
       throw new AppError(400, 'Se requiere turno abierto para registrar pago a proveedor');
     }
 
@@ -183,6 +195,8 @@ async function pagarProveedor(proveedorId, body, actorUser) {
         factura_id: parsed.data.factura_id,
         tipo: 'ABONO',
         monto,
+        monto_centavos: moneyToCents(monto, 'monto'),
+        metodo_pago: metodoPago,
         documento_origen: `FACTURA:${deudaDocumento.numero_documento}`,
         numero_documento: deudaDocumento.numero_documento,
         fecha_emision: deudaDocumento.fecha_emision,
@@ -195,7 +209,7 @@ async function pagarProveedor(proveedorId, body, actorUser) {
     );
 
     let movimientoCaja = null;
-    if (turno && metodoPago === PAYMENT_CODES.EFECTIVO) {
+    if (turno) {
       const existingCash = await cajaRepository.findMovementByOrigin(
         {
           tipo: CASH_MOVEMENT_TYPES.PAGO_PROVEEDOR,
@@ -251,7 +265,7 @@ async function pagarProveedor(proveedorId, body, actorUser) {
       data: {
         movimiento_cxp: movimiento,
         movimiento_caja: movimientoCaja,
-        turno_id: metodoPago === PAYMENT_CODES.EFECTIVO ? turno?.id || null : null
+        turno_id: turno?.id || null
       }
     };
   });
@@ -314,6 +328,8 @@ async function revertirPagoProveedor(proveedorId, movimientoId, body, actorUser)
         factura_id: pago.factura_id || null,
         tipo: 'CARGO',
         monto: moneyRound(pago.monto),
+        monto_centavos: Number(pago.monto_centavos || moneyToCents(pago.monto, 'monto')),
+        metodo_pago: pago.metodo_pago || 'AJUSTE',
         documento_origen: referenciaReverso,
         numero_documento: pago.numero_documento,
         fecha_emision: pago.fecha_emision,
@@ -331,6 +347,7 @@ async function revertirPagoProveedor(proveedorId, movimientoId, body, actorUser)
         tipo: CASH_MOVEMENT_TYPES.REVERSO_PAGO_PROVEEDOR,
         concepto: `Reverso pago proveedor #${proveedorId}`,
         monto: moneyRound(pago.monto),
+        metodoPago: pago.metodo_pago || movimientoCajaOriginal.metodo_pago || PAYMENT_CODES.EFECTIVO,
         documentoOrigen: referenciaReverso,
         moduloOrigen: 'CXP',
         origenId: movimientoReverso.id,
@@ -403,6 +420,8 @@ async function historialPagosProveedor(proveedorId) {
     const referenciaFromObs = parseReferenceFromObservation(row.observacion);
     return {
       ...row,
+      monto_centavos: Number(row.monto_centavos || moneyToCents(row.monto, 'monto')),
+      monto: centsToMoney(Number(row.monto_centavos || moneyToCents(row.monto, 'monto'))),
       metodo_pago: metodoPago,
       banco: banco || null,
       referencia: String(row.referencia || '').trim() || referenciaFromObs || null

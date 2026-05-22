@@ -163,6 +163,11 @@ function assertNoInventoryEditableFields(rawBody = {}) {
 }
 
 async function list(query) {
+  const parsedLimit = Number(query.limit);
+  const parsedOffset = Number(query.offset);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : 20;
+  const offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+
   const filters = {
     categoria_id: query.categoria_id ? Number(query.categoria_id) : undefined,
     search: query.search,
@@ -170,11 +175,24 @@ async function list(query) {
     es_vendible: parseBooleanQuery(query.es_vendible),
     es_transformable: parseBooleanQuery(query.es_transformable),
     es_insumo: parseBooleanQuery(query.es_insumo),
-    es_merma: parseBooleanQuery(query.es_merma)
+    es_merma: parseBooleanQuery(query.es_merma),
+    limit,
+    offset
   };
 
   const rows = await repository.list(filters);
-  return rows.map(normalizeProduct);
+  const items = rows.map(normalizeProduct);
+  const usePaginationEnvelope = ['1', 'true'].includes(String(query.paginado || '').toLowerCase());
+  if (!usePaginationEnvelope) return items;
+
+  const total = await repository.count(filters);
+  return {
+    items,
+    total,
+    page: Math.floor(offset / limit) + 1,
+    limit,
+    totalPages: Math.max(1, Math.ceil(total / limit))
+  };
 }
 
 async function create(body) {

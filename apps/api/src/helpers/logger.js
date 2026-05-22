@@ -58,6 +58,12 @@ function resolveRuntimeLevel() {
   return 'info';
 }
 
+function resolveRetentionDays() {
+  const raw = Number(process.env.LOG_RETENTION_DAYS);
+  if (Number.isFinite(raw) && raw > 0) return Math.min(Math.floor(raw), 365);
+  return 15;
+}
+
 function shouldLog(level, runtimeLevel) {
   const target = LEVEL_WEIGHT[level] || LEVEL_WEIGHT.info;
   const gate = LEVEL_WEIGHT[runtimeLevel] || LEVEL_WEIGHT.info;
@@ -69,6 +75,34 @@ function createLogger(options = {}) {
   const runtimeLevel = options.level || resolveRuntimeLevel();
   const nodeEnv = options.nodeEnv || process.env.NODE_ENV || 'development';
   const dbFileEnv = options.dbFileEnv || process.env.DB_FILE;
+  const retentionDays = options.retentionDays || resolveRetentionDays();
+  let writeQueue = Promise.resolve();
+  let lastCleanupAt = 0;
+
+  function enqueueWrite(task) {
+    writeQueue = writeQueue
+      .then(task)
+      .catch(() => {});
+  }
+
+  async function cleanupOldLogs(logsDir) {
+    const now = Date.now();
+    if ((now - lastCleanupAt) < 60_000) return;
+    lastCleanupAt = now;
+
+    const entries = await fs.promises.readdir(logsDir, { withFileTypes: true });
+    const cutoff = now - (retentionDays * 24 * 60 * 60 * 1000);
+
+    await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.startsWith(`${channel}-`) && entry.name.endsWith('.log'))
+      .map(async (entry) => {
+        const fullPath = path.join(logsDir, entry.name);
+        const stats = await fs.promises.stat(fullPath);
+        if (stats.mtimeMs < cutoff) {
+          await fs.promises.unlink(fullPath);
+        }
+      }));
+  }
 
   function write(level, event, message, meta) {
     if (!shouldLog(level, runtimeLevel)) return;
@@ -84,7 +118,10 @@ function createLogger(options = {}) {
       meta: sanitizeValue(meta || {})
     };
 
-    fs.appendFileSync(filePath, toJsonLine(payload), { encoding: 'utf8' });
+    enqueueWrite(async () => {
+      await fs.promises.appendFile(filePath, toJsonLine(payload), { encoding: 'utf8' });
+      await cleanupOldLogs(dirs.logsDir);
+    });
 
     const summary = `[${payload.ts}] [${channel}] ${level.toUpperCase()} ${event} ${payload.message}`;
     try {

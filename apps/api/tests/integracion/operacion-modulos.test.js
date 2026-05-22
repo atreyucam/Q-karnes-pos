@@ -401,7 +401,7 @@ async function runSuite(options = {}) {
     const milanesaPollo = await getProduct(fixture.productos.simples.milanesaPollo.id);
     const ventaMovs = await db('inventario_movimientos').where({ tipo: 'SALIDA_VENTA' });
     const cxc = await db('cxc_movimientos').where({ venta_id: venta2.data.venta.id, tipo: 'CARGO' }).first();
-    const ticketTransfer = await ventasService.getTicket(venta3.data.venta.id);
+    const ticketTransfer = await ventasService.getTicket(venta3.data.venta.id, cajero);
 
     assert(asQty(pechuga.stock_actual) === 19, 'Venta no descontó pechuga');
     assert(asQty(costillaRes.stock_actual) === 32, 'Venta no descontó costilla de res');

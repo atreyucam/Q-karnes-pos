@@ -24,7 +24,7 @@ export const navigationItems = [
     key: 'compras',
     label: 'Compras',
     icon: PiTruck,
-    roles: ['ADMIN', 'CAJERO'],
+    roles: ['ADMIN'],
     defaultTo: '/compras/nueva',
     basePath: '/compras',
     items: [
@@ -37,7 +37,7 @@ export const navigationItems = [
     key: 'despiece',
     label: 'Despiece',
     icon: PiKnife,
-    roles: ['ADMIN', 'CAJERO'],
+    roles: ['ADMIN'],
     defaultTo: '/transformaciones',
     basePath: '/transformaciones',
     items: [
@@ -45,16 +45,16 @@ export const navigationItems = [
       { to: '/transformaciones', label: 'Lotes de despiece' }
     ]
   },
-  { type: 'link', to: '/productos', label: 'Productos', icon: PiTag, roles: ['ADMIN', 'CAJERO'] },
-  { type: 'link', to: '/inventario', label: 'Inventario', icon: PiPackage, roles: ['ADMIN', 'CAJERO'] },
+  { type: 'link', to: '/productos', label: 'Productos', icon: PiTag, roles: ['ADMIN'] },
+  { type: 'link', to: '/inventario', label: 'Inventario', icon: PiPackage, roles: ['ADMIN'] },
   { type: 'link', to: '/clientes', label: 'Clientes', icon: PiUsersThree, roles: ['ADMIN', 'CAJERO'] },
-  { type: 'link', to: '/proveedores', label: 'Proveedores', icon: PiStorefront, roles: ['ADMIN', 'CAJERO'] },
+  { type: 'link', to: '/proveedores', label: 'Proveedores', icon: PiStorefront, roles: ['ADMIN'] },
   {
     type: 'group',
     key: 'reportes',
     label: 'Reportes',
     icon: PiChartBar,
-    roles: ['ADMIN', 'CAJERO'],
+    roles: ['ADMIN'],
     defaultTo: '/reportes/resumen',
     basePath: '/reportes',
     items: [

@@ -1,27 +1,42 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PiArrowRight, PiEye, PiEyeClosed, PiLockKey, PiUser } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
-import logoEmpresa from '../../public/logoFrigo.png';
 import { Alert, Button, Input } from '../../ui';
 import { useAuthStore } from '../../stores/authStore';
 import useFormErrors from '../../shared/hooks/useFormErrors';
 
 function BrandMark() {
   return (
-    <img src={logoEmpresa} alt="QKarnes POS" className="h-[150px] w-auto object-contain" />
+    <div className="flex h-[96px] w-[96px] items-center justify-center rounded-2xl border border-border bg-surface-alt text-[24px] font-extrabold text-text">
+      QK
+    </div>
   );
 }
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
+  const fetchBootstrapStatus = useAuthStore((s) => s.fetchBootstrapStatus);
+  const bootstrapAdmin = useAuthStore((s) => s.bootstrapAdmin);
+  const bootstrapStatus = useAuthStore((s) => s.bootstrapStatus);
   const loading = useAuthStore((s) => s.loading);
   const error = useAuthStore((s) => s.error);
-  const showDemoHint = Boolean(import.meta.env?.DEV);
+  const showDemoHint = Boolean(import.meta.env?.DEV && import.meta.env?.VITE_ALLOW_DEMO_SEED === 'true');
 
   const [form, setForm] = useState({ usuario: '', password: '' });
+  const [bootstrapForm, setBootstrapForm] = useState({
+    nombre: '',
+    usuario: '',
+    password: '',
+    confirmPassword: ''
+  });
   const [showPassword, setShowPassword] = useState(false);
   const formErrors = useFormErrors();
+  const bootstrapErrors = useFormErrors();
+
+  useEffect(() => {
+    fetchBootstrapStatus().catch(() => {});
+  }, [fetchBootstrapStatus]);
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -38,6 +53,52 @@ export default function LoginPage() {
       // no-op
     }
   };
+
+  const onBootstrapSubmit = async (e) => {
+    e.preventDefault();
+    const nextErrors = {};
+    if (!bootstrapForm.nombre.trim()) nextErrors.nombre = 'Este campo es obligatorio.';
+    if (!bootstrapForm.usuario.trim()) nextErrors.usuario = 'Este campo es obligatorio.';
+    if (!bootstrapForm.password.trim()) nextErrors.password = 'Este campo es obligatorio.';
+    if (!bootstrapForm.confirmPassword.trim()) nextErrors.confirmPassword = 'Este campo es obligatorio.';
+    if (!bootstrapErrors.setErrors(nextErrors)) return;
+
+    try {
+      await bootstrapAdmin(bootstrapForm);
+      await fetchBootstrapStatus();
+      setBootstrapForm({ nombre: '', usuario: '', password: '', confirmPassword: '' });
+    } catch (_) {
+      // no-op
+    }
+  };
+
+  if (bootstrapStatus?.bootstrap_required) {
+    return (
+      <div className="min-h-[100dvh] bg-background">
+        <div className="mx-auto flex min-h-[100dvh] w-full max-w-[1720px] items-center justify-center overflow-hidden px-6 py-10 sm:px-8 lg:px-12">
+          <div className="w-full max-w-[360px]">
+            <div className="flex justify-center"><BrandMark /></div>
+            <div className="mt-8 text-left">
+              <h1 className="text-[30px] font-extrabold leading-[0.95] tracking-[-0.05em] text-text">Configuración inicial</h1>
+              <p className="mt-4 text-[15px] font-medium leading-7 text-text-muted">
+                Crea el primer usuario ADMIN para habilitar el acceso al sistema.
+              </p>
+            </div>
+            <form onSubmit={onBootstrapSubmit} className="mt-8 space-y-4">
+              <Input placeholder="Nombre" value={bootstrapForm.nombre} onChange={(e) => setBootstrapForm((s) => ({ ...s, nombre: e.target.value }))} />
+              <Input placeholder="Usuario" value={bootstrapForm.usuario} onChange={(e) => setBootstrapForm((s) => ({ ...s, usuario: e.target.value }))} />
+              <Input type="password" placeholder="Contraseña" value={bootstrapForm.password} onChange={(e) => setBootstrapForm((s) => ({ ...s, password: e.target.value }))} />
+              <Input type="password" placeholder="Confirmar contraseña" value={bootstrapForm.confirmPassword} onChange={(e) => setBootstrapForm((s) => ({ ...s, confirmPassword: e.target.value }))} />
+              {error ? <Alert tone="error">{error}</Alert> : null}
+              <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                {loading ? 'Creando ADMIN...' : 'Crear ADMIN inicial'}
+              </Button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] bg-background">

@@ -21,6 +21,10 @@ function shiftDate(date, days) {
   return source.toISOString().slice(0, 10);
 }
 
+function currentDateIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 async function loginUsers() {
   const admin = (await authService.login({ usuario: 'admin', password: 'admin123' })).user;
   const cajero = (await authService.login({ usuario: 'cajero', password: 'cajero123' })).user;
@@ -288,7 +292,12 @@ async function runSuite(options = {}) {
 
   try {
     await buildSalesFixture();
-    const reporte = await reportesService.kardex({ producto_id: 1 });
+    const todayRuntime = currentDateIso();
+    const reporte = await reportesService.kardex({
+      producto_id: 1,
+      fecha_inicio: shiftDate(todayRuntime, -7),
+      fecha_fin: todayRuntime
+    });
     const ventaRows = reporte.data.items.filter((item) => item.origen.tipo === 'VENTA');
     const ordered = [...reporte.data.items].sort((a, b) => {
       const left = `${a.fecha}|${String(a.id).padStart(10, '0')}`;

@@ -112,3 +112,8 @@ export async function fetchCxcReport() {
 export async function fetchCxpReport() {
   return fetchReporte('cxp');
 }
+
+export function buildExportUrl(reportKey, params = {}, format = 'csv') {
+  const search = new URLSearchParams({ ...sanitizeQueryParams(params), format }).toString();
+  return `${apiClient.defaults.baseURL}/api/reportes/export/${encodeURIComponent(reportKey)}?${search}`;
+}

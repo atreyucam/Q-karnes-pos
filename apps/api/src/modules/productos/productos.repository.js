@@ -1,51 +1,53 @@
 const db = require('../../db/knex');
 
 async function list(filters = {}, trx = db) {
-  const query = trx('productos as p')
+  const baseQuery = trx('productos as p')
     .leftJoin('categorias as c', 'p.categoria_id', 'c.id')
-    .select(
-      'p.id',
-      'p.codigo',
-      'p.nombre',
-      'p.categoria_id',
-      'c.nombre as categoria_nombre',
-      'p.unidad_medida',
-      'p.unidad',
-      'p.costo_promedio',
-      'p.precio_referencia',
-      'p.precio_venta',
-      'p.stock_actual',
-      'p.stock_minimo',
-      'p.activo',
-      'p.es_vendible',
-      'p.es_transformable',
-      'p.es_insumo',
-      'p.es_merma',
-      trx.raw(`
-        CASE WHEN EXISTS (
-          SELECT 1
-          FROM inventario_movimientos m
-          WHERE m.producto_id = p.id
-        ) THEN 1 ELSE 0 END as tiene_movimientos_inventario
-      `)
-    )
     .orderBy('p.codigo', 'asc');
 
-  if (filters.categoria_id) query.where('p.categoria_id', filters.categoria_id);
+  if (filters.categoria_id) baseQuery.where('p.categoria_id', filters.categoria_id);
 
   if (filters.search) {
-    query.where((qb) => {
+    baseQuery.where((qb) => {
       qb.where('p.codigo', 'like', `%${filters.search}%`).orWhere('p.nombre', 'like', `%${filters.search}%`);
     });
   }
 
-  if (filters.activo !== undefined) query.where('p.activo', filters.activo ? 1 : 0);
-  if (filters.es_vendible !== undefined) query.where('p.es_vendible', filters.es_vendible ? 1 : 0);
-  if (filters.es_transformable !== undefined) query.where('p.es_transformable', filters.es_transformable ? 1 : 0);
-  if (filters.es_insumo !== undefined) query.where('p.es_insumo', filters.es_insumo ? 1 : 0);
-  if (filters.es_merma !== undefined) query.where('p.es_merma', filters.es_merma ? 1 : 0);
+  if (filters.activo !== undefined) baseQuery.where('p.activo', filters.activo ? 1 : 0);
+  if (filters.es_vendible !== undefined) baseQuery.where('p.es_vendible', filters.es_vendible ? 1 : 0);
+  if (filters.es_transformable !== undefined) baseQuery.where('p.es_transformable', filters.es_transformable ? 1 : 0);
+  if (filters.es_insumo !== undefined) baseQuery.where('p.es_insumo', filters.es_insumo ? 1 : 0);
+  if (filters.es_merma !== undefined) baseQuery.where('p.es_merma', filters.es_merma ? 1 : 0);
 
-  return query;
+  if (filters.limit) baseQuery.limit(filters.limit);
+  if (filters.offset) baseQuery.offset(filters.offset);
+
+  return baseQuery.select(
+    'p.id',
+    'p.codigo',
+    'p.nombre',
+    'p.categoria_id',
+    'c.nombre as categoria_nombre',
+    'p.unidad_medida',
+    'p.unidad',
+    'p.costo_promedio',
+    'p.precio_referencia',
+    'p.precio_venta',
+    'p.stock_actual',
+    'p.stock_minimo',
+    'p.activo',
+    'p.es_vendible',
+    'p.es_transformable',
+    'p.es_insumo',
+    'p.es_merma',
+    trx.raw(`
+      CASE WHEN EXISTS (
+        SELECT 1
+        FROM inventario_movimientos m
+        WHERE m.producto_id = p.id
+      ) THEN 1 ELSE 0 END as tiene_movimientos_inventario
+    `)
+  );
 }
 
 async function getById(id, trx = db) {
@@ -99,6 +101,22 @@ async function hasInventoryMovements(productId, trx = db) {
 
 module.exports = {
   list,
+  count: async (filters = {}, trx = db) => {
+    const query = trx('productos as p').count({ total: '*' });
+    if (filters.categoria_id) query.where('p.categoria_id', filters.categoria_id);
+    if (filters.search) {
+      query.where((qb) => {
+        qb.where('p.codigo', 'like', `%${filters.search}%`).orWhere('p.nombre', 'like', `%${filters.search}%`);
+      });
+    }
+    if (filters.activo !== undefined) query.where('p.activo', filters.activo ? 1 : 0);
+    if (filters.es_vendible !== undefined) query.where('p.es_vendible', filters.es_vendible ? 1 : 0);
+    if (filters.es_transformable !== undefined) query.where('p.es_transformable', filters.es_transformable ? 1 : 0);
+    if (filters.es_insumo !== undefined) query.where('p.es_insumo', filters.es_insumo ? 1 : 0);
+    if (filters.es_merma !== undefined) query.where('p.es_merma', filters.es_merma ? 1 : 0);
+    const row = await query.first();
+    return Number(row?.total || 0);
+  },
   getById,
   getByCodigo,
   getLastGeneratedCode,

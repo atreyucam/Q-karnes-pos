@@ -3,6 +3,12 @@ import apiClient, { normalizeResponse, parseApiError } from '../lib/apiClient';
 
 export const useVentasStore = create((set) => ({
   ventas: [],
+  ventasMeta: {
+    total: 0,
+    page: 1,
+    limit: 20,
+    totalPages: 1
+  },
   ventaDetalle: null,
   ticket: null,
   devoluciones: null,
@@ -12,7 +18,31 @@ export const useVentasStore = create((set) => ({
     set({ loading: true, error: null });
     try {
       const response = await apiClient.get('/api/ventas', { params });
-      set({ ventas: normalizeResponse(response.data) || [], loading: false });
+      const normalized = normalizeResponse(response.data);
+      if (Array.isArray(normalized)) {
+        set({
+          ventas: normalized,
+          ventasMeta: {
+            total: normalized.length,
+            page: 1,
+            limit: normalized.length || 20,
+            totalPages: 1
+          },
+          loading: false
+        });
+      } else {
+        const items = Array.isArray(normalized?.items) ? normalized.items : [];
+        set({
+          ventas: items,
+          ventasMeta: {
+            total: Number(normalized?.total || items.length),
+            page: Number(normalized?.page || 1),
+            limit: Number(normalized?.limit || 20),
+            totalPages: Number(normalized?.totalPages || 1)
+          },
+          loading: false
+        });
+      }
     } catch (error) {
       set({ loading: false, error: parseApiError(error) });
     }

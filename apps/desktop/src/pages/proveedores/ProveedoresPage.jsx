@@ -56,7 +56,7 @@ const toNumber = (value) => {
 };
 
 export default function ProveedoresPage() {
-  const { proveedores, error, loading, listar, crear, actualizar, cargarFacturas, cargarResumenCxp } = useProveedoresStore();
+  const { proveedores, meta, error, loading, listar, crear, actualizar, cargarFacturas, cargarResumenCxp } = useProveedoresStore();
   const navigate = useNavigate();
 
   const [pagina, setPagina] = useState(1);
@@ -76,14 +76,17 @@ export default function ProveedoresPage() {
       include_cxp: 1,
       search: filtros.search || undefined,
       activo: filtros.estado === 'TODOS' ? undefined : filtros.estado,
-      tiene_credito: filtros.credito === 'TODOS' ? undefined : filtros.credito
+      tiene_credito: filtros.credito === 'TODOS' ? undefined : filtros.credito,
+      paginado: 1,
+      limit: PAGE_SIZE,
+      offset: (pagina - 1) * PAGE_SIZE
     });
   };
 
   useEffect(() => {
     const timer = window.setTimeout(refreshList, 250);
     return () => window.clearTimeout(timer);
-  }, [listar, filtros]);
+  }, [listar, filtros, pagina]);
 
   const proveedoresOrdenados = useMemo(() => {
     return [...proveedores].sort((a, b) => {
@@ -94,11 +97,8 @@ export default function ProveedoresPage() {
     });
   }, [proveedores]);
 
-  const totalPaginas = Math.max(1, Math.ceil(proveedoresOrdenados.length / PAGE_SIZE));
-  const proveedoresPaginados = useMemo(() => {
-    const start = (pagina - 1) * PAGE_SIZE;
-    return proveedoresOrdenados.slice(start, start + PAGE_SIZE);
-  }, [pagina, proveedoresOrdenados]);
+  const totalPaginas = Math.max(1, Number(meta?.totalPages || 1));
+  const proveedoresPaginados = proveedoresOrdenados;
 
   useEffect(() => {
     if (pagina > totalPaginas) {
@@ -422,7 +422,7 @@ export default function ProveedoresPage() {
               <Paginador
                 paginaActual={pagina}
                 totalPaginas={totalPaginas}
-                totalRegistros={proveedoresOrdenados.length}
+                totalRegistros={Number(meta?.total || proveedoresOrdenados.length)}
                 mostrarSiempre
                 onPageChange={setPagina}
               />

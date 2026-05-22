@@ -25,6 +25,16 @@ const restoreSchema = z.object({
   filename: z.string().trim().min(1),
   confirmacion: z.literal('RESTAURAR')
 });
+const sqliteMaintenanceSchema = z.object({
+  accion: z.enum(['INTEGRITY_CHECK', 'FOREIGN_KEY_CHECK', 'WAL_CHECKPOINT', 'ANALYZE', 'VACUUM']),
+  confirmacion: z.string().trim().optional()
+});
+const backupAutoConfigSchema = z.object({
+  enabled: z.boolean(),
+  frecuencia: z.enum(['DIARIO', 'SEMANAL']),
+  hora: z.string().regex(/^\d{2}:\d{2}$/),
+  retencion: z.number().int().min(1).max(120)
+});
 
 function assertAdminUser(actorUser) {
   if (actorUser?.rol?.nombre !== 'ADMIN') {
@@ -35,6 +45,23 @@ function assertAdminUser(actorUser) {
 function fileSizeSafe(filePath) {
   try {
     return fs.statSync(filePath).size;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function dirSizeSafe(dirPath) {
+  try {
+    const files = fs.readdirSync(dirPath);
+    return files.reduce((acc, name) => {
+      try {
+        const absolute = path.join(dirPath, name);
+        const stats = fs.statSync(absolute);
+        return acc + (stats.isFile() ? stats.size : 0);
+      } catch (_) {
+        return acc;
+      }
+    }, 0);
   } catch (_) {
     return 0;
   }
@@ -63,6 +90,9 @@ async function getHealth(actorUser) {
   }
 
   const pendingRestore = formatRestoreManifest(readPendingRestoreManifest());
+  const backups = listBackupFiles();
+  const latestBackup = backups[0] || null;
+  const logsDir = path.join(paths.supportDir, '..', 'logs');
   const status = dbOk && configOk ? 'ok' : 'degraded';
 
   return {
@@ -75,9 +105,20 @@ async function getHealth(actorUser) {
       version: require('../../../package.json').version,
       runtime: {
         node_env: process.env.NODE_ENV || 'development',
+        host: process.env.HOST || '127.0.0.1',
+        port: Number(process.env.PORT || 3000),
         db_file: paths.dbFile,
         db_size_bytes: fileSizeSafe(paths.dbFile),
-        backup_dir: paths.backupDir
+        backup_dir: paths.backupDir,
+        logs_dir: logsDir,
+        logs_size_bytes: dirSizeSafe(logsDir)
+      },
+      backup: {
+        ultimo_backup: latestBackup ? {
+          filename: latestBackup.filename,
+          fecha: latestBackup.mtime,
+          sizeBytes: latestBackup.sizeBytes
+        } : null
       },
       sqlite: pragmaSnapshot,
       pending_restore: pendingRestore
@@ -235,11 +276,164 @@ async function eliminarBackup(filename, actorUser) {
   };
 }
 
+async function ejecutarMantenimientoSQLite(body, actorUser) {
+  assertAdminUser(actorUser);
+  const parsed = sqliteMaintenanceSchema.safeParse(body || {});
+  if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
+
+  const { accion, confirmacion } = parsed.data;
+  if (accion === 'VACUUM' && String(confirmacion || '').toUpperCase() !== 'VACUUM') {
+    throw new AppError(400, 'Confirmación requerida para VACUUM');
+  }
+
+  const startedAt = Date.now();
+  let result = null;
+  if (accion === 'INTEGRITY_CHECK') {
+    result = await db.raw('PRAGMA integrity_check');
+  } else if (accion === 'FOREIGN_KEY_CHECK') {
+    result = await db.raw('PRAGMA foreign_key_check');
+  } else if (accion === 'WAL_CHECKPOINT') {
+    result = await db.raw('PRAGMA wal_checkpoint(TRUNCATE)');
+  } else if (accion === 'ANALYZE') {
+    result = await db.raw('ANALYZE');
+  } else if (accion === 'VACUUM') {
+    result = await db.raw('VACUUM');
+  }
+
+  const durationMs = Date.now() - startedAt;
+  await auditoriaService.logEvent({
+    entidad: 'SISTEMA_SQLITE',
+    entidad_id: accion,
+    accion: 'MANTENIMIENTO_SQLITE',
+    descripcion: `Mantenimiento SQLite ejecutado: ${accion}`,
+    detalle: {
+      modulo: 'SISTEMA',
+      actor: actorUser,
+      accion_sqlite: accion,
+      duracion_ms: durationMs
+    }
+  });
+
+  return {
+    ok: true,
+    data: {
+      accion,
+      duracion_ms: durationMs,
+      resultado: result
+    }
+  };
+}
+
+async function getBackupAutomatico(actorUser) {
+  assertAdminUser(actorUser);
+  const row = await db('configuracion_sistema').where({ id: 1 }).first();
+  return {
+    ok: true,
+    data: {
+      enabled: Boolean(row?.backup_auto_enabled),
+      frecuencia: String(row?.backup_auto_frecuencia || 'DIARIO').toUpperCase(),
+      hora: String(row?.backup_auto_hora || '03:00'),
+      retencion: Number(row?.backup_auto_retencion || 15),
+      ultimo_run_at: row?.backup_auto_ultimo_run_at || null,
+      ultimo_status: row?.backup_auto_ultimo_status || null,
+      ultimo_error: row?.backup_auto_ultimo_error || null
+    }
+  };
+}
+
+async function setBackupAutomatico(body, actorUser) {
+  assertAdminUser(actorUser);
+  const parsed = backupAutoConfigSchema.safeParse(body || {});
+  if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
+
+  const payload = {
+    backup_auto_enabled: parsed.data.enabled,
+    backup_auto_frecuencia: parsed.data.frecuencia,
+    backup_auto_hora: parsed.data.hora,
+    backup_auto_retencion: parsed.data.retencion,
+    updated_at: db.fn.now()
+  };
+
+  await db('configuracion_sistema').where({ id: 1 }).update(payload);
+  await auditoriaService.logEvent({
+    entidad: 'SISTEMA_BACKUP_AUTO',
+    entidad_id: 'CONFIG',
+    accion: 'CONFIGURAR',
+    descripcion: 'Configuración de backup automático actualizada',
+    detalle: {
+      modulo: 'SISTEMA',
+      actor: actorUser,
+      config: parsed.data
+    }
+  });
+
+  return getBackupAutomatico(actorUser);
+}
+
+async function ejecutarBackupAutomaticoAhora(actorUser) {
+  assertAdminUser(actorUser);
+  const config = (await getBackupAutomatico(actorUser)).data;
+  const startedAt = Date.now();
+  let status = 'OK';
+  let error = null;
+  let backup = null;
+  try {
+    backup = createBackup({ label: 'auto' });
+  } catch (runtimeError) {
+    status = 'ERROR';
+    error = String(runtimeError.message || 'Error desconocido');
+  }
+
+  await db('configuracion_sistema').where({ id: 1 }).update({
+    backup_auto_ultimo_run_at: db.fn.now(),
+    backup_auto_ultimo_status: status,
+    backup_auto_ultimo_error: error
+  });
+
+  if (status === 'OK') {
+    const backups = listBackupFiles();
+    const overflow = backups.slice(config.retencion);
+    for (const item of overflow) {
+      try { deleteBackupFile(item.filename); } catch (_) {}
+    }
+  }
+
+  await auditoriaService.logEvent({
+    entidad: 'SISTEMA_BACKUP_AUTO',
+    entidad_id: backup ? path.basename(backup.backupFile) : 'ERROR',
+    accion: 'EJECUTAR',
+    descripcion: status === 'OK' ? 'Backup automático ejecutado' : 'Backup automático falló',
+    detalle: {
+      modulo: 'SISTEMA',
+      actor: actorUser,
+      status,
+      error,
+      duracion_ms: Date.now() - startedAt
+    }
+  });
+
+  if (status !== 'OK') throw new AppError(500, `No se pudo ejecutar backup automático: ${error}`);
+  return {
+    ok: true,
+    data: {
+      status,
+      backup: {
+        filename: path.basename(backup.backupFile),
+        sizeBytes: backup.sizeBytes
+      }
+    }
+  };
+}
+
 module.exports = {
   getHealth,
   getIntegridad,
   getBackups,
   crearBackup,
   programarRestauracion,
-  eliminarBackup
+  eliminarBackup,
+  ejecutarMantenimientoSQLite,
+  getBackupAutomatico,
+  setBackupAutomatico,
+  ejecutarBackupAutomaticoAhora
 };

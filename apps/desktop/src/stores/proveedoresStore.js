@@ -15,8 +15,15 @@ export const useProveedoresStore = create((set) => ({
     try {
       const response = await apiClient.get('/api/proveedores', { params });
       const data = normalizeResponse(response.data) || [];
-      set({ proveedores: data, loading: false });
-      return data;
+      const items = Array.isArray(data) ? data : (data.items || []);
+      const meta = Array.isArray(data) ? null : {
+        total: Number(data.total || items.length || 0),
+        page: Number(data.page || 1),
+        limit: Number(data.limit || params.limit || items.length || 0),
+        totalPages: Number(data.totalPages || 1)
+      };
+      set({ proveedores: items, meta, loading: false });
+      return { items, meta };
     } catch (error) {
       const message = parseApiError(error);
       set({ loading: false, error: message });

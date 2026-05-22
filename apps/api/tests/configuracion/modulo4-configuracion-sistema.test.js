@@ -12,6 +12,7 @@ const clientesService = require('../../src/modules/clientes/clientes.service');
 const proveedoresService = require('../../src/modules/proveedores/proveedores.service');
 const cxpService = require('../../src/modules/cxp/cxp.service');
 const configuracionService = require('../../src/modules/configuracion/configuracion.service');
+const inventarioService = require('../../src/modules/inventario/inventario.service');
 const productosService = require('../../src/modules/productos/productos.service');
 const { prepareDatabase } = require('../support/database');
 const { addDays } = require('../../src/helpers/credit');
@@ -61,7 +62,37 @@ async function updateMethodsAs(admin, updatesByCode) {
   );
 }
 
-async function createCreditSale(cajero, options = {}) {
+async function createSaleReadyProduct(admin, options = {}) {
+  const created = await productosService.create({
+    codigo: options.codigo || `TST-CFG-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    nombre: options.nombre || `Producto configuracion ${options.precio_venta || 0}`,
+    unidad_medida: options.unidad_medida || 'UND',
+    precio_venta: Number(options.precio_venta || 0),
+    activo: true
+  });
+
+  if (Number(options.stock || 0) > 0) {
+    await inventarioService.ajustesMasivo(
+      {
+        observacion: options.observacion || 'Carga inicial para prueba de configuración',
+        items: [
+          {
+            producto_id: created.id,
+            cantidad: Number(options.stock),
+            referencia: options.referencia || 'TEST:CONFIG_STOCK',
+            costo_origen_tipo: 'MANUAL',
+            costo_unitario_manual: Number(options.costo_unitario_manual || 1)
+          }
+        ]
+      },
+      admin
+    );
+  }
+
+  return created;
+}
+
+async function createCreditSale(cajero, admin, options = {}) {
   const monto = Number(options.monto || 6);
   const cantidad = Number(options.cantidad || 1);
   const precioVenta = Number((monto / cantidad).toFixed(2));
@@ -69,7 +100,8 @@ async function createCreditSale(cajero, options = {}) {
 
   if (!productoId) {
     const existing = await db('productos')
-      .where({ activo: 1, unidad_medida: 'UND' })
+      .where({ activo: 1 })
+      .andWhere('es_vendible', 1)
       .andWhere('precio_venta', precioVenta)
       .andWhere('stock_actual', '>=', cantidad)
       .orderBy('id', 'asc')
@@ -78,13 +110,13 @@ async function createCreditSale(cajero, options = {}) {
     if (existing) {
       productoId = existing.id;
     } else {
-      const created = await productosService.create({
-        codigo: `TST-CFG-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      const created = await createSaleReadyProduct(admin, {
         nombre: `Producto configuracion ${monto}`,
         unidad_medida: 'UND',
         precio_venta: precioVenta,
-        stock_actual: Math.max(20, cantidad),
-        activo: true
+        stock: Math.max(20, cantidad),
+        costo_origen_tipo: 'MANUAL',
+        costo_unitario_manual: Math.max(precioVenta / 2, 0.5)
       });
       productoId = created.id;
     }
@@ -102,7 +134,7 @@ async function createCreditSale(cajero, options = {}) {
   );
 }
 
-async function createCreditPurchase(cajero, options = {}) {
+async function createCreditPurchase(actorUser, options = {}) {
   const numeroFactura = options.numero_factura || `M4-CXP-${Date.now()}`;
   const cantidad = Number(options.cantidad || 2);
   const costoUnit = Number(options.costo_unit || 4);
@@ -115,7 +147,7 @@ async function createCreditPurchase(cajero, options = {}) {
       autorizacion: { usuario: 'admin', password: 'admin123' },
       items: [{ producto_id: options.producto_id || 2, cantidad }]
     },
-    cajero
+    actorUser
   );
 
   const detalle = await db('compras_orden_detalle').where({ orden_id: orden.data.orden.id }).first();
@@ -128,7 +160,7 @@ async function createCreditPurchase(cajero, options = {}) {
       },
       items: [{ orden_detalle_id: detalle.id, cantidad, costo_unit_real: costoUnit }]
     },
-    cajero
+    actorUser
   );
   const factura = await db('compras_facturas').where({ numero_factura: numeroFactura }).first();
 
@@ -222,7 +254,7 @@ async function runSuite(options = {}) {
     const { admin, cajero } = await prepareScenario();
     await updateConfigAs(admin, { permitir_ventas_credito: false });
     const r = await expectThrows(
-      () => createCreditSale(cajero, { referencia: 'M4-VTA-001' }),
+      () => createCreditSale(cajero, admin, { referencia: 'M4-VTA-001' }),
       'deshabilitadas'
     );
     add(6, 'Configurar ventas credito en OFF bloquea ventas a credito', r.ok, r.error);
@@ -230,13 +262,13 @@ async function runSuite(options = {}) {
 
   try {
     const { admin, cajero } = await prepareScenario();
-    const productoTicket = await productosService.create({
+    const productoTicket = await createSaleReadyProduct(admin, {
       codigo: `TST-TICKET-${Date.now()}`,
       nombre: 'Producto ticket configuracion',
       unidad_medida: 'UND',
       precio_venta: 10,
-      stock_actual: 10,
-      activo: true
+      stock: 10,
+      costo_unitario_manual: 6
     });
     await updateConfigAs(admin, {
       negocio_nombre: 'Carniceria Centro',
@@ -258,7 +290,7 @@ async function runSuite(options = {}) {
       },
       cajero
     );
-    const ticket = await ventasService.getTicket(venta.data.venta.id);
+    const ticket = await ventasService.getTicket(venta.data.venta.id, cajero);
     assert(ticket.data.negocio.nombre === 'Carniceria Centro', 'El ticket no usa nombre de negocio configurado');
     assert(ticket.data.ticket_config.numero.startsWith('CFG-'), 'El ticket no usa prefijo configurado');
     assert(ticket.data.ticket_config.mensaje === 'Gracias por su compra', 'El ticket no usa mensaje configurado');
@@ -272,7 +304,7 @@ async function runSuite(options = {}) {
     const { admin, cajero } = await prepareScenario();
     await updateMethodsAs(admin, { CREDITO_CLIENTE: false });
     const r = await expectThrows(
-      () => createCreditSale(cajero, { referencia: 'M4-VTA-002' }),
+      () => createCreditSale(cajero, admin, { referencia: 'M4-VTA-002' }),
       'Metodo de pago no habilitado'
     );
     add(8, 'Deshabilitar CREDITO_CLIENTE bloquea venta a credito', r.ok, r.error);
@@ -288,7 +320,7 @@ async function runSuite(options = {}) {
         autorizacion: { usuario: 'admin', password: 'admin123' },
           items: [{ producto_id: 2, cantidad: 1 }]
       },
-      cajero
+      admin
     );
     const detalle = await db('compras_orden_detalle').where({ orden_id: orden.data.orden.id }).first();
     const r = await expectThrows(
@@ -298,7 +330,7 @@ async function runSuite(options = {}) {
           factura: { numero_factura: 'M4-CXP-001', metodo_pago: 'CREDITO' },
           items: [{ orden_detalle_id: detalle.id, cantidad: 1, costo_unit_real: 4 }]
         },
-        cajero
+        admin
       ),
       'deshabilitadas'
     );
@@ -326,48 +358,51 @@ async function runSuite(options = {}) {
   try {
     const { admin, cajero } = await prepareScenario();
     await updateConfigAs(admin, { exigir_caja_abierta_para_cobros: false });
-    const venta = await createCreditSale(cajero, { referencia: 'M4-VTA-003' });
-    const abono = await clientesService.abono(
-      1,
-      {
-        venta_id: venta.data.venta.id,
-        monto: 6,
-        referencia: 'ABONO-M4-001'
-      },
-      cajero
+    const venta = await createCreditSale(cajero, admin, { referencia: 'M4-VTA-003' });
+    const r = await expectThrows(
+      () => clientesService.abono(
+        1,
+        {
+          venta_id: venta.data.venta.id,
+          monto: 6,
+          referencia: 'ABONO-M4-001'
+        },
+        cajero
+      ),
+      'turno abierto'
     );
-    assert(abono.data.turno_id === null, 'El abono debio permitirse sin turno');
-    assert(abono.data.movimiento_caja === null, 'No debio generar caja sin turno abierto');
-    add(11, 'Config de cobros permite abono sin turno y sin contaminar caja', true);
+    add(11, 'Abonos de clientes requieren turno abierto aunque cobros sin caja esté deshabilitado', r.ok, r.error);
   } catch (error) {
-    add(11, 'Config de cobros permite abono sin turno y sin contaminar caja', false, error.message);
+    add(11, 'Abonos de clientes requieren turno abierto aunque cobros sin caja esté deshabilitado', false, error.message);
   }
 
   try {
-    const { admin, cajero } = await prepareScenario();
+    const { admin } = await prepareScenario();
     await updateConfigAs(admin, { exigir_caja_abierta_para_pagos: false });
-    const { factura } = await createCreditPurchase(cajero, { numero_factura: 'M4-CXP-002' });
-    const pago = await cxpService.pagarProveedor(
-      1,
-      {
-        factura_id: factura.id,
-        monto: 8,
-        referencia: 'PAGO-M4-001'
-      },
-      cajero
+    const { factura } = await createCreditPurchase(admin, { numero_factura: 'M4-CXP-002' });
+    const r = await expectThrows(
+      () => cxpService.pagarProveedor(
+        1,
+        {
+          factura_id: factura.id,
+          monto: 8,
+          referencia: 'PAGO-M4-001'
+        },
+        admin
+      ),
+      'turno abierto'
     );
-    assert(pago.data.turno_id === null, 'El pago debio permitirse sin turno');
-    assert(pago.data.movimiento_caja === null, 'No debio generar caja sin turno abierto');
-    add(12, 'Config de pagos permite pagar proveedor sin turno y sin contaminar caja', true);
+    add(12, 'Pagos a proveedor requieren turno abierto aunque pagos sin caja esté deshabilitado', r.ok, r.error);
   } catch (error) {
-    add(12, 'Config de pagos permite pagar proveedor sin turno y sin contaminar caja', false, error.message);
+    add(12, 'Pagos a proveedor requieren turno abierto aunque pagos sin caja esté deshabilitado', false, error.message);
   }
 
   try {
     const { admin, cajero } = await prepareScenario();
     await updateConfigAs(admin, { dias_credito_cliente_default: 21 });
     const cliente = await clientesService.create({ nombre: 'Cliente plazo config' });
-    const venta = await createCreditSale(cajero, {
+    await openTurno(cajero, 'Venta credito plazo por defecto');
+    const venta = await createCreditSale(cajero, admin, {
       cliente_id: cliente.id,
       referencia: 'M4-VTA-004'
     });

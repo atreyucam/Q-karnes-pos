@@ -230,16 +230,37 @@ export default function VentaDetallePage() {
     });
   }, [pagos, resumenFinanciero?.credito_inicial, venta, ventaAbonos, ventaDetalle?.credito?.credito_inicial, ventaId]);
 
+  const isAdmin = user?.rol?.nombre === 'ADMIN';
+  const saleOwnerId = Number(venta?.usuario_id || venta?.turno_usuario_id || 0);
+  const currentUserId = Number(user?.id || 0);
+  const currentTurnId = Number(turnoActual?.id || 0);
+  const saleTurnId = Number(venta?.turno_id || 0);
+  const isSaleOwner = saleOwnerId > 0 && saleOwnerId === currentUserId;
+  const isCurrentTurnSale = currentTurnId > 0 && saleTurnId > 0 && currentTurnId === saleTurnId;
+  const isClosedTurnSale =
+    String(venta?.turno_estado || '').toUpperCase() === 'CERRADO' || Boolean(venta?.turno_fecha_cierre);
+  const cajeroCanOperateSale = isSaleOwner && isCurrentTurnSale && !isClosedTurnSale;
   const canReturn =
-    Boolean(venta) && ![SALE_STATUS.ANULADA, SALE_STATUS.DEVUELTA_TOTAL].includes(venta.estado);
+    Boolean(venta)
+    && ![SALE_STATUS.ANULADA, SALE_STATUS.DEVUELTA_TOTAL].includes(venta.estado)
+    && (isAdmin || cajeroCanOperateSale);
 
   const canAnular =
-    Boolean(venta) && venta.estado === SALE_STATUS.EMITIDA && devolucionesRows.length === 0;
+    Boolean(venta)
+    && venta.estado === SALE_STATUS.EMITIDA
+    && devolucionesRows.length === 0
+    && (isAdmin || cajeroCanOperateSale);
 
   const needsCashShiftForAnular =
     Number(resumenPago?.contado_centavos || 0) > 0 && !turnoActual?.id;
 
-  const isAdmin = user?.rol?.nombre === 'ADMIN';
+  const salesPolicyMessage = useMemo(() => {
+    if (!venta) return '';
+    if (isAdmin) return '';
+    if (isClosedTurnSale) return 'Esta venta pertenece a un turno cerrado.';
+    if (!isSaleOwner || !isCurrentTurnSale) return 'No tienes permisos para esta acción.';
+    return '';
+  }, [isAdmin, isClosedTurnSale, isCurrentTurnSale, isSaleOwner, venta]);
 
   const subtotalCalculado = useMemo(() => {
     if (!detalleRows.length) return 0;
@@ -285,21 +306,29 @@ export default function VentaDetallePage() {
 
     const action = searchParams.get('action');
 
-    if (action === 'devolucion' && canReturn) {
-      setDevolucionOpen(true);
+    if (action === 'devolucion') {
+      if (canReturn) {
+        setDevolucionOpen(true);
+      } else if (salesPolicyMessage) {
+        setLocalError(salesPolicyMessage);
+      }
       const nextParams = new URLSearchParams(searchParams);
       nextParams.delete('action');
       setSearchParams(nextParams, { replace: true });
       return;
     }
 
-    if (action === 'anular' && canAnular) {
-      setAnulacionOpen(true);
+    if (action === 'anular') {
+      if (canAnular) {
+        setAnulacionOpen(true);
+      } else if (salesPolicyMessage) {
+        setLocalError(salesPolicyMessage);
+      }
       const nextParams = new URLSearchParams(searchParams);
       nextParams.delete('action');
       setSearchParams(nextParams, { replace: true });
     }
-  }, [canAnular, canReturn, searchParams, setSearchParams, venta]);
+  }, [canAnular, canReturn, salesPolicyMessage, searchParams, setSearchParams, venta]);
 
   const handlePrint = async () => {
     try {
@@ -314,6 +343,10 @@ export default function VentaDetallePage() {
   };
 
   const handleSubmitDevolucion = async (payload) => {
+    if (!canReturn) {
+      setLocalError(salesPolicyMessage || 'No tienes permisos para esta acción.');
+      return;
+    }
     setLocalError('');
     setSubmittingDevolucion(true);
     try {
@@ -328,6 +361,10 @@ export default function VentaDetallePage() {
   };
 
   const handleSubmitAnulacion = async () => {
+    if (!canAnular) {
+      setLocalError(salesPolicyMessage || 'No tienes permisos para esta acción.');
+      return;
+    }
     setLocalError('');
     const nextErrors = {};
 
@@ -395,11 +432,35 @@ export default function VentaDetallePage() {
             <PiReceipt className="text-base" />
             {printing ? 'Generando...' : 'Ver ticket'}
           </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={() => setDevolucionOpen(true)} disabled={!canReturn}>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              if (!canReturn) {
+                setLocalError(salesPolicyMessage || 'No tienes permisos para esta acción.');
+                return;
+              }
+              setDevolucionOpen(true);
+            }}
+            disabled={!canReturn}
+          >
             <PiArrowsClockwise className="text-base" />
             Devolver
           </Button>
-          <Button type="button" size="sm" variant="danger" onClick={() => setAnulacionOpen(true)} disabled={!canAnular}>
+          <Button
+            type="button"
+            size="sm"
+            variant="danger"
+            onClick={() => {
+              if (!canAnular) {
+                setLocalError(salesPolicyMessage || 'No tienes permisos para esta acción.');
+                return;
+              }
+              setAnulacionOpen(true);
+            }}
+            disabled={!canAnular}
+          >
             <PiWarningCircle className="text-base" />
             Anular
           </Button>
@@ -439,6 +500,20 @@ export default function VentaDetallePage() {
           </Card>
 
           <div className="space-y-2">
+            {!isAdmin ? (
+              <Alert tone="info">
+                Las ventas cobradas no se editan directamente. Usa anulación o devolución.
+              </Alert>
+            ) : null}
+
+            <Alert tone="info">
+              La anulación y la devolución usan el snapshot de costo y margen registrado en la venta.
+            </Alert>
+
+            {salesPolicyMessage ? (
+              <Alert tone="warning">{salesPolicyMessage}</Alert>
+            ) : null}
+
             {needsCashShiftForAnular ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
                 <p className="text-sm text-amber-800">
@@ -449,7 +524,9 @@ export default function VentaDetallePage() {
 
             {!canReturn ? (
               <Alert tone="info">
-                {venta.estado === SALE_STATUS.ANULADA
+                {salesPolicyMessage
+                  ? salesPolicyMessage
+                  : venta.estado === SALE_STATUS.ANULADA
                   ? 'La venta ya fue anulada y no admite devoluciones.'
                   : 'La venta ya fue devuelta totalmente.'}
               </Alert>
@@ -457,7 +534,9 @@ export default function VentaDetallePage() {
 
             {!canAnular ? (
               <Alert tone="info">
-                {venta.estado !== SALE_STATUS.EMITIDA
+                {salesPolicyMessage
+                  ? salesPolicyMessage
+                  : venta.estado !== SALE_STATUS.EMITIDA
                   ? `La anulación no está disponible para el estado ${venta.estado}.`
                   : 'La anulación ya no está disponible porque la venta tiene devoluciones registradas.'}
               </Alert>

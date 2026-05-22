@@ -2,7 +2,7 @@ const service = require('./inventario.service');
 
 async function disponible(req, res, next) {
   try {
-    const data = await service.disponible();
+    const data = await service.disponible(req.query);
     return res.json(data);
   } catch (error) {
     return next(error);
@@ -11,7 +11,7 @@ async function disponible(req, res, next) {
 
 async function alertas(req, res, next) {
   try {
-    const data = await service.alertas();
+    const data = await service.alertas(req.query);
     return res.json(data);
   } catch (error) {
     return next(error);
@@ -101,7 +101,7 @@ async function crearMerma(req, res, next) {
 
 async function movimientos(req, res, next) {
   try {
-    const data = await service.movimientos();
+    const data = await service.movimientos(req.query);
     return res.json(data);
   } catch (error) {
     return next(error);

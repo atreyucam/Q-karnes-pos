@@ -108,6 +108,11 @@ const updateSchema = z.object({
 });
 
 async function list(query = {}) {
+  const parsedLimit = Number(query.limit);
+  const parsedOffset = Number(query.offset);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : 20;
+  const offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+
   const includeCxp = query.include_cxp === '1' || query.include_cxp === 'true';
   const search = query.search ? String(query.search) : undefined;
   const tieneCredito = query.tiene_credito === '1' || query.tiene_credito === 'true'
@@ -121,12 +126,26 @@ async function list(query = {}) {
       ? false
       : undefined;
 
-  return repository.list({
+  const filters = {
     include_cxp: includeCxp,
     search,
     tiene_credito: tieneCredito,
-    activo
-  });
+    activo,
+    limit,
+    offset
+  };
+  const items = await repository.list(filters);
+  const usePaginationEnvelope = ['1', 'true'].includes(String(query.paginado || '').toLowerCase());
+  if (!usePaginationEnvelope) return items;
+
+  const total = await repository.count(filters);
+  return {
+    items,
+    total,
+    page: Math.floor(offset / limit) + 1,
+    limit,
+    totalPages: Math.max(1, Math.ceil(total / limit))
+  };
 }
 
 async function create(body) {

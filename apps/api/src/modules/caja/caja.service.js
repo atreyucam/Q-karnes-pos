@@ -52,6 +52,7 @@ const corteZSchema = z.object({
     .nonnegative('El efectivo contado no puede ser negativo')
     .max(MAX_MANUAL_CASH_AMOUNT, `El efectivo contado no puede superar ${MAX_MANUAL_CASH_AMOUNT}`),
   observacion: z.string().optional(),
+  motivo_admin: z.string().trim().min(1).optional(),
   autorizacion: z.object({
     usuario: z.string().min(1),
     password: z.string().min(1)
@@ -63,11 +64,32 @@ function resolveCloseState(diferencia) {
   return diferencia > 0 ? 'SOBRANTE' : 'FALTANTE';
 }
 
-function buildCloseSnapshot(turno, snapshot, contado, diferencia) {
+function isAdmin(user) {
+  return String(user?.rol?.nombre || '').trim().toUpperCase() === 'ADMIN';
+}
+
+async function auditCajaDenied({ turno, user, accion, motivo, detalle = {} }) {
+  await auditoriaService.logEvent({
+    entidad: 'CAJA_TURNO',
+    entidad_id: String(turno?.id || 'N/A'),
+    accion: 'CAJA_PERMISSION_DENY',
+    detalle: {
+      modulo: 'CAJA',
+      accion,
+      resultado: 'DENY',
+      motivo,
+      actor: user || null,
+      ...detalle
+    }
+  }).catch(() => {});
+}
+
+function buildCloseSnapshot(turno, snapshot, contado, diferencia, metadata = {}) {
   const totalCobrado = moneyRound(
     Number(snapshot.ventas_efectivo || 0)
     + Number(snapshot.ventas_transferencia || 0)
     + Number(snapshot.cobranzas_clientes || 0)
+    + Number(snapshot.cobranzas_clientes_transferencia || 0)
   );
 
   return {
@@ -85,16 +107,26 @@ function buildCloseSnapshot(turno, snapshot, contado, diferencia) {
     egresos: Number(snapshot.egresos_efectivo || 0),
     ventas_efectivo: Number(snapshot.ventas_efectivo || 0),
     cobros_credito_efectivo: Number(snapshot.cobranzas_clientes || 0),
+    cobros_credito_transferencia: Number(snapshot.cobranzas_clientes_transferencia || 0),
     ingresos_manuales: Number(snapshot.ingresos_manuales || 0),
     egresos_manuales: Number(snapshot.egresos_manuales || 0),
     compras_efectivo: Number(snapshot.compras_efectivo || 0),
+    compras_transferencia: Number(snapshot.compras_transferencia || 0),
     pagos_proveedores: Number(snapshot.pagos_proveedores || 0),
+    pagos_proveedores_transferencia: Number(snapshot.pagos_proveedores_transferencia || 0),
     devoluciones_efectivo: Number(snapshot.devoluciones_efectivo || 0),
     anulaciones_efectivo: Number(snapshot.anulaciones_efectivo || 0),
     reversiones_abonos_clientes: Number(snapshot.reversiones_abonos_clientes || 0),
     reversiones_pagos_proveedores: Number(snapshot.reversiones_pagos_proveedores || 0),
     otros_ingresos: Number(snapshot.otros_ingresos || 0),
-    otros_egresos: Number(snapshot.otros_egresos || 0)
+    otros_egresos: Number(snapshot.otros_egresos || 0),
+    abierto_por: metadata.abierto_por || null,
+    abierto_por_id: metadata.abierto_por_id || Number(turno.usuario_id || 0) || null,
+    cerrado_por: metadata.cerrado_por || null,
+    cerrado_por_id: metadata.cerrado_por_id || null,
+    cierre_tipo: metadata.cierre_tipo || 'NORMAL',
+    cierre_es_administrativo: Boolean(metadata.cierre_es_administrativo),
+    motivo_cierre_admin: metadata.motivo_cierre_admin || null
   };
 }
 
@@ -113,7 +145,15 @@ function buildTurnoSummary(turno, snapshot) {
     turno,
     snapshot,
     Number(turno?.efectivo_contado || 0),
-    Number(turno?.diferencia || 0)
+    Number(turno?.diferencia || 0),
+    {
+      abierto_por: turno?.usuario_nombre || null,
+      abierto_por_id: Number(turno?.usuario_id || 0) || null,
+      cerrado_por: null,
+      cerrado_por_id: null,
+      cierre_tipo: turno?.fecha_cierre ? 'NORMAL' : null,
+      cierre_es_administrativo: false
+    }
   );
 
   return {
@@ -258,8 +298,22 @@ async function corteZ(body, user) {
 
   const turno = await repository.findOpenShift();
   if (!turno) throw new AppError(400, 'No hay turno abierto');
-  if (Number(turno.usuario_id) !== Number(user.id)) {
-    throw new AppError(403, 'Solo quien abrió el turno puede cerrarlo');
+  const isOwner = Number(turno.usuario_id) === Number(user.id);
+  const adminSession = isAdmin(user);
+  if (!isOwner && !adminSession) {
+    await auditCajaDenied({
+      turno,
+      user,
+      accion: 'CORTE_Z',
+      motivo: 'CIERRE_TURNO_AJENO_DENEGADO',
+      detalle: {
+        turno_usuario_id: turno.usuario_id
+      }
+    });
+    throw new AppError(403, 'Solo el responsable del turno o ADMIN puede cerrarlo');
+  }
+  if (!isOwner && adminSession && !parsed.data.motivo_admin) {
+    throw new AppError(400, 'Motivo obligatorio para cierre administrativo');
   }
 
   const movimientos = await repository.getMovementsByShift(turno.id);
@@ -268,7 +322,15 @@ async function corteZ(body, user) {
   const contado = moneyRound(parsed.data.efectivo_contado);
   const diferencia = moneyRound(contado - esperado);
   const estadoCierre = resolveCloseState(diferencia);
-  const closeSnapshot = buildCloseSnapshot(turno, snapshot, contado, diferencia);
+  const closeSnapshot = buildCloseSnapshot(turno, snapshot, contado, diferencia, {
+    abierto_por: turno.usuario_nombre || null,
+    abierto_por_id: Number(turno.usuario_id || 0) || null,
+    cerrado_por: user?.nombre || user?.usuario || null,
+    cerrado_por_id: Number(user?.id || 0) || null,
+    cierre_tipo: !isOwner && adminSession ? 'ADMINISTRATIVO' : 'NORMAL',
+    cierre_es_administrativo: !isOwner && adminSession,
+    motivo_cierre_admin: !isOwner && adminSession ? parsed.data.motivo_admin : null
+  });
   let authorizer = null;
 
   if (diferencia !== 0 && !parsed.data.observacion) {
@@ -311,7 +373,7 @@ async function corteZ(body, user) {
       {
         entidad: 'CAJA_TURNO',
         entidad_id: turno.id,
-        accion: 'CORTE_Z',
+        accion: !isOwner && adminSession ? 'CORTE_Z_ADMINISTRATIVO' : 'CORTE_Z',
         antes: {
           turno_id: turno.id,
           estado: turno.estado,
@@ -331,6 +393,12 @@ async function corteZ(body, user) {
           modulo: 'CAJA',
           actor: user,
           autorizador: authorizer,
+          cierre_tipo: !isOwner && adminSession ? 'ADMINISTRATIVO' : 'NORMAL',
+          usuario_abrio_id: turno.usuario_id,
+          usuario_abrio_nombre: turno.usuario_nombre || null,
+          usuario_cerro_id: user.id,
+          usuario_cerro_nombre: user.nombre || user.usuario || null,
+          motivo_cierre_admin: !isOwner && adminSession ? parsed.data.motivo_admin : null,
           esperado,
           contado,
           diferencia,
@@ -360,7 +428,8 @@ async function corteZ(body, user) {
         contado,
         diferencia,
         estado_cierre: estadoCierre,
-        resumen_cierre: closeSnapshot
+        resumen_cierre: closeSnapshot,
+        cierre_tipo: !isOwner && adminSession ? 'ADMINISTRATIVO' : 'NORMAL'
       }
     };
   });

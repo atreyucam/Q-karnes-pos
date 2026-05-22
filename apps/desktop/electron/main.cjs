@@ -10,6 +10,8 @@ const isDev = rendererMode !== 'production';
 const DEV_ORIGIN = process.env.ELECTRON_DEV_URL || 'http://127.0.0.1:5173';
 const DIST_INDEX = path.join(__dirname, '..', 'dist', 'index.html');
 const desktopLogger = createDesktopLogger('desktop-runtime');
+const perfBootLogEnabled = String(process.env.PERF_BOOT_LOG || '').trim().toLowerCase() === 'true';
+const bootStartedAt = Date.now();
 let apiRuntime = null;
 
 function isAllowedNavigation(url) {
@@ -66,6 +68,15 @@ function createWindow() {
     }
     win.loadFile(DIST_INDEX);
   }
+
+  if (perfBootLogEnabled) {
+    win.webContents.once('did-finish-load', () => {
+      desktopLogger.info('desktop_perf_renderer_ready', 'Renderer cargado', {
+        elapsedMs: Date.now() - bootStartedAt,
+        mode: rendererMode
+      });
+    });
+  }
 }
 
 process.on('uncaughtException', (error) => {
@@ -82,6 +93,11 @@ app.whenReady().then(() => {
       rendererMode,
       logDir: resolveDesktopLogDir()
     });
+    if (perfBootLogEnabled) {
+      desktopLogger.info('desktop_perf_app_ready', 'Evento app.whenReady recibido', {
+        elapsedMs: Date.now() - bootStartedAt
+      });
+    }
 
     if (!isDev) {
       apiRuntime = await startEmbeddedApi();
@@ -89,9 +105,20 @@ app.whenReady().then(() => {
         apiRoot: apiRuntime.apiRoot,
         apiPort: apiRuntime.apiPort
       });
+      if (perfBootLogEnabled) {
+        desktopLogger.info('desktop_perf_api_embedded_ready', 'API embebida disponible', {
+          elapsedMs: Date.now() - bootStartedAt,
+          apiPort: apiRuntime.apiPort
+        });
+      }
     }
 
     createWindow();
+    if (perfBootLogEnabled) {
+      desktopLogger.info('desktop_perf_window_created', 'Ventana principal creada', {
+        elapsedMs: Date.now() - bootStartedAt
+      });
+    }
   })();
 }).catch((error) => {
   desktopLogger.critical('desktop_boot_fail', 'Fallo inicializando aplicación desktop', { error });

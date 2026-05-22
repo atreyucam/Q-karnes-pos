@@ -20,6 +20,14 @@ async function getOpenShift(trx = db) {
   return trx('caja_turnos').where({ estado: 'ABIERTO' }).orderBy('id', 'desc').first();
 }
 
+async function getShiftById(id, trx = db) {
+  return trx('caja_turnos as ct')
+    .leftJoin('usuarios as u', 'ct.usuario_id', 'u.id')
+    .select('ct.*', 'u.nombre as usuario_nombre')
+    .where('ct.id', id)
+    .first();
+}
+
 async function insertSale(data, trx = db) {
   const [id] = await trx('ventas').insert(data);
   return trx('ventas').where({ id }).first();
@@ -107,13 +115,23 @@ async function listSales(filters = {}, trx = db) {
     )
     .orderBy('v.id', 'desc');
 
-  if (filters.turno_id) query.where('v.turno_id', filters.turno_id);
-  if (filters.estado) query.where('v.estado', filters.estado);
-  if (filters.desde) query.where('v.fecha', '>=', filters.desde);
-  if (filters.hasta) query.where('v.fecha', '<=', filters.hasta);
+  applySalesFilters(query, filters);
+
+  if (filters.limit) query.limit(filters.limit);
+  if (filters.offset) query.offset(filters.offset);
+
+  return query;
+}
+
+function applySalesFilters(baseQuery, filters = {}) {
+  if (filters.turno_id) baseQuery.where('v.turno_id', filters.turno_id);
+  if (filters.usuario_id) baseQuery.where('v.usuario_id', filters.usuario_id);
+  if (filters.estado) baseQuery.where('v.estado', filters.estado);
+  if (filters.desde) baseQuery.where('v.fecha', '>=', filters.desde);
+  if (filters.hasta) baseQuery.where('v.fecha', '<=', filters.hasta);
 
   if (filters.search) {
-    query.where((qb) => {
+    baseQuery.where((qb) => {
       qb.where('v.referencia', 'like', `%${filters.search}%`)
         .orWhere('c.nombre', 'like', `%${filters.search}%`)
         .orWhere('u.nombre', 'like', `%${filters.search}%`)
@@ -121,10 +139,45 @@ async function listSales(filters = {}, trx = db) {
     });
   }
 
-  if (filters.limit) query.limit(filters.limit);
-  if (filters.offset) query.offset(filters.offset);
+  if (filters.metodo_pago) {
+    const metodo = String(filters.metodo_pago || '').trim().toUpperCase();
+    if (metodo) {
+      baseQuery.whereExists(function paymentMethodScope() {
+        this.select(db.raw('1'))
+          .from('venta_pagos as vp')
+          .whereRaw('vp.venta_id = v.id')
+          .andWhereRaw(`
+            CASE
+              WHEN ? = 'EFECTIVO' THEN (
+                UPPER(COALESCE(vp.tipo, '')) = 'CONTADO'
+                AND UPPER(COALESCE(vp.metodo_codigo, 'EFECTIVO')) = 'EFECTIVO'
+              )
+              WHEN ? = 'TRANSFERENCIA' THEN (
+                UPPER(COALESCE(vp.tipo, '')) = 'TRANSFERENCIA'
+                OR UPPER(COALESCE(vp.metodo_codigo, '')) = 'TRANSFERENCIA'
+              )
+              WHEN ? IN ('CREDITO', 'CREDITO_CLIENTE') THEN (
+                UPPER(COALESCE(vp.tipo, '')) = 'CREDITO'
+                OR UPPER(COALESCE(vp.metodo_codigo, '')) = 'CREDITO_CLIENTE'
+              )
+              ELSE UPPER(COALESCE(vp.metodo_codigo, vp.tipo, '')) = ?
+            END
+          `, [metodo, metodo, metodo, metodo]);
+      });
+    }
+  }
+}
 
-  return query;
+async function countSales(filters = {}, trx = db) {
+  const query = trx('ventas as v')
+    .leftJoin('clientes as c', 'v.cliente_id', 'c.id')
+    .leftJoin('usuarios as u', 'v.usuario_id', 'u.id')
+    .count({ total: 'v.id' })
+    .first();
+
+  applySalesFilters(query, filters);
+  const row = await query;
+  return Number(row?.total || 0);
 }
 
 async function getSaleById(id, trx = db) {
@@ -135,7 +188,16 @@ async function getSaleByIdWithRelations(id, trx = db) {
   const venta = await trx('ventas as v')
     .leftJoin('clientes as c', 'v.cliente_id', 'c.id')
     .leftJoin('usuarios as u', 'v.usuario_id', 'u.id')
-    .select('v.*', 'c.nombre as cliente_nombre', 'u.nombre as usuario_nombre')
+    .leftJoin('caja_turnos as t', 'v.turno_id', 't.id')
+    .select(
+      'v.*',
+      'c.nombre as cliente_nombre',
+      'u.nombre as usuario_nombre',
+      't.usuario_id as turno_usuario_id',
+      't.estado as turno_estado',
+      't.fecha_apertura as turno_fecha_apertura',
+      't.fecha_cierre as turno_fecha_cierre'
+    )
     .where('v.id', id)
     .first();
 
@@ -316,6 +378,7 @@ module.exports = {
   getClientById,
   getOpenShiftByUser,
   getOpenShift,
+  getShiftById,
   insertSale,
   insertSaleDetails,
   insertSalePayments,
@@ -325,6 +388,7 @@ module.exports = {
   insertCashMovement,
   insertCxcMovement,
   listSales,
+  countSales,
   getSaleById,
   getSaleByIdWithRelations,
   getSaleTicket,

@@ -10,6 +10,7 @@ const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
 const { computeDebtStatus } = require('../../helpers/credit');
 const { CASH_MOVEMENT_TYPES, buildCashMovementPayload } = require('../caja/cashMovement');
+const { moneyToCents, centsToMoney } = require('../../helpers/unitPolicy');
 
 const cedulaSchema = z.string().regex(/^\d{10}$/, 'La cédula debe tener 10 dígitos numéricos');
 
@@ -53,14 +54,24 @@ const revertirAbonoSchema = z.object({
 });
 
 function mapDebtDocument(row) {
-  const cargos = moneyRound(row.cargos);
-  const abonos = moneyRound(row.abonos);
-  const saldo = moneyRound(cargos - abonos);
+  const cargosCentavos = Number(row.cargos_centavos || 0);
+  const abonosCentavos = Number(row.abonos_centavos || 0);
+  const saldoCentavos = cargosCentavos - abonosCentavos;
+  const contadoOriginalCentavos = Number(row.contado_original_centavos || 0);
+  const creditoOriginalCentavos = Number(row.credito_original_centavos || 0);
+  const cargos = centsToMoney(cargosCentavos);
+  const abonos = centsToMoney(abonosCentavos);
+  const saldo = centsToMoney(saldoCentavos);
 
   return {
     ...row,
-    contado: moneyRound(row.contado_original),
-    credito: moneyRound(row.credito_original),
+    contado_centavos: contadoOriginalCentavos,
+    credito_centavos: creditoOriginalCentavos,
+    contado: centsToMoney(contadoOriginalCentavos),
+    credito: centsToMoney(creditoOriginalCentavos),
+    cargos_centavos: cargosCentavos,
+    abonos_centavos: abonosCentavos,
+    saldo_centavos: saldoCentavos > 0 ? saldoCentavos : 0,
     cargos,
     abonos,
     saldo: saldo > 0 ? saldo : 0,
@@ -127,7 +138,7 @@ async function update(id, body) {
 
   if (parsed.data.activo === false) {
     const saldos = await repository.saldoCliente(id);
-    const saldo = moneyRound(saldos.cargos - saldos.abonos);
+    const saldo = centsToMoney(Number(saldos.cargos_centavos || 0) - Number(saldos.abonos_centavos || 0));
     if (saldo > 0) {
       throw new AppError(400, 'No se puede inactivar cliente con saldo > 0');
     }
@@ -145,7 +156,7 @@ async function creditoResumen(id) {
     repository.saldoCliente(id),
     repository.listDeudasByCliente(id)
   ]);
-  const saldo = moneyRound(saldos.cargos - saldos.abonos);
+  const saldoCentavos = Number(saldos.cargos_centavos || 0) - Number(saldos.abonos_centavos || 0);
   const deudas = deudasRaw.map(mapDebtDocument);
 
   const resumenDocumentos = deudas.reduce(
@@ -161,9 +172,9 @@ async function creditoResumen(id) {
 
   return {
     cliente,
-    cargos: moneyRound(saldos.cargos),
-    abonos: moneyRound(saldos.abonos),
-    saldo,
+    cargos: centsToMoney(Number(saldos.cargos_centavos || 0)),
+    abonos: centsToMoney(Number(saldos.abonos_centavos || 0)),
+    saldo: centsToMoney(saldoCentavos),
     movimientos: movs,
     deudas,
     resumen_documentos: resumenDocumentos
@@ -186,7 +197,7 @@ async function abono(id, body, actorUser) {
     }
 
     const deuda = await repository.getVentaCreditoDocumento(id, parsed.data.venta_id, trx);
-    if (!deuda || moneyRound(deuda.cargos) <= 0) {
+    if (!deuda || Number(deuda.cargos_centavos || 0) <= 0) {
       throw new AppError(400, 'La venta no tiene deuda de crédito activa');
     }
 
@@ -205,8 +216,8 @@ async function abono(id, body, actorUser) {
     await configuracionService.assertPaymentMethodEnabled(metodoPago, trx);
 
     const turno = await cajaRepository.findOpenShift(trx);
-    if (config.exigir_caja_abierta_para_cobros && metodoPago === 'EFECTIVO' && !turno) {
-      throw new AppError(400, 'Para registrar abonos en efectivo debes abrir caja');
+    if (!turno) {
+      throw new AppError(400, 'Se requiere turno abierto para registrar abonos de clientes');
     }
 
     const observacionAbono = [
@@ -220,6 +231,8 @@ async function abono(id, body, actorUser) {
         venta_id: parsed.data.venta_id,
         tipo: 'ABONO',
         monto,
+        monto_centavos: moneyToCents(monto, 'monto'),
+        metodo_pago: metodoPago,
         numero_documento: deudaDocumento.numero_documento,
         fecha_emision: deudaDocumento.fecha_emision,
         fecha_vencimiento: deudaDocumento.fecha_vencimiento,
@@ -232,7 +245,7 @@ async function abono(id, body, actorUser) {
     const documentoOrigen = deudaDocumento.numero_documento || `VENTA:${parsed.data.venta_id}`;
     let movimientoCaja = null;
 
-    if (turno && metodoPago === 'EFECTIVO') {
+    if (turno) {
       const existingCash = await cajaRepository.findMovementByOrigin(
         {
           tipo: CASH_MOVEMENT_TYPES.ABONO_CLIENTE,
@@ -287,7 +300,7 @@ async function abono(id, body, actorUser) {
       data: {
         movimiento_cxc: movimiento,
         movimiento_caja: movimientoCaja,
-        turno_id: metodoPago === 'EFECTIVO' ? turno?.id || null : null
+        turno_id: turno?.id || null
       }
     };
   });
@@ -350,6 +363,8 @@ async function revertirAbono(id, abonoId, body, actorUser) {
         venta_id: abono.venta_id || null,
         tipo: 'CARGO',
         monto: moneyRound(abono.monto),
+        monto_centavos: Number(abono.monto_centavos || moneyToCents(abono.monto, 'monto')),
+        metodo_pago: abono.metodo_pago || 'AJUSTE',
         numero_documento: abono.numero_documento,
         fecha_emision: abono.fecha_emision,
         fecha_vencimiento: abono.fecha_vencimiento,
@@ -365,6 +380,7 @@ async function revertirAbono(id, abonoId, body, actorUser) {
         tipo: CASH_MOVEMENT_TYPES.REVERSO_ABONO_CLIENTE,
         concepto: `Reverso cobranza cliente #${id}`,
         monto: moneyRound(abono.monto),
+        metodoPago: abono.metodo_pago || movimientoCajaOriginal.metodo_pago || 'EFECTIVO',
         documentoOrigen: referenciaReverso,
         moduloOrigen: 'CXC',
         origenId: movimientoReverso.id,
@@ -461,7 +477,11 @@ async function historialAbonos(id) {
   const rows = await repository.listAbonosByCliente(id);
   return {
     ok: true,
-    data: rows
+    data: rows.map((row) => ({
+      ...row,
+      monto_centavos: Number(row.monto_centavos || moneyToCents(row.monto, 'monto')),
+      monto: centsToMoney(Number(row.monto_centavos || moneyToCents(row.monto, 'monto')))
+    }))
   };
 }
 

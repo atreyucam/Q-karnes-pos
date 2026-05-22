@@ -324,6 +324,8 @@ function CashClosingModal({
   errors,
   errorMessage,
   loading,
+  isAdministrativeClose,
+  canCloseTurn,
   onFormChange,
   onAuthChange
 }) {
@@ -357,6 +359,7 @@ function CashClosingModal({
   const hasDifference = hasCountedCash && Math.abs(diferencia) > 0.009;
   const statusMeta = hasCountedCash ? getCloseStatusMeta(hasDifference ? diferencia : 0) : getPendingCloseStatusMeta();
   const turnoLabel = turnoActual?.id ? `Turno #${turnoActual.id}` : 'Sin turno';
+  const closeModeLabel = isAdministrativeClose ? 'Cierre administrativo' : 'Cierre normal';
 
   useEffect(() => {
     if (!open) {
@@ -411,7 +414,11 @@ function CashClosingModal({
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="ui-panel-title">{step === 1 ? 'Cerrar caja' : 'Confirmar cierre'}</h3>
+                  <h3 className="ui-panel-title">
+                    {step === 1
+                      ? (isAdministrativeClose ? 'Cierre administrativo' : 'Cerrar caja')
+                      : 'Confirmar cierre'}
+                  </h3>
                   <StatusBadge tone={step === 1 ? 'default' : statusMeta.tone}>
                     {step === 1 ? 'Paso 1 de 2' : 'Paso 2 de 2'}
                   </StatusBadge>
@@ -429,6 +436,10 @@ function CashClosingModal({
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
             <div className="space-y-4 pb-1">
               {errorMessage ? <Alert tone="error">{errorMessage}</Alert> : null}
+              {!canCloseTurn ? <Alert tone="warning">No tienes permisos para esta acción.</Alert> : null}
+              {isAdministrativeClose ? (
+                <Alert tone="warning">El cierre administrativo requiere motivo.</Alert>
+              ) : null}
 
               {step === 1 ? (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -498,6 +509,18 @@ function CashClosingModal({
                         />
                         {errors.observacion ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.observacion}</p> : null}
                       </div>
+                      {isAdministrativeClose ? (
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Motivo administrativo</label>
+                          <Textarea
+                            rows={3}
+                            placeholder="Motivo obligatorio del cierre administrativo."
+                            value={form.motivo_admin || ''}
+                            onChange={(event) => onFormChange('motivo_admin', event.target.value)}
+                          />
+                          {errors.motivo_admin ? <p className="mt-2 text-sm text-[var(--color-danger)]">{errors.motivo_admin}</p> : null}
+                        </div>
+                      ) : null}
                     </SummaryCard>
                   </div>
                 </div>
@@ -515,6 +538,12 @@ function CashClosingModal({
                   <ResultRow label="Esperado" value={formatMoney(efectivoEsperado)} />
                   <ResultRow label="Contado" value={formatMoney(contado)} />
                   <ResultRow label="Diferencia" value={formatMoney(diferencia)} tone={statusMeta.tone} />
+                  <ResultRow label="Abierto por" value={closeSummary.abierto_por || turnoActual?.usuario_nombre || 'Usuario no identificado'} />
+                  <ResultRow label="Cerrado por" value={user?.nombre || user?.usuario || 'Usuario no identificado'} />
+                  <ResultRow label="Tipo de cierre" value={closeSummary.cierre_tipo || closeModeLabel} />
+                  {isAdministrativeClose ? (
+                    <ResultRow label="Motivo administrativo" value={String(form.motivo_admin || '').trim() || 'Pendiente'} />
+                  ) : null}
                   <p className="mt-4 text-sm text-[var(--color-text-muted)]">
                     {hasDifference ? 'Se detectó una diferencia en caja.' : 'Sin diferencias detectadas.'}
                   </p>
@@ -532,7 +561,7 @@ function CashClosingModal({
                 <Button type="button" variant="secondary" className={primaryFooterButtonClass} onClick={onPrint} disabled={loading}>
                   Imprimir corte X
                 </Button>
-                <Button type="button" className={primaryFooterButtonClass} onClick={handleContinue} disabled={loading}>
+                <Button type="button" className={primaryFooterButtonClass} onClick={handleContinue} disabled={loading || !canCloseTurn}>
                   Continuar
                 </Button>
               </div>
@@ -546,7 +575,7 @@ function CashClosingModal({
                   variant={hasDifference ? 'danger' : 'primary'}
                   className={hasDifference ? dangerFooterButtonClass : primaryFooterButtonClass}
                   onClick={handleConfirm}
-                  disabled={loading}
+                  disabled={loading || !canCloseTurn}
                 >
                   {hasDifference ? 'Confirmar cierre con diferencia' : 'Confirmar cierre'}
                 </Button>
@@ -630,7 +659,7 @@ export default function CajaPage() {
   const [manualNumericWarning, setManualNumericWarning] = useState('');
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
-  const [closeForm, setCloseForm] = useState({ efectivo_contado: '', observacion: '' });
+  const [closeForm, setCloseForm] = useState({ efectivo_contado: '', observacion: '', motivo_admin: '' });
   const [closeAuth, setCloseAuth] = useState({ usuario: '', password: '' });
   const [closeSubmitting, setCloseSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState('');
@@ -768,6 +797,10 @@ export default function CajaPage() {
   const cajaAbiertaPor = turnoActual?.usuario_nombre || (turnoActual?.usuario_id ? `Usuario #${turnoActual.usuario_id}` : 'Usuario no identificado');
   const cajaAbiertaEn = turnoActual?.fecha_apertura ? formatDateQuito(turnoActual.fecha_apertura) : null;
   const turnoResumen = turnoActual?.id ? `Turno #${turnoActual.id}` : 'Sin turno';
+  const isAdmin = currentUser?.rol?.nombre === 'ADMIN';
+  const isTurnOwner = Number(turnoActual?.usuario_id || 0) === Number(currentUser?.id || 0);
+  const isAdministrativeClose = Boolean(turnoActual?.id) && isAdmin && !isTurnOwner;
+  const canCloseTurn = Boolean(turnoActual?.id) && (isAdmin || isTurnOwner);
 
   const movimientosFiltrados = useMemo(
     () => (showOnlyBalanceImpact ? movimientos.filter((movimiento) => movimiento?.afecta_saldo) : movimientos),
@@ -808,6 +841,7 @@ export default function CajaPage() {
   };
 
   const openManualModal = (tipo) => {
+    if (!canCloseTurn) return;
     setManualModal(tipo);
     setManualForm({ concepto: '', monto: '' });
     setManualNumericWarning('');
@@ -845,7 +879,11 @@ export default function CajaPage() {
 
   const handleOpenCloseModal = async () => {
     cierreFormErrors.resetErrors();
-    setCloseForm({ efectivo_contado: '', observacion: '' });
+    if (!canCloseTurn) {
+      cierreFormErrors.setErrors({});
+      return;
+    }
+    setCloseForm({ efectivo_contado: '', observacion: '', motivo_admin: '' });
     setCloseAuth({ usuario: '', password: '' });
     await refreshTurnoData();
     setCloseModalOpen(true);
@@ -870,6 +908,9 @@ export default function CajaPage() {
     if (closeHasDifference) {
       if (!closeForm.observacion.trim()) nextErrors.observacion = 'La observación es obligatoria cuando existe diferencia.';
     }
+    if (isAdministrativeClose && !closeForm.motivo_admin.trim()) {
+      nextErrors.motivo_admin = 'El cierre administrativo requiere motivo.';
+    }
 
     return cierreFormErrors.setErrors(nextErrors);
   };
@@ -882,6 +923,10 @@ export default function CajaPage() {
   };
 
   const onCloseShift = async ({ mode, authorization } = {}) => {
+    if (!canCloseTurn) {
+      return false;
+    }
+
     if (mode === 'step1') {
       return validateCloseCountStep();
     }
@@ -897,13 +942,14 @@ export default function CajaPage() {
       await corteZ({
         efectivo_contado: closeCountedCash,
         observacion: closeForm.observacion.trim() || undefined,
+        motivo_admin: isAdministrativeClose ? closeForm.motivo_admin.trim() || undefined : undefined,
         autorizacion: closeHasDifference
           ? { usuario: authorization?.usuario?.trim() || closeAuth.usuario.trim(), password: authorization?.password || closeAuth.password }
           : undefined
       });
 
       setCloseModalOpen(false);
-      setCloseForm({ efectivo_contado: '', observacion: '' });
+      setCloseForm({ efectivo_contado: '', observacion: '', motivo_admin: '' });
       setCloseAuth({ usuario: '', password: '' });
       cierreFormErrors.resetErrors();
       setSuccessToast('La caja se cerró correctamente.');
@@ -916,11 +962,11 @@ export default function CajaPage() {
 
   const quickActions = turnoActual ? (
     <>
-      <Button onClick={() => openManualModal('INGRESO')}>+ Ingreso manual</Button>
-      <Button variant="secondary" onClick={() => openManualModal('EGRESO')}>+ Egreso manual</Button>
-      <Button variant="danger" onClick={handleOpenCloseModal}>
+      <Button onClick={() => openManualModal('INGRESO')} disabled={!canCloseTurn} title={!canCloseTurn ? 'No tienes permisos para esta acción.' : undefined}>+ Ingreso manual</Button>
+      <Button variant="secondary" onClick={() => openManualModal('EGRESO')} disabled={!canCloseTurn} title={!canCloseTurn ? 'No tienes permisos para esta acción.' : undefined}>+ Egreso manual</Button>
+      <Button variant="danger" onClick={handleOpenCloseModal} disabled={!canCloseTurn} title={!canCloseTurn ? 'No tienes permisos para esta acción.' : undefined}>
         <PiLockKeyOpenBold className="h-4 w-4" />
-        Cerrar caja
+        {isAdministrativeClose ? 'Cierre administrativo' : 'Cerrar caja'}
       </Button>
     </>
   ) : null;
@@ -946,6 +992,16 @@ export default function CajaPage() {
                 {cajaAbiertaPor}
                 {cajaAbiertaEn ? ` · ${cajaAbiertaEn}` : ''}
               </p>
+              {isAdministrativeClose ? (
+                <p className="text-sm font-medium text-[var(--color-warning-text)]">
+                  Estás cerrando un turno ajeno. El cierre será administrativo.
+                </p>
+              ) : null}
+              {!isAdministrativeClose && !isTurnOwner && turnoActual?.id ? (
+                <p className="text-sm font-medium text-[var(--color-warning-text)]">
+                  No tienes permisos para esta acción.
+                </p>
+              ) : null}
             </div>
           </PanelSection>
         </Panel>
@@ -1186,6 +1242,8 @@ export default function CajaPage() {
         errors={cierreFormErrors.errors}
         errorMessage={error}
         loading={closeSubmitting}
+        isAdministrativeClose={isAdministrativeClose}
+        canCloseTurn={canCloseTurn}
         onFormChange={(field, value) => {
           cierreFormErrors.clearFieldError(field);
           setCloseForm((state) => ({ ...state, [field]: value }));

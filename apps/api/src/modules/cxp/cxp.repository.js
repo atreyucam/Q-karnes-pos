@@ -1,5 +1,9 @@
 const db = require('../../db/knex');
 
+function amountCentsExpr(alias = 'cxp_movimientos') {
+  return `COALESCE(${alias}.monto_centavos, CAST(ROUND(CAST(COALESCE(${alias}.monto, 0) AS REAL) * 100, 0) AS INTEGER))`;
+}
+
 function buildProveedorDebtDocumentsQuery(proveedorId, trx = db) {
   return trx('compras_facturas as f')
     .join('proveedores as p', 'f.proveedor_id', 'p.id')
@@ -12,7 +16,9 @@ function buildProveedorDebtDocumentsQuery(proveedorId, trx = db) {
       'f.proveedor_id',
       'f.numero_factura',
       'f.metodo_pago',
+      'f.metodo_pago_real',
       'f.total',
+      'f.total_centavos',
       'f.fecha',
       'p.dias_pago'
     )
@@ -21,14 +27,16 @@ function buildProveedorDebtDocumentsQuery(proveedorId, trx = db) {
       'f.proveedor_id',
       'f.numero_factura',
       'f.metodo_pago',
+      'f.metodo_pago_real',
       'f.total',
+      'f.total_centavos',
       'f.fecha',
       'p.dias_pago',
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.numero_documento END), f.numero_factura) as numero_documento"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_emision END), DATE(f.fecha)) as fecha_emision"),
       trx.raw("COALESCE(MAX(CASE WHEN cm.tipo = 'CARGO' THEN cm.fecha_vencimiento END), DATE(f.fecha, '+' || COALESCE(p.dias_pago, 0) || ' day')) as fecha_vencimiento"),
-      trx.raw("COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN cm.monto ELSE 0 END), 0) as cargos"),
-      trx.raw("COALESCE(SUM(CASE WHEN cm.tipo = 'ABONO' THEN cm.monto ELSE 0 END), 0) as abonos")
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpr('cm')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN cm.tipo = 'ABONO' THEN ${amountCentsExpr('cm')} ELSE 0 END), 0) as abonos_centavos`)
     );
 }
 
@@ -50,14 +58,14 @@ async function saldoByProveedor(proveedorId, trx = db) {
   const row = await trx('cxp_movimientos')
     .where({ proveedor_id: proveedorId })
     .select(
-      trx.raw("SUM(CASE WHEN tipo='CARGO' THEN monto ELSE 0 END) as cargos"),
-      trx.raw("SUM(CASE WHEN tipo='ABONO' THEN monto ELSE 0 END) as abonos")
+      trx.raw(`COALESCE(SUM(CASE WHEN tipo='CARGO' THEN ${amountCentsExpr('cxp_movimientos')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN tipo='ABONO' THEN ${amountCentsExpr('cxp_movimientos')} ELSE 0 END), 0) as abonos_centavos`)
     )
     .first();
 
   return {
-    cargos: Number(row?.cargos || 0),
-    abonos: Number(row?.abonos || 0)
+    cargos_centavos: Number(row?.cargos_centavos || 0),
+    abonos_centavos: Number(row?.abonos_centavos || 0)
   };
 }
 
@@ -65,14 +73,14 @@ async function saldoByFactura(facturaId, trx = db) {
   const row = await trx('cxp_movimientos')
     .where({ factura_id: facturaId })
     .select(
-      trx.raw("SUM(CASE WHEN tipo='CARGO' THEN monto ELSE 0 END) as cargos"),
-      trx.raw("SUM(CASE WHEN tipo='ABONO' THEN monto ELSE 0 END) as abonos")
+      trx.raw(`COALESCE(SUM(CASE WHEN tipo='CARGO' THEN ${amountCentsExpr('cxp_movimientos')} ELSE 0 END), 0) as cargos_centavos`),
+      trx.raw(`COALESCE(SUM(CASE WHEN tipo='ABONO' THEN ${amountCentsExpr('cxp_movimientos')} ELSE 0 END), 0) as abonos_centavos`)
     )
     .first();
 
   return {
-    cargos: Number(row?.cargos || 0),
-    abonos: Number(row?.abonos || 0)
+    cargos_centavos: Number(row?.cargos_centavos || 0),
+    abonos_centavos: Number(row?.abonos_centavos || 0)
   };
 }
 
@@ -94,7 +102,7 @@ async function findMovimientoByReference(proveedorId, referencia, trx = db) {
 
 async function listFacturasProveedor(proveedorId, trx = db) {
   return buildProveedorDebtDocumentsQuery(proveedorId, trx)
-    .havingRaw("COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN cm.monto ELSE 0 END), 0) > 0")
+    .havingRaw(`COALESCE(SUM(CASE WHEN cm.tipo = 'CARGO' THEN ${amountCentsExpr('cm')} ELSE 0 END), 0) > 0`)
     .orderBy('fecha_vencimiento', 'asc')
     .orderBy('f.id', 'desc');
 }

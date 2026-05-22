@@ -44,6 +44,30 @@ function sanitize(value, depth = 0) {
 }
 
 function createDesktopLogger(channel = 'desktop-runtime') {
+  const retentionRaw = Number(process.env.LOG_RETENTION_DAYS);
+  const retentionDays = Number.isFinite(retentionRaw) && retentionRaw > 0 ? Math.min(Math.floor(retentionRaw), 365) : 15;
+  let writeQueue = Promise.resolve();
+  let lastCleanupAt = 0;
+
+  function enqueueWrite(task) {
+    writeQueue = writeQueue.then(task).catch(() => {});
+  }
+
+  async function cleanupOldLogs(logDir) {
+    const now = Date.now();
+    if ((now - lastCleanupAt) < 60_000) return;
+    lastCleanupAt = now;
+    const cutoff = now - (retentionDays * 24 * 60 * 60 * 1000);
+    const files = await fs.promises.readdir(logDir, { withFileTypes: true });
+    await Promise.all(files
+      .filter((entry) => entry.isFile() && entry.name.startsWith(`${channel}-`) && entry.name.endsWith('.log'))
+      .map(async (entry) => {
+        const filePath = path.join(logDir, entry.name);
+        const stats = await fs.promises.stat(filePath);
+        if (stats.mtimeMs < cutoff) await fs.promises.unlink(filePath);
+      }));
+  }
+
   function write(level, event, message, meta = {}) {
     const logDir = resolveDesktopLogDir();
     fs.mkdirSync(logDir, { recursive: true });
@@ -57,7 +81,10 @@ function createDesktopLogger(channel = 'desktop-runtime') {
       message,
       meta: sanitize(meta)
     };
-    fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+    enqueueWrite(async () => {
+      await fs.promises.appendFile(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+      await cleanupOldLogs(logDir);
+    });
 
     const summary = `[${payload.ts}] [${channel}] ${level.toUpperCase()} ${event} ${message}`;
     try {

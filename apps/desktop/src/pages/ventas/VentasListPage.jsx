@@ -31,6 +31,7 @@ const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 export default function VentasListPage() {
   const navigate = useNavigate();
   const ventas = useVentasStore((s) => s.ventas);
+  const ventasMeta = useVentasStore((s) => s.ventasMeta);
   const error = useVentasStore((s) => s.error);
   const listar = useVentasStore((s) => s.listar);
   const cargarTicket = useVentasStore((s) => s.cargarTicket);
@@ -40,43 +41,27 @@ export default function VentasListPage() {
   const [printingSaleId, setPrintingSaleId] = useState(null);
 
   useEffect(() => {
+    const offset = (pagina - 1) * PAGE_SIZE;
     listar({
+      paginado: 1,
+      limit: PAGE_SIZE,
+      offset,
       search: filters.search || undefined,
       estado: filters.estado === 'TODOS' ? undefined : filters.estado,
+      metodo_pago: filters.metodo === 'TODOS' ? undefined : filters.metodo,
       desde: filters.desde || undefined,
       hasta: filters.hasta || undefined
     });
-  }, [filters.desde, filters.estado, filters.hasta, filters.search, listar]);
+  }, [filters.desde, filters.estado, filters.hasta, filters.search, filters.metodo, listar, pagina]);
 
   useEffect(() => {
     setPagina(1);
-  }, [ventas.length, filters]);
+  }, [filters.desde, filters.estado, filters.hasta, filters.search, filters.metodo]);
 
-  const ventasFiltradas = useMemo(() => {
-    const q = filters.search.trim().toLowerCase();
+  const ventasFiltradas = useMemo(() => ventas, [ventas]);
 
-    return ventas.filter((venta) => {
-      const matchesSearch = !q || [
-        venta.id,
-        venta.cliente_nombre,
-        venta.metodo_pago_label,
-        venta.estado,
-        venta.total,
-        venta.usuario_nombre,
-        venta.referencia
-      ].some((value) => String(value || '').toLowerCase().includes(q));
-      const matchesEstado = filters.estado === 'TODOS' || String(venta.estado || '') === filters.estado;
-      const metodo = String(venta.metodo_pago_label || '').trim().toLowerCase();
-      const matchesMetodo = filters.metodo === 'TODOS' || metodo === filters.metodo.toLowerCase();
-      return matchesSearch && matchesEstado && matchesMetodo;
-    });
-  }, [filters, ventas]);
-
-  const totalPaginas = Math.max(1, Math.ceil(ventasFiltradas.length / PAGE_SIZE));
-  const ventasPaginadas = useMemo(() => {
-    const start = (pagina - 1) * PAGE_SIZE;
-    return ventasFiltradas.slice(start, start + PAGE_SIZE);
-  }, [pagina, ventasFiltradas]);
+  const totalPaginas = Number(ventasMeta?.totalPages || 1);
+  const totalRegistros = Number(ventasMeta?.total || ventasFiltradas.length);
 
   const handlePrintTicket = async (saleId) => {
     try {
@@ -88,6 +73,11 @@ export default function VentasListPage() {
     } finally {
       setPrintingSaleId(null);
     }
+  };
+
+  const canRequestReturn = (venta) => {
+    const estado = String(venta?.estado || '').toUpperCase();
+    return !['ANULADA', 'DEVUELTA_TOTAL'].includes(estado);
   };
 
   return (
@@ -184,13 +174,13 @@ export default function VentasListPage() {
           </tr>
         </TablaCabecera>
         <TablaCuerpo>
-          {ventasPaginadas.length === 0 ? (
+          {ventasFiltradas.length === 0 ? (
             <TablaFila>
               <TablaCelda colSpan={8} className="text-center text-[var(--color-text-muted)]">
                 No hay ventas para este filtro.
               </TablaCelda>
             </TablaFila>
-          ) : ventasPaginadas.map((venta) => (
+          ) : ventasFiltradas.map((venta) => (
             <TablaFila key={venta.id}>
               <TablaCelda className="font-semibold text-[var(--color-text)]">#{venta.id}</TablaCelda>
               <TablaCelda>{formatDateQuito(venta.fecha)}</TablaCelda>
@@ -217,6 +207,7 @@ export default function VentasListPage() {
                     icon={<PiArrowsClockwise />}
                     aria-label={`Devolver venta ${venta.id}`}
                     title="Devolver"
+                    disabled={!canRequestReturn(venta)}
                     onClick={() => navigate(`/ventas/${venta.id}?action=devolucion`)}
                   >
                     Devolver
@@ -241,7 +232,7 @@ export default function VentasListPage() {
       <Paginador
         paginaActual={pagina}
         totalPaginas={totalPaginas}
-        totalRegistros={ventasFiltradas.length}
+        totalRegistros={totalRegistros}
         mostrarSiempre
         onPageChange={setPagina}
       />

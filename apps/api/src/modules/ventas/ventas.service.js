@@ -125,6 +125,9 @@ const editVentaSchema = z.object({
   message: 'Debe enviar al menos un campo para editar'
 });
 
+const ROLE_ADMIN = 'ADMIN';
+const ROLE_CAJERO = 'CAJERO';
+
 function toUpper(value) {
   return String(value || '').trim().toUpperCase();
 }
@@ -374,6 +377,172 @@ function normalizeVentaPack(pack) {
     pagos,
     resumen_pago: resumenPago
   };
+}
+
+function isAdmin(user) {
+  return toUpper(user?.rol?.nombre) === ROLE_ADMIN;
+}
+
+function isCajero(user) {
+  return toUpper(user?.rol?.nombre) === ROLE_CAJERO;
+}
+
+function ensureOperativeActor(actorUser) {
+  if (!actorUser?.id) throw new AppError(401, 'Usuario no autenticado');
+}
+
+async function auditVentaDenied({
+  ventaId,
+  actorUser,
+  accion,
+  motivo,
+  detalle = {},
+  trx
+}) {
+  await auditoriaService.logEvent({
+    entidad: 'VENTA',
+    entidad_id: String(ventaId || 'N/A'),
+    accion: 'VENTA_PERMISSION_DENY',
+    detalle: {
+      modulo: 'VENTAS',
+      accion,
+      resultado: 'DENY',
+      motivo,
+      actor: actorUser || null,
+      ...detalle
+    }
+  }, trx).catch(() => {});
+}
+
+function saleBelongsToActor(pack, actorUser) {
+  return Number(pack?.venta?.usuario_id || 0) === Number(actorUser?.id || 0);
+}
+
+async function getActorOpenShift(actorUser, trx) {
+  if (!actorUser?.id) return null;
+  return repository.getOpenShiftByUser(actorUser.id, trx);
+}
+
+async function assertCajaOperativaVenta(pack, actorUser, options = {}) {
+  ensureOperativeActor(actorUser);
+  if (isAdmin(actorUser)) return { actorShift: await getActorOpenShift(actorUser, options.trx) };
+
+  if (!isCajero(actorUser)) {
+    await auditVentaDenied({
+      ventaId: pack?.venta?.id,
+      actorUser,
+      accion: options.accion || 'CONSULTAR_VENTA',
+      motivo: 'ROL_NO_OPERATIVO',
+      trx: options.trx
+    });
+    throw new AppError(403, 'Rol no autorizado para operar ventas');
+  }
+
+  if (!saleBelongsToActor(pack, actorUser)) {
+    await auditVentaDenied({
+      ventaId: pack?.venta?.id,
+      actorUser,
+      accion: options.accion || 'CONSULTAR_VENTA',
+      motivo: 'VENTA_DE_OTRO_CAJERO',
+      detalle: {
+        venta_usuario_id: pack?.venta?.usuario_id || null
+      },
+      trx: options.trx
+    });
+    throw new AppError(403, 'Solo puede operar ventas registradas por su usuario');
+  }
+
+  const actorShift = await getActorOpenShift(actorUser, options.trx);
+  if (!actorShift || Number(pack?.venta?.turno_id || 0) !== Number(actorShift.id)) {
+    await auditVentaDenied({
+      ventaId: pack?.venta?.id,
+      actorUser,
+      accion: options.accion || 'CONSULTAR_VENTA',
+      motivo: 'VENTA_FUERA_DEL_TURNO_ACTUAL',
+      detalle: {
+        venta_turno_id: pack?.venta?.turno_id || null,
+        turno_actual_actor_id: actorShift?.id || null
+      },
+      trx: options.trx
+    });
+    throw new AppError(403, 'CAJERO solo puede operar ventas de su turno actual');
+  }
+
+  return { actorShift };
+}
+
+async function assertAdminAuditAccess(pack, actorUser, accion) {
+  ensureOperativeActor(actorUser);
+  if (isAdmin(actorUser)) return;
+  await auditVentaDenied({
+    ventaId: pack?.venta?.id,
+    actorUser,
+    accion,
+    motivo: 'AUDITORIA_SOLO_ADMIN'
+  });
+  throw new AppError(403, 'Solo ADMIN puede consultar auditoría de ventas');
+}
+
+async function assertCanAnularVenta(pack, actorUser, trx) {
+  ensureOperativeActor(actorUser);
+  const saleShift = pack?.venta?.turno_id ? await repository.getShiftById(pack.venta.turno_id, trx) : null;
+
+  if (isAdmin(actorUser)) {
+    return { saleShift, actorShift: await getActorOpenShift(actorUser, trx) };
+  }
+
+  const { actorShift } = await assertCajaOperativaVenta(pack, actorUser, {
+    trx,
+    accion: 'ANULAR_VENTA'
+  });
+
+  if (!saleShift || toUpper(saleShift.estado) !== 'ABIERTO') {
+    await auditVentaDenied({
+      ventaId: pack?.venta?.id,
+      actorUser,
+      accion: 'ANULAR_VENTA',
+      motivo: 'VENTA_EN_TURNO_CERRADO',
+      detalle: {
+        venta_turno_id: pack?.venta?.turno_id || null,
+        turno_estado: saleShift?.estado || null
+      },
+      trx
+    });
+    throw new AppError(403, 'No puede anular ventas de turnos cerrados');
+  }
+
+  return { saleShift, actorShift };
+}
+
+async function assertCanDevolverVenta(pack, actorUser, trx) {
+  ensureOperativeActor(actorUser);
+  const saleShift = pack?.venta?.turno_id ? await repository.getShiftById(pack.venta.turno_id, trx) : null;
+
+  if (isAdmin(actorUser)) {
+    return { saleShift, actorShift: await getActorOpenShift(actorUser, trx) };
+  }
+
+  const { actorShift } = await assertCajaOperativaVenta(pack, actorUser, {
+    trx,
+    accion: 'DEVOLVER_VENTA'
+  });
+
+  if (!saleShift || toUpper(saleShift.estado) !== 'ABIERTO') {
+    await auditVentaDenied({
+      ventaId: pack?.venta?.id,
+      actorUser,
+      accion: 'DEVOLVER_VENTA',
+      motivo: 'VENTA_EN_TURNO_CERRADO',
+      detalle: {
+        venta_turno_id: pack?.venta?.turno_id || null,
+        turno_estado: saleShift?.estado || null
+      },
+      trx
+    });
+    throw new AppError(403, 'No puede devolver ventas de turnos cerrados');
+  }
+
+  return { saleShift, actorShift };
 }
 
 function buildCashMovementTypeForSale(paymentRow) {
@@ -844,6 +1013,8 @@ async function createVenta(body, authUser) {
           venta_id: venta.id,
           tipo: 'CARGO',
           monto: centsToMoney(creditCentavos),
+          monto_centavos: creditCentavos,
+          metodo_pago: 'CREDITO_CLIENTE',
           numero_documento: venta.referencia || `VENTA:${venta.id}`,
           fecha_emision: toDateOnly(venta.fecha),
           fecha_vencimiento: addDays(
@@ -903,17 +1074,39 @@ async function createVenta(body, authUser) {
   });
 }
 
-async function listVentas(query = {}) {
+async function listVentas(query = {}, actorUser) {
+  ensureOperativeActor(actorUser);
+  const paginado = String(query?.paginado || '').trim() === '1';
+  const requestedLimit = Number(query.limit || 20);
+  const normalizedLimit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 200) : 20;
+  const requestedOffset = Number(query.offset || 0);
+  const normalizedOffset = Number.isFinite(requestedOffset) ? Math.max(requestedOffset, 0) : 0;
+
   const filters = {
     turno_id: query.turno_id ? Number(query.turno_id) : undefined,
     estado: query.estado,
     desde: query.desde,
     hasta: query.hasta,
     search: query.search,
-    limit: query.limit ? Number(query.limit) : undefined,
-    offset: query.offset ? Number(query.offset) : undefined
+    metodo_pago: query.metodo_pago,
+    usuario_id: query.vendedor_id ? Number(query.vendedor_id) : undefined,
+    limit: paginado ? normalizedLimit : (query.limit ? Number(query.limit) : undefined),
+    offset: paginado ? normalizedOffset : (query.offset ? Number(query.offset) : undefined)
   };
 
+  if (!isAdmin(actorUser)) {
+    const actorShift = await getActorOpenShift(actorUser);
+    if (!actorShift) {
+      return { ok: true, data: [] };
+    }
+    if (filters.turno_id && Number(filters.turno_id) !== Number(actorShift.id)) {
+      throw new AppError(403, 'CAJERO solo puede consultar ventas de su turno actual');
+    }
+    filters.turno_id = actorShift.id;
+    filters.usuario_id = actorUser.id;
+  }
+
+  const total = paginado ? await repository.countSales(filters) : null;
   const rows = await repository.listSales(filters);
   const data = rows.map((row) => {
     const summary = summarizePayments([
@@ -948,12 +1141,28 @@ async function listVentas(query = {}) {
     };
   });
 
+  if (paginado) {
+    const page = Math.floor(normalizedOffset / normalizedLimit) + 1;
+    const totalPages = Math.max(1, Math.ceil((total || 0) / normalizedLimit));
+    return {
+      ok: true,
+      data: {
+        items: data,
+        total: Number(total || 0),
+        page,
+        limit: normalizedLimit,
+        totalPages
+      }
+    };
+  }
+
   return { ok: true, data };
 }
 
-async function getVenta(id) {
+async function getVenta(id, actorUser) {
   const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(id));
   if (!pack) throw new AppError(404, 'Venta no encontrada');
+  await assertCajaOperativaVenta(pack, actorUser, { accion: 'VER_VENTA' });
   const [abonosRaw, cxcMovements] = await Promise.all([
     repository.listCxcAbonosByVenta(id),
     repository.listCxcMovementsByVenta(id)
@@ -1060,18 +1269,22 @@ async function getVenta(id) {
   };
 }
 
-async function getTicket(id) {
-  const [ticket, pack, config, paymentMethods, cxcMovements] = await Promise.all([
+async function getTicket(id, actorUser) {
+  const [ticket, packRaw] = await Promise.all([
     repository.getSaleTicket(id),
-    repository.getSaleByIdWithRelations(id),
+    repository.getSaleByIdWithRelations(id)
+  ]);
+
+  if (!ticket || !packRaw) throw new AppError(404, 'Venta no encontrada');
+
+  const normalizedPack = normalizeVentaPack(packRaw);
+  await assertCajaOperativaVenta(normalizedPack, actorUser, { accion: 'REIMPRIMIR_TICKET' });
+
+  const [config, paymentMethods, cxcMovements] = await Promise.all([
     configuracionService.getRuntimeConfig(),
     configuracionService.listRuntimePaymentMethods(),
     repository.listCxcMovementsByVenta(id)
   ]);
-
-  if (!ticket || !pack) throw new AppError(404, 'Venta no encontrada');
-
-  const normalizedPack = normalizeVentaPack(pack);
   const paymentSummary = normalizedPack.resumen_pago;
   const metodoPago = paymentMethods.find((method) => method.codigo === paymentSummary.codigo)?.nombre
     || paymentSummary.label;
@@ -1083,6 +1296,18 @@ async function getTicket(id) {
     if (row.tipo === 'ABONO') return acc - cents;
     return acc;
   }, 0);
+
+  await auditoriaService.logEvent({
+    entidad: 'VENTA',
+    entidad_id: String(id),
+    accion: 'REIMPRESION_TICKET',
+    descripcion: `Ticket reimpreso para venta #${id}`,
+    detalle: {
+      modulo: 'VENTAS',
+      actor: actorUser,
+      venta_id: id
+    }
+  }).catch(() => {});
 
   return {
     ok: true,
@@ -1247,6 +1472,7 @@ async function createDevolucion(ventaId, body, actorUser) {
   return db.transaction(async (trx) => {
     const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(ventaId, trx));
     if (!pack) throw new AppError(404, 'Venta no encontrada');
+    const { saleShift } = await assertCanDevolverVenta(pack, actorUser, trx);
     if (pack.venta.estado === SALE_STATUS.ANULADA) {
       throw new AppError(400, 'No se puede devolver una venta anulada');
     }
@@ -1457,6 +1683,8 @@ async function createDevolucion(ventaId, body, actorUser) {
           venta_id: ventaId,
           tipo: 'ABONO',
           monto: centsToMoney(refundBreakdown.credito_centavos),
+          monto_centavos: refundBreakdown.credito_centavos,
+          metodo_pago: 'AJUSTE',
           numero_documento: pack.venta.referencia || `VENTA:${ventaId}`,
           fecha_emision: toDateOnly(pack.venta.fecha),
           fecha_vencimiento: addDays(
@@ -1502,6 +1730,8 @@ async function createDevolucion(ventaId, body, actorUser) {
           devolucion_id: devolucion.id,
           motivo: parsed.data.motivo,
           observacion: parsed.data.observacion || null,
+          turno_origen_id: pack.venta.turno_id || null,
+          turno_origen_estado: saleShift?.estado || null,
           total_devuelto_centavos: totalDevueltoCentavos,
           total_costo_devuelto_centavos: totalCostoDevueltoCentavos,
           total_margen_revertido_centavos: totalMargenRevertidoCentavos,
@@ -1529,9 +1759,10 @@ async function createDevolucion(ventaId, body, actorUser) {
   });
 }
 
-async function listDevoluciones(ventaId) {
-  const venta = await repository.getSaleById(ventaId);
-  if (!venta) throw new AppError(404, 'Venta no encontrada');
+async function listDevoluciones(ventaId, actorUser) {
+  const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(ventaId));
+  if (!pack) throw new AppError(404, 'Venta no encontrada');
+  await assertCajaOperativaVenta(pack, actorUser, { accion: 'LISTAR_DEVOLUCIONES' });
 
   const devoluciones = (await repository.getDevolucionesByVenta(ventaId)).map((row) => {
     const summary = summarizePayments([
@@ -1573,9 +1804,10 @@ async function listDevoluciones(ventaId) {
   };
 }
 
-async function getAuditoria(ventaId) {
-  const venta = await repository.getSaleById(ventaId);
-  if (!venta) throw new AppError(404, 'Venta no encontrada');
+async function getAuditoria(ventaId, actorUser) {
+  const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(ventaId));
+  if (!pack) throw new AppError(404, 'Venta no encontrada');
+  await assertAdminAuditAccess(pack, actorUser, 'VER_AUDITORIA_VENTA');
   return {
     ok: true,
     data: await auditoriaService.getEntityAudit('VENTA', ventaId)
@@ -1604,6 +1836,7 @@ async function anularVenta(ventaId, body, actorUser) {
   return db.transaction(async (trx) => {
     const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(ventaId, trx));
     if (!pack) throw new AppError(404, 'Venta no encontrada');
+    const { saleShift } = await assertCanAnularVenta(pack, actorUser, trx);
     if (pack.venta.estado === SALE_STATUS.ANULADA) {
       throw new AppError(400, 'La venta ya fue anulada');
     }
@@ -1746,6 +1979,8 @@ async function anularVenta(ventaId, body, actorUser) {
           venta_id: ventaId,
           tipo: 'ABONO',
           monto: centsToMoney(pack.resumen_pago.credito_centavos),
+          monto_centavos: pack.resumen_pago.credito_centavos,
+          metodo_pago: 'AJUSTE',
           numero_documento: pack.venta.referencia || `VENTA:${ventaId}`,
           fecha_emision: toDateOnly(pack.venta.fecha),
           fecha_vencimiento: addDays(
@@ -1800,8 +2035,11 @@ async function anularVenta(ventaId, body, actorUser) {
           anulacion_id: anulacion.id,
           motivo: parsed.data.motivo,
           novedad: parsed.data.novedad,
+          turno_origen_id: pack.venta.turno_id || null,
+          turno_origen_estado: saleShift?.estado || null,
           impacto_stock: stockImpact,
           impacto_caja_centavos: pack.resumen_pago.contado_centavos,
+          impacto_transferencia_centavos: pack.resumen_pago.transferencia_centavos,
           impacto_cxc_centavos: pack.resumen_pago.credito_centavos
         }
       },
@@ -1824,34 +2062,20 @@ async function editarVenta(ventaId, body, actorUser) {
     throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
   }
 
-  return db.transaction(async (trx) => {
-    const venta = await repository.getSaleById(ventaId, trx);
-    if (!venta) throw new AppError(404, 'Venta no encontrada');
-
-    const updated = await repository.updateSaleFields(ventaId, parsed.data, trx);
-
-    await auditoriaService.logEvent(
-      {
-        entidad: 'VENTA',
-        entidad_id: ventaId,
-        accion: 'EDITAR',
-        descripcion: `Venta #${ventaId} editada`,
-        datos_anteriores: {
-          observacion: venta.observacion || null,
-          referencia: venta.referencia || null
-        },
-        datos_nuevos: parsed.data,
-        detalle: {
-          modulo: 'VENTAS',
-          actor: actorUser || null,
-          cambios: parsed.data
-        }
-      },
-      trx
-    );
-
-    return { ok: true, data: updated };
+  const pack = normalizeVentaPack(await repository.getSaleByIdWithRelations(ventaId));
+  if (!pack) throw new AppError(404, 'Venta no encontrada');
+  await assertCajaOperativaVenta(pack, actorUser, { accion: 'EDITAR_VENTA' });
+  await auditVentaDenied({
+    ventaId,
+    actorUser,
+    accion: 'EDITAR_VENTA',
+    motivo: 'VENTA_COBRADA_NO_EDITABLE',
+    detalle: {
+      estado_actual: pack.venta.estado,
+      total_centavos: pack.venta.total_centavos
+    }
   });
+  throw new AppError(400, 'Las ventas cobradas no se editan directamente; use anulación o devolución');
 }
 
 module.exports = {

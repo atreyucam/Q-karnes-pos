@@ -11,7 +11,7 @@ import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
 const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 export default function ComprasPage() {
-  const { ordenes, error, listarOrdenes, cancelarOrden, cerrarOrdenParcial } = useComprasStore();
+  const { ordenes, ordenesMeta, error, listarOrdenes, cancelarOrden, cerrarOrdenParcial } = useComprasStore();
   const navigate = useNavigate();
   const [pagina, setPagina] = useState(1);
   const [filtros, setFiltros] = useState({ search: '', estado: 'TODOS', fecha: '' });
@@ -24,11 +24,14 @@ export default function ComprasPage() {
     const timer = window.setTimeout(() => {
       listarOrdenes({
         search: filtros.search || undefined,
-        estado: filtros.estado === 'TODOS' ? undefined : filtros.estado
+        estado: filtros.estado === 'TODOS' ? undefined : filtros.estado,
+        paginado: 1,
+        limit: PAGE_SIZE,
+        offset: (pagina - 1) * PAGE_SIZE
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [listarOrdenes, filtros]);
+  }, [listarOrdenes, filtros, pagina]);
 
   const ordenesFiltradas = useMemo(() => {
     return ordenes.filter((orden) => {
@@ -44,11 +47,8 @@ export default function ComprasPage() {
       completas: ordenesFiltradas.filter((orden) => orden.estado === 'COMPLETA').length
   }), [ordenesFiltradas]);
 
-  const totalPaginas = Math.max(1, Math.ceil(ordenesFiltradas.length / PAGE_SIZE));
-  const ordenesPaginadas = useMemo(() => {
-    const start = (pagina - 1) * PAGE_SIZE;
-    return ordenesFiltradas.slice(start, start + PAGE_SIZE);
-  }, [ordenesFiltradas, pagina]);
+  const totalPaginas = Math.max(1, Number(ordenesMeta?.totalPages || 1));
+  const ordenesPaginadas = ordenesFiltradas;
 
   useEffect(() => {
     if (pagina > totalPaginas) setPagina(totalPaginas);
@@ -79,7 +79,10 @@ export default function ComprasPage() {
       }
       await listarOrdenes({
         search: filtros.search || undefined,
-        estado: filtros.estado === 'TODOS' ? undefined : filtros.estado
+        estado: filtros.estado === 'TODOS' ? undefined : filtros.estado,
+        paginado: 1,
+        limit: PAGE_SIZE,
+        offset: (pagina - 1) * PAGE_SIZE
       });
       closeActionModal();
     } catch (nextError) {
@@ -258,7 +261,7 @@ export default function ComprasPage() {
         </Tabla>
 
         <div className="px-5 py-4">
-          <Paginador paginaActual={pagina} totalPaginas={totalPaginas} totalRegistros={ordenesFiltradas.length} mostrarSiempre onPageChange={setPagina} />
+          <Paginador paginaActual={pagina} totalPaginas={totalPaginas} totalRegistros={Number(ordenesMeta?.total || ordenesFiltradas.length)} mostrarSiempre onPageChange={setPagina} />
         </div>
       </Card>
 

@@ -3,8 +3,11 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const net = require('node:net');
+const { createDesktopLogger } = require('./logger.cjs');
 
 const API_PORT = Number(process.env.QKARNES_API_PORT || 4100);
+const perfBootLogEnabled = String(process.env.PERF_BOOT_LOG || '').trim().toLowerCase() === 'true';
+const perfLogger = createDesktopLogger('desktop-runtime');
 
 function resolveApiRoot() {
   if (process.env.QKARNES_API_BUNDLE_ROOT) {
@@ -60,20 +63,30 @@ async function assertPortAvailable(port) {
 }
 
 async function ensureDatabaseReady(apiRoot) {
+  const startedAt = Date.now();
+  if (perfBootLogEnabled) {
+    perfLogger.info('desktop_perf_migrations_start', 'Inicio de migraciones embebidas', { apiRoot });
+  }
   const knexConfig = require(path.join(apiRoot, 'knexfile.js'));
   const knex = require('knex')(knexConfig.production);
+  const { ensureUsersReadyForRuntime } = require(path.join(apiRoot, 'src', 'config', 'runtimeSecurity.js'));
 
   try {
     await knex.migrate.latest();
-
-    const hasUsuariosTable = await knex.schema.hasTable('usuarios');
-    if (!hasUsuariosTable) {
-      throw new Error('La tabla usuarios no existe luego de ejecutar migraciones');
+    if (perfBootLogEnabled) {
+      perfLogger.info('desktop_perf_migrations_done', 'Migraciones embebidas completadas', {
+        elapsedMs: Date.now() - startedAt
+      });
     }
-
-    const [{ totalUsuarios }] = await knex('usuarios').count({ totalUsuarios: '*' });
-    if (Number(totalUsuarios || 0) === 0) {
-      await knex.seed.run({ specific: '001_demo.js' });
+    await ensureUsersReadyForRuntime({
+      knex,
+      nodeEnv: process.env.NODE_ENV,
+      context: 'Electron embebido'
+    });
+    if (perfBootLogEnabled) {
+      perfLogger.info('desktop_perf_runtime_users_done', 'Validación de usuarios runtime completada', {
+        elapsedMs: Date.now() - startedAt
+      });
     }
   } finally {
     await knex.destroy();
@@ -81,6 +94,7 @@ async function ensureDatabaseReady(apiRoot) {
 }
 
 async function startEmbeddedApi() {
+  const startedAt = Date.now();
   const apiRoot = resolveApiRoot();
   const userDataRoot = resolveUserDataRoot();
   const jwtSecret = ensureJwtSecret(userDataRoot);
@@ -91,10 +105,22 @@ async function startEmbeddedApi() {
   process.env.JWT_SECRET = jwtSecret;
 
   await assertPortAvailable(API_PORT);
+  if (perfBootLogEnabled) {
+    perfLogger.info('desktop_perf_port_ready', 'Puerto embebido disponible', {
+      apiPort: API_PORT,
+      elapsedMs: Date.now() - startedAt
+    });
+  }
   await ensureDatabaseReady(apiRoot);
 
   const { startServer } = require(path.join(apiRoot, 'src', 'server.js'));
   const server = await startServer({ port: API_PORT });
+  if (perfBootLogEnabled) {
+    perfLogger.info('desktop_perf_api_ready', 'API embebida lista', {
+      apiPort: API_PORT,
+      elapsedMs: Date.now() - startedAt
+    });
+  }
 
   return {
     apiRoot,

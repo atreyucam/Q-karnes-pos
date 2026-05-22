@@ -1,20 +1,30 @@
 const db = require('../../db/knex');
 
-async function listDisponible(trx = db) {
-  return trx('productos as p')
+async function listDisponible(filters = {}, trx = db) {
+  const query = trx('productos as p')
     .leftJoin('categorias as c', 'p.categoria_id', 'c.id')
     .select('p.*', 'c.nombre as categoria_nombre')
     .where('p.activo', 1)
     .orderBy('p.codigo', 'asc');
+
+  if (filters.limit) query.limit(filters.limit);
+  if (filters.offset) query.offset(filters.offset);
+
+  return query;
 }
 
-async function listAlertas(trx = db) {
-  return trx('productos as p')
+async function listAlertas(filters = {}, trx = db) {
+  const query = trx('productos as p')
     .leftJoin('categorias as c', 'p.categoria_id', 'c.id')
     .select('p.*', 'c.nombre as categoria_nombre')
     .where('p.activo', 1)
     .whereRaw('CAST(p.stock_actual AS REAL) <= CAST(p.stock_minimo AS REAL)')
     .orderBy('p.stock_actual', 'asc');
+
+  if (filters.limit) query.limit(filters.limit);
+  if (filters.offset) query.offset(filters.offset);
+
+  return query;
 }
 
 async function getProductoById(id, trx = db) {
@@ -157,11 +167,35 @@ async function createMerma(data, trx = db) {
   return trx('mermas').where({ id }).first();
 }
 
-async function listMovimientos(trx = db) {
-  return trx('inventario_movimientos as m')
+async function listMovimientos(filters = {}, trx = db) {
+  const query = trx('inventario_movimientos as m')
     .join('productos as p', 'm.producto_id', 'p.id')
     .select('m.*', 'p.codigo as producto_codigo', 'p.nombre as producto_nombre', 'p.unidad_medida')
     .orderBy('m.id', 'desc');
+
+  if (filters.limit) query.limit(filters.limit);
+  if (filters.offset) query.offset(filters.offset);
+
+  return query;
+}
+
+async function countDisponible(trx = db) {
+  const row = await trx('productos as p').where('p.activo', 1).count({ total: '*' }).first();
+  return Number(row?.total || 0);
+}
+
+async function countAlertas(trx = db) {
+  const row = await trx('productos as p')
+    .where('p.activo', 1)
+    .whereRaw('CAST(p.stock_actual AS REAL) <= CAST(p.stock_minimo AS REAL)')
+    .count({ total: '*' })
+    .first();
+  return Number(row?.total || 0);
+}
+
+async function countMovimientos(trx = db) {
+  const row = await trx('inventario_movimientos').count({ total: '*' }).first();
+  return Number(row?.total || 0);
 }
 
 module.exports = {
@@ -182,5 +216,8 @@ module.exports = {
   insertValorizacion,
   listMermas,
   createMerma,
-  listMovimientos
+  listMovimientos,
+  countDisponible,
+  countAlertas,
+  countMovimientos
 };

@@ -10,6 +10,10 @@ router.use(authenticate, authorizeRoles('ADMIN'));
 
 router.get('/health', controller.health);
 router.get('/integridad', controller.integridad);
+router.post('/sqlite/mantenimiento', controller.sqliteMaintenance);
+router.get('/backups/automatico', controller.getBackupAutomatico);
+router.put('/backups/automatico', controller.setBackupAutomatico);
+router.post('/backups/automatico/ejecutar', controller.runBackupAutomatico);
 router.get('/backups', controller.listBackups);
 router.post('/backups', controller.createBackup);
 router.post('/restaurar', controller.restore);

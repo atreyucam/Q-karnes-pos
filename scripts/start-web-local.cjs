@@ -4,6 +4,17 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const repoRoot = path.resolve(__dirname, '..');
+const perfBootLogEnabled = String(process.env.PERF_BOOT_LOG || '').trim().toLowerCase() === 'true';
+const bootTimeline = [];
+
+function markBootStep(step, extra = {}) {
+  const atMs = Date.now();
+  bootTimeline.push({ step, atMs, extra });
+  if (perfBootLogEnabled) {
+    // eslint-disable-next-line no-console
+    console.log(`[boot:web-local] ${step}`, extra);
+  }
+}
 
 function resolveDefaultDataDir() {
   if (process.platform === 'win32') {
@@ -44,30 +55,40 @@ process.env.DB_FILE = process.env.DB_FILE || path.join(resolveDefaultDataDir(), 
 process.env.JWT_SECRET = ensureJwtSecret();
 
 async function ensureDatabaseReady() {
+  markBootStep('migrations_start');
   const knexConfig = require(path.join(repoRoot, 'apps', 'api', 'knexfile.js'));
   const knex = require('knex')(knexConfig.production);
+  const { ensureUsersReadyForRuntime } = require(path.join(repoRoot, 'apps', 'api', 'src', 'config', 'runtimeSecurity.js'));
 
   try {
     await knex.migrate.latest();
-
-    const hasUsuariosTable = await knex.schema.hasTable('usuarios');
-    if (!hasUsuariosTable) {
-      throw new Error('La tabla usuarios no existe luego de ejecutar migraciones');
-    }
-
-    const [{ totalUsuarios }] = await knex('usuarios').count({ totalUsuarios: '*' });
-    if (Number(totalUsuarios || 0) === 0) {
-      await knex.seed.run({ specific: '001_demo.js' });
-    }
+    markBootStep('migrations_done');
+    await ensureUsersReadyForRuntime({
+      knex,
+      nodeEnv: process.env.NODE_ENV,
+      context: 'Web Local'
+    });
+    markBootStep('runtime_users_ready');
   } finally {
     await knex.destroy();
   }
 }
 
 async function main() {
+  const startedAt = Date.now();
+  markBootStep('script_start', { nodeEnv: process.env.NODE_ENV });
   await ensureDatabaseReady();
+  markBootStep('server_bootstrap_start');
   const { startServer } = require(path.join(repoRoot, 'apps', 'api', 'src', 'server.js'));
   await startServer();
+  markBootStep('server_ready', {
+    totalMs: Date.now() - startedAt,
+    bootSteps: bootTimeline.map((entry, index) => ({
+      step: entry.step,
+      elapsedMs: entry.atMs - startedAt,
+      deltaMs: index === 0 ? 0 : entry.atMs - bootTimeline[index - 1].atMs
+    }))
+  });
 }
 
 main().catch((error) => {

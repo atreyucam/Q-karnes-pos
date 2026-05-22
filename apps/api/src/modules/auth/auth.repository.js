@@ -33,8 +33,27 @@ async function findById(id, trx = db) {
   return baseQuery(trx).where('u.id', id).first();
 }
 
+async function countUsers(trx = db) {
+  const row = await trx('usuarios').count({ total: '*' }).first();
+  return Number(row?.total || 0);
+}
+
+async function findRoleByName(nombre, trx = db) {
+  return trx('roles')
+    .whereRaw('UPPER(nombre) = ?', [String(nombre || '').trim().toUpperCase()])
+    .first();
+}
+
+async function createUser(payload, trx = db) {
+  const [id] = await trx('usuarios').insert(payload);
+  return trx('usuarios').where({ id }).first();
+}
+
 module.exports = {
   findByUsuario,
   findByLoginIdentifier,
-  findById
+  findById,
+  countUsers,
+  findRoleByName,
+  createUser
 };
