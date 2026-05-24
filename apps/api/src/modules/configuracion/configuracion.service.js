@@ -19,6 +19,12 @@ const updateConfigSchema = z.object({
   exigir_caja_abierta_para_pagos: z.boolean(),
   permitir_ventas_credito: z.boolean(),
   permitir_compras_credito: z.boolean(),
+  redondeo_precios_venta_activo: z.boolean(),
+  redondeo_incremento_centavos: z.number().int().positive(),
+  redondeo_evitar_45: z.boolean(),
+  alertas_redondeo_activas: z.boolean(),
+  umbral_redondeo_diario_cajero_centavos: z.number().int().nonnegative(),
+  umbral_redondeo_turno_centavos: z.number().int().nonnegative(),
   ticket_prefijo: z.string().trim().min(1).max(20),
   ticket_mensaje: z.string().trim().min(1).max(255)
 });
@@ -100,6 +106,12 @@ async function updateConfiguracion(body, actorUser) {
     exigir_caja_abierta_para_pagos: parsed.data.exigir_caja_abierta_para_pagos,
     permitir_ventas_credito: parsed.data.permitir_ventas_credito,
     permitir_compras_credito: parsed.data.permitir_compras_credito,
+    redondeo_precios_venta_activo: parsed.data.redondeo_precios_venta_activo,
+    redondeo_incremento_centavos: parsed.data.redondeo_incremento_centavos,
+    redondeo_evitar_45: parsed.data.redondeo_evitar_45,
+    alertas_redondeo_activas: parsed.data.alertas_redondeo_activas,
+    umbral_redondeo_diario_cajero_centavos: parsed.data.umbral_redondeo_diario_cajero_centavos,
+    umbral_redondeo_turno_centavos: parsed.data.umbral_redondeo_turno_centavos,
     ticket_prefijo: parsed.data.ticket_prefijo.trim().toUpperCase(),
     ticket_mensaje: parsed.data.ticket_mensaje.trim()
   });

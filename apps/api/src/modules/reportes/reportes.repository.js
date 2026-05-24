@@ -27,6 +27,24 @@ function subtotalCentsExpression(alias, field = 'subtotal') {
   return `COALESCE(${alias}.subtotal_centavos, CAST(ROUND(CAST(COALESCE(${alias}.${field}, 0) AS REAL) * 100, 0) AS INTEGER))`;
 }
 
+function transformacionFechaDateTimeExpr(alias = 't') {
+  return `
+    CASE
+      WHEN typeof(${alias}.fecha) IN ('integer', 'real') THEN datetime(${alias}.fecha / 1000, 'unixepoch', 'localtime')
+      ELSE datetime(${alias}.fecha)
+    END
+  `;
+}
+
+function transformacionFechaDateExpr(alias = 't') {
+  return `
+    CASE
+      WHEN typeof(${alias}.fecha) IN ('integer', 'real') THEN date(${alias}.fecha / 1000, 'unixepoch', 'localtime')
+      ELSE date(${alias}.fecha)
+    END
+  `;
+}
+
 function inventoryBalanceSubquery(trx = db) {
   return trx('inventario_movimientos as im')
     .select('im.producto_id')
@@ -85,6 +103,7 @@ async function dashboard(trx = db) {
   const [
     ventasHoy,
     ventasAyer,
+    ventasPorMetodoHoy,
     stockBajo,
     stockBajoAyer,
     cxcPendiente,
@@ -112,6 +131,29 @@ async function dashboard(trx = db) {
       .select(
         trx.raw('COUNT(*) as transacciones'),
         trx.raw(`COALESCE(SUM(${totalCentsExpression('v')} - COALESCE(dv.total_devuelto_centavos, 0)), 0) as total_centavos`)
+      )
+      .first(),
+    trx('ventas as v')
+      .leftJoin('venta_pagos as vp', 'vp.venta_id', 'v.id')
+      .whereNot('v.estado', 'ANULADA')
+      .whereRaw(`date(v.fecha) = ${today}`)
+      .select(
+        trx.raw(`
+          COALESCE(SUM(CASE
+            WHEN UPPER(COALESCE(vp.tipo, '')) = 'CONTADO'
+              AND UPPER(COALESCE(vp.metodo_codigo, 'EFECTIVO')) = 'EFECTIVO'
+            THEN ${paymentAmountExpression('vp')}
+            ELSE 0
+          END), 0) as efectivo_centavos
+        `),
+        trx.raw(`
+          COALESCE(SUM(CASE
+            WHEN UPPER(COALESCE(vp.tipo, '')) = 'TRANSFERENCIA'
+              OR UPPER(COALESCE(vp.metodo_codigo, '')) = 'TRANSFERENCIA'
+            THEN ${paymentAmountExpression('vp')}
+            ELSE 0
+          END), 0) as transferencia_centavos
+        `)
       )
       .first(),
     trx('productos as p')
@@ -219,6 +261,7 @@ async function dashboard(trx = db) {
     generated_at: null,
     ventas_hoy: ventasHoy || null,
     ventas_ayer: ventasAyer || null,
+    ventas_por_metodo_hoy: ventasPorMetodoHoy || null,
     stock_bajo: stockBajo || null,
     stock_bajo_ayer: stockBajoAyer || null,
     cxc_pendiente: Array.isArray(cxcPendiente) ? cxcPendiente : [],
@@ -528,10 +571,11 @@ async function cxpDocumentosPendientes(trx = db) {
 }
 
 async function transformacionesResumen(trx = db) {
+  const fechaDateExpr = transformacionFechaDateExpr('t');
   return trx('transformaciones as t')
     .join('transformacion_insumos as i', 'i.transformacion_id', 't.id')
     .where('t.estado', 'APLICADA')
-    .select(trx.raw('DATE(t.fecha) as fecha'))
+    .select(trx.raw(`${fechaDateExpr} as fecha`))
     .count({ lotes: '*' })
     .sum({ entrada_total: 'i.cantidad' })
     .select(
@@ -550,7 +594,7 @@ async function transformacionesResumen(trx = db) {
         )), 0) as merma_total
       `)
     )
-    .groupByRaw('DATE(t.fecha)')
+    .groupByRaw(fechaDateExpr)
     .orderBy('fecha', 'asc');
 }
 
@@ -872,18 +916,20 @@ async function getKardexRows(filters = {}, trx = db) {
 }
 
 async function getTransformacionesReport(bounds = {}, trx = db) {
+  const fechaDateTimeExpr = transformacionFechaDateTimeExpr('t');
   return trx('transformaciones as t')
     .join('transformacion_insumos as i', 'i.transformacion_id', 't.id')
     .join('productos as p', 'p.id', 'i.producto_id')
     .modify((qb) => {
-      applyDateRange(qb, 't.fecha', bounds);
+      if (bounds.startAt) qb.whereRaw(`datetime(${fechaDateTimeExpr}) >= datetime(?)`, [bounds.startAt]);
+      if (bounds.endAt) qb.whereRaw(`datetime(${fechaDateTimeExpr}) <= datetime(?)`, [bounds.endAt]);
       if (bounds.estado) qb.where('t.estado', bounds.estado);
       if (bounds.producto_padre_id) qb.where('i.producto_id', Number(bounds.producto_padre_id));
     })
     .select(
       't.id',
       't.numero',
-      't.fecha',
+      trx.raw(`datetime(${fechaDateTimeExpr}) as fecha`),
       't.estado',
       't.tipo_proceso',
       't.cantidad_padre_base',
@@ -1047,6 +1093,264 @@ async function getCajaDiariaSummary(date, trx = db) {
   };
 }
 
+async function redondeoComercialResumen(bounds = {}, trx = db) {
+  const [
+    hasVentaTotalRedondeo,
+    hasVentaTotalCentavos,
+    hasVentaDetalleDiff,
+    hasDevolucionRedondeo,
+    hasAnulacionImpacto
+  ] = await Promise.all([
+    trx.schema.hasColumn('ventas', 'total_redondeo_centavos'),
+    trx.schema.hasColumn('ventas', 'total_centavos'),
+    trx.schema.hasColumn('venta_detalle', 'redondeo_diferencia_centavos'),
+    trx.schema.hasColumn('devoluciones', 'total_redondeo_revertido_centavos'),
+    trx.schema.hasColumn('ventas_anulaciones', 'impacto_redondeo_centavos')
+  ]);
+
+  const salesRoundExpr = hasVentaTotalRedondeo
+    ? 'COALESCE(v.total_redondeo_centavos, 0)'
+    : (hasVentaDetalleDiff
+      ? `COALESCE((
+          SELECT SUM(
+            CAST(
+              ROUND(
+                CAST(COALESCE(vd.cantidad, 0) AS REAL) * CAST(COALESCE(vd.redondeo_diferencia_centavos, 0) AS REAL),
+                0
+              ) AS INTEGER
+            )
+          )
+          FROM venta_detalle vd
+          WHERE vd.venta_id = v.id
+        ), 0)`
+      : '0');
+  const salesTotalExpr = hasVentaTotalCentavos
+    ? 'COALESCE(v.total_centavos, 0)'
+    : `CAST(ROUND(CAST(COALESCE(v.total, 0) AS REAL) * 100, 0) AS INTEGER)`;
+  const devolucionExpr = hasDevolucionRedondeo
+    ? 'COALESCE(d.total_redondeo_revertido_centavos, 0)'
+    : '0';
+  const anulacionExpr = hasAnulacionImpacto
+    ? 'COALESCE(va.impacto_redondeo_centavos, 0)'
+    : '0';
+
+  const ventasScope = trx('ventas as v')
+    .modify((qb) => applyDateRange(qb, 'v.fecha', bounds));
+  const devolucionesScope = trx('devoluciones as d')
+    .modify((qb) => applyDateRange(qb, 'd.fecha', bounds));
+  const anulacionesScope = trx('ventas_anulaciones as va')
+    .modify((qb) => applyDateRange(qb, 'va.fecha', bounds));
+
+  const [ventasResumen, devolucionesResumen, anulacionesResumen] = await Promise.all([
+    ventasScope.clone()
+      .select(
+        trx.raw(`COALESCE(SUM(${salesRoundExpr}), 0) as total_redondeo_centavos`),
+        trx.raw(`COALESCE(SUM(${salesTotalExpr}), 0) as total_vendido_centavos`),
+        trx.raw('COUNT(*) as ventas_total'),
+        trx.raw(`SUM(CASE WHEN ${salesRoundExpr} > 0 THEN 1 ELSE 0 END) as ventas_con_redondeo`)
+      )
+      .first(),
+    devolucionesScope.clone()
+      .select(trx.raw(`COALESCE(SUM(${devolucionExpr}), 0) as total_devuelto_centavos`))
+      .first(),
+    anulacionesScope.clone()
+      .select(trx.raw(`COALESCE(SUM(${anulacionExpr}), 0) as total_anulado_centavos`))
+      .first()
+  ]);
+
+  const resumen = {
+    total_redondeo_bruto_centavos: Number(ventasResumen?.total_redondeo_centavos || 0),
+    total_redondeo_devoluciones_centavos: Number(devolucionesResumen?.total_devuelto_centavos || 0),
+    total_redondeo_anulaciones_centavos: Number(anulacionesResumen?.total_anulado_centavos || 0),
+    total_vendido_centavos: Number(ventasResumen?.total_vendido_centavos || 0),
+    ventas_total: Number(ventasResumen?.ventas_total || 0),
+    ventas_con_redondeo: Number(ventasResumen?.ventas_con_redondeo || 0)
+  };
+  resumen.total_redondeo_centavos = Math.max(
+    0,
+    resumen.total_redondeo_bruto_centavos - resumen.total_redondeo_devoluciones_centavos - resumen.total_redondeo_anulaciones_centavos
+  );
+
+  const porTurnoVentas = await ventasScope.clone()
+    .leftJoin('caja_turnos as ct', 'ct.id', 'v.turno_id')
+    .leftJoin('usuarios as u', 'u.id', 'ct.usuario_id')
+    .groupBy('v.turno_id', 'u.nombre')
+    .select(
+      'v.turno_id',
+      'u.nombre as cajero_turno',
+      trx.raw('COUNT(*) as ventas'),
+      trx.raw(`COALESCE(SUM(${salesRoundExpr}), 0) as bruto_centavos`)
+    );
+  const porTurnoDevoluciones = await devolucionesScope.clone()
+    .leftJoin('ventas as v', 'v.id', 'd.venta_id')
+    .groupBy('v.turno_id')
+    .select('v.turno_id', trx.raw(`COALESCE(SUM(${devolucionExpr}), 0) as devuelto_centavos`));
+  const porTurnoAnulaciones = await anulacionesScope.clone()
+    .leftJoin('ventas as v', 'v.id', 'va.venta_id')
+    .groupBy('v.turno_id')
+    .select('v.turno_id', trx.raw(`COALESCE(SUM(${anulacionExpr}), 0) as anulado_centavos`));
+
+  const porTurnoMap = new Map();
+  for (const row of porTurnoVentas) {
+    porTurnoMap.set(String(row.turno_id || 'SIN_TURNO'), {
+      turno_id: row.turno_id || null,
+      cajero_turno: row.cajero_turno || 'Sin turno',
+      ventas: Number(row.ventas || 0),
+      bruto_centavos: Number(row.bruto_centavos || 0),
+      devuelto_centavos: 0,
+      anulado_centavos: 0
+    });
+  }
+  for (const row of porTurnoDevoluciones) {
+    const key = String(row.turno_id || 'SIN_TURNO');
+    const current = porTurnoMap.get(key) || { turno_id: row.turno_id || null, cajero_turno: 'Sin turno', ventas: 0, bruto_centavos: 0, devuelto_centavos: 0, anulado_centavos: 0 };
+    current.devuelto_centavos += Number(row.devuelto_centavos || 0);
+    porTurnoMap.set(key, current);
+  }
+  for (const row of porTurnoAnulaciones) {
+    const key = String(row.turno_id || 'SIN_TURNO');
+    const current = porTurnoMap.get(key) || { turno_id: row.turno_id || null, cajero_turno: 'Sin turno', ventas: 0, bruto_centavos: 0, devuelto_centavos: 0, anulado_centavos: 0 };
+    current.anulado_centavos += Number(row.anulado_centavos || 0);
+    porTurnoMap.set(key, current);
+  }
+  const porTurno = Array.from(porTurnoMap.values())
+    .map((row) => ({ ...row, total_redondeo_centavos: Math.max(0, row.bruto_centavos - row.devuelto_centavos - row.anulado_centavos) }))
+    .sort((a, b) => b.total_redondeo_centavos - a.total_redondeo_centavos);
+
+  const porCajeroVentas = await ventasScope.clone()
+    .leftJoin('usuarios as u', 'u.id', 'v.usuario_id')
+    .groupBy('v.usuario_id', 'u.nombre')
+    .select(
+      'v.usuario_id',
+      'u.nombre as usuario_nombre',
+      trx.raw('COUNT(*) as ventas'),
+      trx.raw(`COALESCE(SUM(${salesRoundExpr}), 0) as bruto_centavos`)
+    );
+  const porCajeroDevoluciones = await devolucionesScope.clone()
+    .leftJoin('ventas as v', 'v.id', 'd.venta_id')
+    .groupBy('v.usuario_id')
+    .select('v.usuario_id', trx.raw(`COALESCE(SUM(${devolucionExpr}), 0) as devuelto_centavos`));
+  const porCajeroAnulaciones = await anulacionesScope.clone()
+    .leftJoin('ventas as v', 'v.id', 'va.venta_id')
+    .groupBy('v.usuario_id')
+    .select('v.usuario_id', trx.raw(`COALESCE(SUM(${anulacionExpr}), 0) as anulado_centavos`));
+
+  const porCajeroMap = new Map();
+  for (const row of porCajeroVentas) {
+    porCajeroMap.set(String(row.usuario_id || 'SIN_USUARIO'), {
+      usuario_id: row.usuario_id || null,
+      usuario_nombre: row.usuario_nombre || 'Sin usuario',
+      ventas: Number(row.ventas || 0),
+      bruto_centavos: Number(row.bruto_centavos || 0),
+      devuelto_centavos: 0,
+      anulado_centavos: 0
+    });
+  }
+  for (const row of porCajeroDevoluciones) {
+    const key = String(row.usuario_id || 'SIN_USUARIO');
+    const current = porCajeroMap.get(key) || { usuario_id: row.usuario_id || null, usuario_nombre: 'Sin usuario', ventas: 0, bruto_centavos: 0, devuelto_centavos: 0, anulado_centavos: 0 };
+    current.devuelto_centavos += Number(row.devuelto_centavos || 0);
+    porCajeroMap.set(key, current);
+  }
+  for (const row of porCajeroAnulaciones) {
+    const key = String(row.usuario_id || 'SIN_USUARIO');
+    const current = porCajeroMap.get(key) || { usuario_id: row.usuario_id || null, usuario_nombre: 'Sin usuario', ventas: 0, bruto_centavos: 0, devuelto_centavos: 0, anulado_centavos: 0 };
+    current.anulado_centavos += Number(row.anulado_centavos || 0);
+    porCajeroMap.set(key, current);
+  }
+  const porCajero = Array.from(porCajeroMap.values())
+    .map((row) => ({ ...row, total_redondeo_centavos: Math.max(0, row.bruto_centavos - row.devuelto_centavos - row.anulado_centavos) }))
+    .sort((a, b) => b.total_redondeo_centavos - a.total_redondeo_centavos);
+
+  const porProductoBruto = hasVentaDetalleDiff
+    ? await trx('venta_detalle as vd')
+      .join('ventas as v', 'v.id', 'vd.venta_id')
+      .join('productos as p', 'p.id', 'vd.producto_id')
+      .modify((qb) => applyDateRange(qb, 'v.fecha', bounds))
+      .groupBy('vd.producto_id', 'p.codigo', 'p.nombre')
+      .select(
+        'vd.producto_id',
+        'p.codigo',
+        'p.nombre',
+        trx.raw('SUM(CASE WHEN COALESCE(vd.redondeo_diferencia_centavos, 0) > 0 THEN 1 ELSE 0 END) as veces_redondeado'),
+        trx.raw(`
+          COALESCE(
+            SUM(
+              CAST(ROUND(CAST(COALESCE(vd.cantidad, 0) AS REAL) * CAST(COALESCE(vd.redondeo_diferencia_centavos, 0) AS REAL), 0) AS INTEGER)
+            ),
+            0
+          ) as bruto_centavos
+        `)
+      )
+    : [];
+
+  let porProductoDevuelto = [];
+  if (hasDevolucionRedondeo) {
+    const hasDevolucionDetalleRedondeo = await trx.schema.hasColumn('devolucion_detalle', 'redondeo_revertido_centavos');
+    if (hasDevolucionDetalleRedondeo) {
+      porProductoDevuelto = await trx('devolucion_detalle as dd')
+        .join('devoluciones as d', 'd.id', 'dd.devolucion_id')
+        .join('venta_detalle as vd', 'vd.id', 'dd.venta_detalle_id')
+        .modify((qb) => applyDateRange(qb, 'd.fecha', bounds))
+        .groupBy('vd.producto_id')
+        .select(
+          'vd.producto_id',
+          trx.raw(`COALESCE(SUM(COALESCE(dd.redondeo_revertido_centavos, 0)), 0) as devuelto_centavos`)
+        );
+    }
+  }
+  const devolucionesByProduct = new Map(porProductoDevuelto.map((row) => [Number(row.producto_id), Number(row.devuelto_centavos || 0)]));
+  const porProducto = porProductoBruto
+    .map((row) => ({
+      producto_id: Number(row.producto_id),
+      codigo: row.codigo,
+      nombre: row.nombre,
+      veces_redondeado: Number(row.veces_redondeado || 0),
+      total_redondeo_centavos: Math.max(0, Number(row.bruto_centavos || 0) - Number(devolucionesByProduct.get(Number(row.producto_id)) || 0))
+    }))
+    .sort((a, b) => b.total_redondeo_centavos - a.total_redondeo_centavos || a.nombre.localeCompare(b.nombre));
+
+  const ventasPorDia = await ventasScope.clone()
+    .groupByRaw('DATE(v.fecha)')
+    .select(
+      trx.raw('DATE(v.fecha) as fecha'),
+      trx.raw('COUNT(*) as ventas'),
+      trx.raw(`COALESCE(SUM(${salesRoundExpr}), 0) as bruto_centavos`)
+    );
+  const devolucionesPorDia = await devolucionesScope.clone()
+    .groupByRaw('DATE(d.fecha)')
+    .select(trx.raw('DATE(d.fecha) as fecha'), trx.raw(`COALESCE(SUM(${devolucionExpr}), 0) as devuelto_centavos`));
+  const anulacionesPorDia = await anulacionesScope.clone()
+    .groupByRaw('DATE(va.fecha)')
+    .select(trx.raw('DATE(va.fecha) as fecha'), trx.raw(`COALESCE(SUM(${anulacionExpr}), 0) as anulado_centavos`));
+
+  const porDiaMap = new Map();
+  for (const row of ventasPorDia) {
+    porDiaMap.set(row.fecha, { fecha: row.fecha, ventas: Number(row.ventas || 0), bruto_centavos: Number(row.bruto_centavos || 0), devuelto_centavos: 0, anulado_centavos: 0 });
+  }
+  for (const row of devolucionesPorDia) {
+    const current = porDiaMap.get(row.fecha) || { fecha: row.fecha, ventas: 0, bruto_centavos: 0, devuelto_centavos: 0, anulado_centavos: 0 };
+    current.devuelto_centavos += Number(row.devuelto_centavos || 0);
+    porDiaMap.set(row.fecha, current);
+  }
+  for (const row of anulacionesPorDia) {
+    const current = porDiaMap.get(row.fecha) || { fecha: row.fecha, ventas: 0, bruto_centavos: 0, devuelto_centavos: 0, anulado_centavos: 0 };
+    current.anulado_centavos += Number(row.anulado_centavos || 0);
+    porDiaMap.set(row.fecha, current);
+  }
+  const porDia = Array.from(porDiaMap.values())
+    .map((row) => ({ ...row, total_redondeo_centavos: Math.max(0, row.bruto_centavos - row.devuelto_centavos - row.anulado_centavos) }))
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+
+  return {
+    resumen,
+    por_turno: porTurno,
+    por_cajero: porCajero,
+    por_producto: porProducto,
+    por_dia: porDia
+  };
+}
+
 module.exports = {
   dashboard,
   ventasReporte,
@@ -1071,5 +1375,6 @@ module.exports = {
   getInventoryCurrentValuation,
   getKardexRows,
   getTransformacionesReport,
-  getCajaDiariaSummary
+  getCajaDiariaSummary,
+  redondeoComercialResumen
 };

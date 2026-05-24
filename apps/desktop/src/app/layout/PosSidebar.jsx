@@ -61,8 +61,12 @@ export default function PosSidebar({ user, collapsed, mobileOpen, onCloseMobile 
             }}
             className={clsx('sidebar-brand !m-0 h-full', collapsed && 'sidebar-brand-collapsed')}
           >
-            <div className="sidebar-brand-logo flex items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-xs font-extrabold text-[var(--color-text)]">
-              QK
+            <div className="sidebar-brand-logo flex items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1">
+              <img
+                src="/logoFrigo.png"
+                alt="Logo Frigo"
+                className="h-full w-full object-contain"
+              />
             </div>
 
             {!collapsed && (

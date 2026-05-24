@@ -7,6 +7,7 @@ const router = express.Router();
 
 router.use(authenticate);
 router.get('/', authorizeRoles('ADMIN', 'CAJERO'), controller.list);
+router.get('/next-code', authorizeRoles('ADMIN'), controller.getNextCode);
 router.get('/:id', authorizeRoles('ADMIN', 'CAJERO'), controller.getById);
 router.post('/', authorizeRoles('ADMIN'), controller.create);
 router.patch('/:id', authorizeRoles('ADMIN'), controller.update);

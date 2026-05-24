@@ -238,12 +238,19 @@ export default function CompraDetallePage() {
             <TablaCuerpo>
               {(ordenActual?.detalle || []).map((d) => {
                 const unidad = String(d.unidad_medida || d.unidad || 'UND').toUpperCase();
+                const cantidadTotal = Number(d.cantidad || 0);
+                const cantidadRecibida = Number(d.cantidad_recibida || 0);
                 const pendiente = Number(d.cantidad_pendiente ?? (Number(d.cantidad) - Number(d.cantidad_recibida)));
+                const recibidaClassName = cantidadRecibida <= 0
+                  ? 'text-[var(--color-danger)] font-semibold'
+                  : cantidadRecibida >= cantidadTotal
+                    ? 'text-emerald-700 font-semibold'
+                    : 'text-amber-600 font-semibold';
                 return (
                   <TablaFila key={d.id}>
                     <TablaCelda title={d.producto_codigo || ''}>{d.producto_nombre}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(d.cantidad, unidad, { fixedLB: true })} {unidad}</TablaCelda>
-                    <TablaCelda>{formatQtyByUnit(d.cantidad_recibida, unidad, { fixedLB: true })} {unidad}</TablaCelda>
+                    <TablaCelda className={recibidaClassName}>{formatQtyByUnit(d.cantidad_recibida, unidad, { fixedLB: true })} {unidad}</TablaCelda>
                     <TablaCelda>{formatQtyByUnit(pendiente, unidad, { fixedLB: true })} {unidad}</TablaCelda>
                   </TablaFila>
                 );

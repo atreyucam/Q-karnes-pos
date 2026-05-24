@@ -16,6 +16,12 @@ const DEFAULT_CONFIG = {
   exigir_caja_abierta_para_pagos: true,
   permitir_ventas_credito: true,
   permitir_compras_credito: true,
+  redondeo_precios_venta_activo: false,
+  redondeo_incremento_centavos: 5,
+  redondeo_evitar_45: true,
+  alertas_redondeo_activas: true,
+  umbral_redondeo_diario_cajero_centavos: 1000,
+  umbral_redondeo_turno_centavos: 2000,
   ticket_prefijo: 'TK',
   ticket_mensaje: 'Gracias por su compra'
 };

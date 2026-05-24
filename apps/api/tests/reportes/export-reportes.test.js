@@ -29,6 +29,10 @@ async function runSuite(options = {}) {
     const cxp = await reportesService.cxp();
     assert(cxp?.data?.resumen, 'No devolvió resumen CxP');
     add(4, 'Reporte CxP disponible para exportación', true);
+
+    const redondeo = await reportesService.redondeoComercial({ fecha_inicio: '2000-01-01', fecha_fin: '2100-01-01' });
+    assert(redondeo?.data?.resumen, 'No devolvió resumen de redondeo comercial');
+    add(5, 'Reporte redondeo comercial disponible para exportación', true);
   } catch (error) {
     add(999, 'Error inesperado', false, error.message);
   } finally {
@@ -40,4 +44,3 @@ async function runSuite(options = {}) {
 if (require.main === module) runSuite();
 
 module.exports = { runSuite };
-

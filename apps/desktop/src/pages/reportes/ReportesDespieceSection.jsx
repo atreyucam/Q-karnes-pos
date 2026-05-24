@@ -21,7 +21,7 @@ import ReportDateFilters from './ReportesFilters';
 import { ChartPanel, HorizontalBarChart, SalesLineChart } from './ReportesCharts';
 import { exportRowsToCsv } from './reportesExport';
 import {
-  createDefaultQuickFilters,
+  businessTodayString,
   formatCentavos,
   formatDateLabel,
   formatDateOnly,
@@ -29,7 +29,8 @@ import {
   formatPercent,
   formatQuantity,
   joinChildren,
-  sanitizeDateRange
+  sanitizeDateRange,
+  shiftDate
 } from './reportesUtils';
 import { useReportTablePagination } from './useReportTablePagination';
 
@@ -42,8 +43,12 @@ function normalizeTransformacionesResumen(rawData) {
 export default function ReportesDespieceSection() {
   const cargarReporte = useReportesStore((state) => state.cargarReporte);
   const views = useReportesStore((state) => state.views);
+  const todayString = businessTodayString();
+  const tomorrowString = shiftDate(todayString, 1);
   const [filters, setFilters] = useState(() => ({
-    ...createDefaultQuickFilters('last30'),
+    quick: 'custom',
+    fecha_inicio: todayString,
+    fecha_fin: tomorrowString,
     estado: '',
     lote: ''
   }));
@@ -181,6 +186,11 @@ export default function ReportesDespieceSection() {
             { key: 'merma', label: 'Merma' },
             { key: 'rendimiento', label: 'Rendimiento' }
           ], rows);
+        }}
+        resetPreset={{
+          quick: 'custom',
+          fecha_inicio: todayString,
+          fecha_fin: tomorrowString
         }}
         extraFields={(
           <>

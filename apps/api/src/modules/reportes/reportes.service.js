@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const repository = require('./reportes.repository');
+const configuracionRepository = require('../configuracion/configuracion.repository');
 const { AppError } = require('../../helpers/AppError');
 const { zodError } = require('../../helpers/zodError');
 const { moneyRound } = require('../../helpers/money');
@@ -213,6 +214,8 @@ function emptyDashboardData() {
     business_date: null,
     kpis: {
       ventas_hoy: 0,
+      ventas_efectivo_hoy: 0,
+      ventas_transferencia_hoy: 0,
       transacciones_hoy: 0,
       stock_bajo: 0,
       deudas_clientes: 0,
@@ -688,6 +691,8 @@ async function dashboard(actorUser) {
   const ventasHoyCentavos = Number(snapshot?.ventas_hoy?.total_centavos || 0);
   const ventasAyerCentavos = Number(snapshot?.ventas_ayer?.total_centavos || 0);
   const transaccionesHoy = Number(snapshot?.ventas_hoy?.transacciones || 0);
+  const ventasEfectivoHoyCentavos = Number(snapshot?.ventas_por_metodo_hoy?.efectivo_centavos || 0);
+  const ventasTransferenciaHoyCentavos = Number(snapshot?.ventas_por_metodo_hoy?.transferencia_centavos || 0);
   const transaccionesAyer = Number(snapshot?.ventas_ayer?.transacciones || 0);
   const receivables = summarizeReceivables(snapshot?.cxc_pendiente || []);
   const deudaAyerCentavos = Number(snapshot?.cxc_pendiente_ayer?.total_centavos || 0);
@@ -698,6 +703,8 @@ async function dashboard(actorUser) {
   data.business_date = currentBusinessDate();
   data.kpis = {
     ventas_hoy: centsToMoney(ventasHoyCentavos),
+    ventas_efectivo_hoy: centsToMoney(ventasEfectivoHoyCentavos),
+    ventas_transferencia_hoy: centsToMoney(ventasTransferenciaHoyCentavos),
     transacciones_hoy: transaccionesHoy,
     stock_bajo: stockBajoHoy,
     deudas_clientes: receivables.total,
@@ -2058,6 +2065,130 @@ async function cajaDiaria(query = {}) {
   };
 }
 
+async function redondeoComercial(query = {}) {
+  const bounds = parseDateRange(query);
+  const previous = previousRange(bounds);
+  const [data, previousData, config] = await Promise.all([
+    repository.redondeoComercialResumen(bounds),
+    repository.redondeoComercialResumen(previous),
+    configuracionRepository.getSystemConfig()
+  ]);
+  const totalRedondeoCentavos = Number(data?.resumen?.total_redondeo_centavos || 0);
+  const ventasConRedondeo = Number(data?.resumen?.ventas_con_redondeo || 0);
+  const ventasTotal = Number(data?.resumen?.ventas_total || 0);
+  const totalProducto = (data?.por_producto || []).reduce((acc, row) => acc + Number(row.total_redondeo_centavos || 0), 0);
+  const prevTotal = Number(previousData?.resumen?.total_redondeo_centavos || 0);
+  const alertsActive = Boolean(Number(config?.alertas_redondeo_activas ?? 1));
+  const umbralCajero = Number(config?.umbral_redondeo_diario_cajero_centavos || 1000);
+  const umbralTurno = Number(config?.umbral_redondeo_turno_centavos || 2000);
+  const alertas = [];
+  if (alertsActive) {
+    for (const row of data?.por_cajero || []) {
+      const total = Number(row.total_redondeo_centavos || 0);
+      if (total > umbralCajero) {
+        alertas.push({
+          tipo: 'CAJERO',
+          clave: `CAJERO:${row.usuario_id || 'NA'}`,
+          etiqueta: row.usuario_nombre || 'Sin usuario',
+          total_redondeo_centavos: total,
+          umbral_centavos: umbralCajero
+        });
+      }
+    }
+    for (const row of data?.por_turno || []) {
+      const total = Number(row.total_redondeo_centavos || 0);
+      if (total > umbralTurno) {
+        alertas.push({
+          tipo: 'TURNO',
+          clave: `TURNO:${row.turno_id || 'NA'}`,
+          etiqueta: row.cajero_turno || 'Sin turno',
+          total_redondeo_centavos: total,
+          umbral_centavos: umbralTurno
+        });
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    data: {
+      filtros: {
+        fecha_inicio: bounds.fecha_inicio,
+        fecha_fin: bounds.fecha_fin
+      },
+      resumen: {
+        total_vendido_centavos: Number(data?.resumen?.total_vendido_centavos || 0),
+        total_redondeo_bruto_centavos: Number(data?.resumen?.total_redondeo_bruto_centavos || 0),
+        total_redondeo_devoluciones_centavos: Number(data?.resumen?.total_redondeo_devoluciones_centavos || 0),
+        total_redondeo_anulaciones_centavos: Number(data?.resumen?.total_redondeo_anulaciones_centavos || 0),
+        total_redondeo_centavos: totalRedondeoCentavos,
+        ventas_total: ventasTotal,
+        ventas_con_redondeo: ventasConRedondeo,
+        promedio_redondeo_por_venta_centavos: ventasConRedondeo > 0
+          ? Math.round(totalRedondeoCentavos / ventasConRedondeo)
+          : 0,
+        promedio_redondeo_por_producto_centavos: (data?.por_producto || []).length > 0
+          ? Math.round(totalProducto / (data?.por_producto || []).length)
+          : 0,
+        porcentaje_ventas_con_redondeo: ventasTotal > 0 ? Number(((ventasConRedondeo * 100) / ventasTotal).toFixed(2)) : 0
+      },
+      comparativas: {
+        periodo_actual: {
+          fecha_inicio: bounds.fecha_inicio,
+          fecha_fin: bounds.fecha_fin,
+          total_redondeo_centavos: totalRedondeoCentavos
+        },
+        periodo_anterior: {
+          fecha_inicio: previous.fecha_inicio,
+          fecha_fin: previous.fecha_fin,
+          total_redondeo_centavos: prevTotal
+        },
+        variacion_centavos: totalRedondeoCentavos - prevTotal,
+        variacion_porcentaje: calculatePercentVariation(totalRedondeoCentavos, prevTotal)
+      },
+      alertas: {
+        activas: alertsActive,
+        umbral_diario_cajero_centavos: umbralCajero,
+        umbral_turno_centavos: umbralTurno,
+        items: alertas
+      },
+      por_turno: (data?.por_turno || []).map((row) => ({
+        turno_id: row.turno_id ? Number(row.turno_id) : null,
+        cajero_turno: row.cajero_turno || 'Sin turno',
+        ventas: Number(row.ventas || 0),
+        bruto_centavos: Number(row.bruto_centavos || 0),
+        devuelto_centavos: Number(row.devuelto_centavos || 0),
+        anulado_centavos: Number(row.anulado_centavos || 0),
+        total_redondeo_centavos: Number(row.total_redondeo_centavos || 0)
+      })),
+      por_cajero: (data?.por_cajero || []).map((row) => ({
+        usuario_id: row.usuario_id ? Number(row.usuario_id) : null,
+        usuario_nombre: row.usuario_nombre || 'Sin usuario',
+        ventas: Number(row.ventas || 0),
+        bruto_centavos: Number(row.bruto_centavos || 0),
+        devuelto_centavos: Number(row.devuelto_centavos || 0),
+        anulado_centavos: Number(row.anulado_centavos || 0),
+        total_redondeo_centavos: Number(row.total_redondeo_centavos || 0)
+      })),
+      por_producto: (data?.por_producto || []).map((row) => ({
+        producto_id: Number(row.producto_id),
+        codigo: row.codigo,
+        nombre: row.nombre,
+        veces_redondeado: Number(row.veces_redondeado || 0),
+        total_redondeo_centavos: Number(row.total_redondeo_centavos || 0)
+      })),
+      por_dia: (data?.por_dia || []).map((row) => ({
+        fecha: row.fecha,
+        ventas: Number(row.ventas || 0),
+        bruto_centavos: Number(row.bruto_centavos || 0),
+        devuelto_centavos: Number(row.devuelto_centavos || 0),
+        anulado_centavos: Number(row.anulado_centavos || 0),
+        total_redondeo_centavos: Number(row.total_redondeo_centavos || 0)
+      }))
+    }
+  };
+}
+
 module.exports = {
   dashboard,
   resumenOperativo,
@@ -2082,5 +2213,6 @@ module.exports = {
   inventarioActual,
   kardex,
   transformaciones,
-  cajaDiaria
+  cajaDiaria,
+  redondeoComercial
 };

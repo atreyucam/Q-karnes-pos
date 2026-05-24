@@ -1,4 +1,4 @@
-import apiClient, { normalizeResponse } from '../lib/apiClient';
+import apiClient, { normalizeResponse, parseApiError } from '../lib/apiClient';
 
 const REPORT_ENDPOINTS = {
   resumenOperativo: '/api/reportes/resumen-operativo',
@@ -21,6 +21,7 @@ const REPORT_ENDPOINTS = {
   compras: '/api/reportes/compras',
   comprasProductos: '/api/reportes/compras-productos',
   transformacionesResumen: '/api/reportes/transformaciones-resumen',
+  redondeoComercial: '/api/reportes/redondeo-comercial',
   cxc: '/api/reportes/cxc',
   cxp: '/api/reportes/cxp'
 };
@@ -116,4 +117,64 @@ export async function fetchCxpReport() {
 export function buildExportUrl(reportKey, params = {}, format = 'csv') {
   const search = new URLSearchParams({ ...sanitizeQueryParams(params), format }).toString();
   return `${apiClient.defaults.baseURL}/api/reportes/export/${encodeURIComponent(reportKey)}?${search}`;
+}
+
+function parseFilenameFromDisposition(disposition = '') {
+  const match = /filename="?([^"]+)"?/i.exec(String(disposition || ''));
+  return match?.[1] || null;
+}
+
+export async function exportReporteArchivo(reportKey, params = {}, format = 'csv') {
+  const endpoint = `/api/reportes/export/${encodeURIComponent(reportKey)}`;
+  const requestParams = sanitizeQueryParams({ ...params, format });
+  try {
+    const response = await apiClient.get(endpoint, {
+      params: requestParams,
+      responseType: 'blob'
+    });
+
+    const disposition = response.headers?.['content-disposition'] || '';
+    const fallback = `${reportKey}-${new Date().toISOString().slice(0, 10)}.${format === 'pdf' ? 'pdf' : 'csv'}`;
+    const filename = parseFilenameFromDisposition(disposition) || fallback;
+    const blobUrl = URL.createObjectURL(response.data);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.setAttribute('download', filename);
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    const data = error?.response?.data;
+    let apiMessage = '';
+
+    if (data instanceof Blob) {
+      try {
+        const text = await data.text();
+        const parsed = JSON.parse(text);
+        apiMessage = parsed?.error || '';
+      } catch (_) {
+        apiMessage = '';
+      }
+    } else if (data && typeof data === 'object') {
+      apiMessage = data.error || '';
+    }
+
+    // eslint-disable-next-line no-console
+    console.error('Fallo exportReporteArchivo', {
+      endpoint,
+      params: requestParams,
+      status,
+      apiMessage
+    });
+
+    if (status === 401) {
+      throw new Error(apiMessage || 'No autenticado. Inicia sesión de nuevo.');
+    }
+    if (status === 403) {
+      throw new Error(apiMessage || 'No tienes permisos para exportar este reporte.');
+    }
+    throw new Error(apiMessage || parseApiError(error));
+  }
 }

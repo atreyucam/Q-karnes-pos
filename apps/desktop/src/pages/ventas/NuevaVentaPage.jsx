@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { PiTrash, PiX } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
 import { useVentasStore } from '../../stores/ventasStore';
+import apiClient, { normalizeResponse } from '../../lib/apiClient';
 import {
   Alert,
   Button,
@@ -21,13 +22,21 @@ import { useCajaStore } from '../../stores/cajaStore';
 import {
   PAYMENT_CODES,
   buildVentaCreatePayload,
+  centsToMoney,
+  moneyToCents,
+  normalizeRoundingConfig,
   normalizePaymentMethods,
   paymentAffectsCash,
-  paymentRequiresClient
+  paymentRequiresClient,
+  redondearPrecioVenta
 } from './ventaUtils';
 
 function round2(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function round3(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 1000) / 1000;
 }
 
 function defaultQtyInput(unidad) {
@@ -70,6 +79,7 @@ export default function NuevaVentaPage() {
   const errorVenta = useVentasStore((s) => s.error);
   const configuracion = useConfiguracionStore((s) => s.configuracion);
   const metodosPago = useConfiguracionStore((s) => s.metodosPago);
+  const cargarConfiguracionTodo = useConfiguracionStore((s) => s.cargarTodo);
   const turnoActual = useCajaStore((s) => s.turnoActual);
   const fetchTurnoActual = useCajaStore((s) => s.fetchTurnoActual);
   const {
@@ -106,6 +116,7 @@ export default function NuevaVentaPage() {
   const [creditAbonoInput, setCreditAbonoInput] = useState('');
   const [checkoutSubmitPhase, setCheckoutSubmitPhase] = useState('confirm');
   const [checkoutConfirmPromptVisible, setCheckoutConfirmPromptVisible] = useState(false);
+  const [runtimeConfig, setRuntimeConfig] = useState(null);
 
   const productRefs = useRef([]);
   const cashReceivedInputRef = useRef(null);
@@ -119,6 +130,9 @@ export default function NuevaVentaPage() {
       return true;
     });
   }, [configuracion?.permitir_ventas_credito, metodosPago]);
+  const effectiveConfig = runtimeConfig || configuracion;
+  const roundingConfig = useMemo(() => normalizeRoundingConfig(effectiveConfig), [effectiveConfig]);
+  const roundingActive = Boolean(roundingConfig?.activo);
 
   const defaultCashPaymentCode = useMemo(
     () => enabledPaymentMethods.find((method) => method.codigo === PAYMENT_CODES.EFECTIVO)?.codigo
@@ -149,6 +163,34 @@ export default function NuevaVentaPage() {
     [enabledPaymentMethods, selectedPaymentCode]
   );
   const requiresOpenCashShift = paymentImpactsCash && (configuracion?.exigir_caja_abierta_para_cobros ?? true);
+
+  useEffect(() => {
+    const syncRuntimeConfig = async () => {
+      await cargarConfiguracionTodo().catch(() => {});
+      try {
+        const response = await apiClient.get('/api/configuracion');
+        setRuntimeConfig(normalizeResponse(response.data) || null);
+      } catch (_) {
+        setRuntimeConfig(null);
+      }
+    };
+    syncRuntimeConfig();
+  }, [cargarConfiguracionTodo]);
+
+  useEffect(() => {
+    const refreshConfig = () => {
+      cargarConfiguracionTodo().catch(() => {});
+      apiClient.get('/api/configuracion')
+        .then((response) => setRuntimeConfig(normalizeResponse(response.data) || null))
+        .catch(() => setRuntimeConfig(null));
+    };
+    window.addEventListener('focus', refreshConfig);
+    document.addEventListener('visibilitychange', refreshConfig);
+    return () => {
+      window.removeEventListener('focus', refreshConfig);
+      document.removeEventListener('visibilitychange', refreshConfig);
+    };
+  }, [cargarConfiguracionTodo]);
 
   useEffect(() => {
     fetchTurnoActual({ silent: true }).catch(() => {});
@@ -201,35 +243,43 @@ export default function NuevaVentaPage() {
       }
 
       const cantidad = !cantidadError
-        ? (unidad === 'UND' ? Math.trunc(qtyValue) : round2(qtyValue))
+        ? (unidad === 'UND' ? Math.trunc(qtyValue) : round3(qtyValue))
         : 0;
-      const precio = round2(item.precio_venta);
+      const precio = round2(redondearPrecioVenta(item.precio_venta, roundingConfig));
+      const subtotalCentavos = moneyToCents(cantidad * precio);
 
       return {
         ...item,
         cantidad,
         precio,
-        subtotal: round2(cantidad * precio),
+        subtotal_centavos: subtotalCentavos,
+        subtotal: centsToMoney(subtotalCentavos),
         cantidadError,
         invalido: Boolean(cantidadError)
       };
     }),
-    [carrito]
+    [carrito, roundingConfig]
   );
 
   const hasInvalidItems = carritoConEstado.some((item) => item.invalido);
-  const subtotal = useMemo(
-    () => round2(carritoConEstado.reduce((acc, item) => acc + item.subtotal, 0)),
+  const subtotalCentavos = useMemo(
+    () => carritoConEstado.reduce((acc, item) => acc + Number(item.subtotal_centavos || 0), 0),
     [carritoConEstado]
   );
+  const subtotal = useMemo(() => centsToMoney(subtotalCentavos), [subtotalCentavos]);
   const descuentoValue = useMemo(() => {
     const value = parseDecimal(descuento);
     if (!Number.isFinite(value) || value < 0) return 0;
     return round2(value);
   }, [descuento]);
+  const descuentoCentavos = useMemo(() => moneyToCents(descuentoValue), [descuentoValue]);
+  const totalCentavos = useMemo(
+    () => Math.max(0, subtotalCentavos - descuentoCentavos),
+    [descuentoCentavos, subtotalCentavos]
+  );
   const total = useMemo(
-    () => Math.max(0, round2(subtotal - descuentoValue)),
-    [descuentoValue, subtotal]
+    () => centsToMoney(totalCentavos),
+    [totalCentavos]
   );
   const creditAbonoValue = useMemo(() => {
     const value = parseDecimal(creditAbonoInput);
@@ -237,8 +287,8 @@ export default function NuevaVentaPage() {
     return round2(value);
   }, [creditAbonoInput]);
   const creditSaldoPendiente = useMemo(
-    () => Math.max(0, round2(total - creditAbonoValue)),
-    [creditAbonoValue, total]
+    () => centsToMoney(Math.max(0, totalCentavos - moneyToCents(creditAbonoValue))),
+    [creditAbonoValue, totalCentavos]
   );
   const cashReceivedValue = useMemo(() => {
     const value = parseDecimal(cashReceivedInput);
@@ -246,8 +296,8 @@ export default function NuevaVentaPage() {
     return round2(value);
   }, [cashReceivedInput]);
   const cashChangeValue = useMemo(
-    () => Math.max(0, round2(cashReceivedValue - total)),
-    [cashReceivedValue, total]
+    () => centsToMoney(Math.max(0, moneyToCents(cashReceivedValue) - totalCentavos)),
+    [cashReceivedValue, totalCentavos]
   );
   const checkoutMethodIsEfectivo = checkoutMethodCode === PAYMENT_CODES.EFECTIVO;
   const checkoutMethodIsTransfer = checkoutMethodCode === PAYMENT_CODES.TRANSFERENCIA;
@@ -342,7 +392,9 @@ export default function NuevaVentaPage() {
 
       if (existing) {
         const existingQty = parseQtyByUnidad(existing.cantidadInput, unidad);
-        const newQty = round2((Number.isFinite(existingQty) ? existingQty : 0) + qtyToAdd);
+        const newQty = unidad === 'UND'
+          ? round2((Number.isFinite(existingQty) ? existingQty : 0) + qtyToAdd)
+          : round3((Number.isFinite(existingQty) ? existingQty : 0) + qtyToAdd);
 
         if (newQty > stockActual) {
           setStockIssue({
@@ -535,6 +587,16 @@ export default function NuevaVentaPage() {
     setCheckoutError('');
     setCheckoutSubmitPhase('confirm');
 
+    const freshRuntime = await cargarConfiguracionTodo().catch(() => null);
+    const effectiveConfig = freshRuntime?.config || configuracion;
+    const effectiveRounding = normalizeRoundingConfig(effectiveConfig);
+    const recalculatedSubtotalCentavos = carritoConEstado.reduce((acc, item) => {
+      const precioUnitFinal = round2(redondearPrecioVenta(item.precio_venta, effectiveRounding));
+      return acc + moneyToCents(Number(item.cantidad || 0) * precioUnitFinal);
+    }, 0);
+    const recalculatedTotalCentavos = Math.max(0, recalculatedSubtotalCentavos - moneyToCents(descuentoValue));
+    const effectiveTotal = centsToMoney(recalculatedTotalCentavos);
+
     const methodCode = checkoutMethodCode;
     setSelectedPaymentCode(methodCode);
     const isCredito = methodCode === PAYMENT_CODES.CREDITO_CLIENTE;
@@ -573,21 +635,21 @@ export default function NuevaVentaPage() {
         setCheckoutError('Ingresa el monto recibido');
         return;
       }
-      if (cashReceivedValue < total) {
+      if (cashReceivedValue < effectiveTotal) {
         setCheckoutError('El monto recibido debe ser mayor o igual al total');
         return;
       }
-      pagos.contado = total;
+      pagos.contado = effectiveTotal;
       cobro.efectivo = {
         monto_recibido: round2(cashReceivedValue),
-        cambio: round2(cashChangeValue)
+        cambio: round2(centsToMoney(Math.max(0, moneyToCents(cashReceivedValue) - recalculatedTotalCentavos)))
       };
     } else if (isTransfer) {
       if (!transferBank.trim()) {
         setCheckoutError('Ingresa el banco o metodo de transferencia');
         return;
       }
-      pagos.transferencia = total;
+      pagos.transferencia = effectiveTotal;
       referencia = transferReference.trim() || undefined;
       observacion = [
         `Banco: ${transferBank.trim()}`,
@@ -604,23 +666,23 @@ export default function NuevaVentaPage() {
           setCheckoutError('Ingresa un monto abonado mayor a 0');
           return;
         }
-        if (creditAbonoValue >= total) {
+        if (creditAbonoValue >= effectiveTotal) {
           setCheckoutError('El abono parcial debe ser menor al total');
           return;
         }
         pagos.contado = creditAbonoValue;
-        pagos.credito = creditSaldoPendiente;
+        pagos.credito = centsToMoney(Math.max(0, recalculatedTotalCentavos - moneyToCents(creditAbonoValue)));
         cobro.credito = {
           tipo_credito: 'ABONO_PARCIAL',
           monto_abonado: round2(creditAbonoValue),
-          saldo_pendiente: round2(creditSaldoPendiente)
+          saldo_pendiente: round2(centsToMoney(Math.max(0, recalculatedTotalCentavos - moneyToCents(creditAbonoValue))))
         };
       } else {
-        pagos.credito = total;
+        pagos.credito = effectiveTotal;
         cobro.credito = {
           tipo_credito: 'PENDIENTE_TOTAL',
           monto_abonado: 0,
-          saldo_pendiente: round2(total)
+          saldo_pendiente: round2(effectiveTotal)
         };
       }
     }
@@ -633,7 +695,7 @@ export default function NuevaVentaPage() {
       })),
       descuentoTotal: descuentoValue,
       paymentCode: methodCode,
-      total,
+      total: effectiveTotal,
       pagosInput: pagos,
       cobro,
       referencia,
@@ -643,7 +705,7 @@ export default function NuevaVentaPage() {
     setSubmitting(true);
     try {
       setCheckoutSubmitPhase('register');
-      const totalVenta = total;
+      const totalVenta = effectiveTotal;
       const result = await crearVenta(payload);
       const ventaId = result?.venta?.id;
       if (ventaId) {
@@ -653,8 +715,8 @@ export default function NuevaVentaPage() {
       resetVentaDraft();
       await fetchTurnoActual({ silent: true }).catch(() => {});
       setSuccessToast({ open: true, total: totalVenta });
-    } catch (_) {
-      setCheckoutError('No se pudo registrar la venta. Intenta nuevamente.');
+    } catch (error) {
+      setCheckoutError(error?.message || 'No se pudo registrar la venta. Intenta nuevamente.');
     } finally {
       setSubmitting(false);
       setCheckoutSubmitPhase('confirm');
@@ -766,7 +828,11 @@ export default function NuevaVentaPage() {
                     : isLow
                       ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_40%,white_60%)]'
                       : 'bg-[var(--color-surface)]';
-                  const priceText = `${formatMoney(producto.precio_venta || producto.precio_referencia || 0)} / ${unidad}`;
+                  const precioBase = round2(producto.precio_venta || producto.precio_referencia || 0);
+                  const precioFinal = round2(redondearPrecioVenta(precioBase, roundingConfig));
+                  const priceText = `${formatMoney(precioBase)} / ${unidad}`;
+                  const roundedText = `${formatMoney(precioFinal)} / ${unidad}`;
+                  const precioFueRedondeado = precioBase !== precioFinal;
                   const stockText = `${formatStock(producto.stock_actual, unidad)} ${unidad} disponibles`;
 
                   return (
@@ -795,9 +861,16 @@ export default function NuevaVentaPage() {
                             {producto.nombre}
                           </p>
                           <div className="shrink-0 flex items-center gap-4">
-                            <p className="text-sm font-bold leading-none text-[var(--color-text)]">
-                              {isOut ? 'AGOTADO' : priceText}
-                            </p>
+                            <div className="text-right">
+                              <p className="text-sm font-bold leading-none text-[var(--color-text)]">
+                                {isOut ? 'AGOTADO' : priceText}
+                              </p>
+                              {!isOut && roundingActive ? (
+                                <p className="mt-0.5 text-xs font-semibold text-[var(--color-brand)]">
+                                  Cobro: {roundedText}
+                                </p>
+                              ) : null}
+                            </div>
                             <Button
                               type="button"
                               variant={isOut ? 'secondary' : 'primary'}
@@ -923,6 +996,9 @@ export default function NuevaVentaPage() {
 
                       {item.cantidadError ? (
                         <p className="mt-1.5 text-xs font-semibold text-[var(--color-danger)]">{item.cantidadError}</p>
+                      ) : null}
+                      {!item.cantidadError && roundingActive && round2(item.precio_venta) !== round2(item.precio) ? (
+                        <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Redondeado desde {formatMoney(item.precio_venta)}</p>
                       ) : null}
                     </article>
                   ))}

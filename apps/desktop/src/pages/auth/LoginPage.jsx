@@ -7,9 +7,11 @@ import useFormErrors from '../../shared/hooks/useFormErrors';
 
 function BrandMark() {
   return (
-    <div className="flex h-[96px] w-[96px] items-center justify-center rounded-2xl border border-border bg-surface-alt text-[24px] font-extrabold text-text">
-      QK
-    </div>
+    <img
+      src="/logoFrigo.png"
+      alt="Logo Frigo"
+      className="h-[160px] w-[160px] object-contain"
+    />
   );
 }
 

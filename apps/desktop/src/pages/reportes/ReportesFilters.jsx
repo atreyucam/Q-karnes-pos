@@ -27,7 +27,8 @@ export default function ReportDateFilters({
   extraFields = null,
   secondaryMinWidth = 180,
   showExport = false,
-  onExport
+  onExport,
+  resetPreset = null
 }) {
   return (
     <FiltersBar
@@ -61,16 +62,20 @@ export default function ReportDateFilters({
             variant="secondary"
             onClick={() => {
               const today = businessTodayString();
-              const range = buildRangeFromQuick('last7', today);
-              setFilters((prev) => ({
-                ...prev,
-                quick: 'last7',
-                fecha_inicio: range.fecha_inicio,
-                fecha_fin: range.fecha_fin
-              }));
+              const range = resetPreset
+                ? {
+                    quick: resetPreset.quick || 'custom',
+                    fecha_inicio: resetPreset.fecha_inicio,
+                    fecha_fin: resetPreset.fecha_fin
+                  }
+                : {
+                    quick: 'last7',
+                    ...buildRangeFromQuick('last7', today)
+                  };
+              setFilters((prev) => ({ ...prev, ...range }));
               onSubmit?.({
                 ...filters,
-                quick: 'last7',
+                quick: range.quick,
                 ...range
               });
             }}

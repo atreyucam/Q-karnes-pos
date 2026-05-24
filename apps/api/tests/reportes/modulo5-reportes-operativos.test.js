@@ -434,6 +434,45 @@ async function runSuite(options = {}) {
     add(12, 'Inventario panel consolida valorización, criticidad y movimientos recientes', false, error.message);
   }
 
+  try {
+    const fixture = await buildSalesFixture();
+    await db('ventas').where({ referencia: 'M5-HOY-EFECTIVO' }).update({ total_redondeo_centavos: 12 });
+    await db('ventas').where({ referencia: 'M5-HOY-CREDITO' }).update({ total_redondeo_centavos: 8 });
+
+    const ventaEfectivo = await db('ventas').where({ referencia: 'M5-HOY-EFECTIVO' }).first();
+    await ventasService.createDevolucion(
+      ventaEfectivo.id,
+      {
+        motivo: 'Ajuste test redondeo',
+        items: [{
+          venta_detalle_id: (await db('venta_detalle').where({ venta_id: ventaEfectivo.id }).first()).id,
+          cantidad: 1
+        }]
+      },
+      fixture.cajero
+    );
+
+    const ventaCredito = await db('ventas').where({ referencia: 'M5-HOY-CREDITO' }).first();
+    await ventasService.anularVenta(
+      ventaCredito.id,
+      { motivo: 'Anulación test redondeo', novedad: 'Prueba reporte neto' },
+      fixture.admin
+    );
+
+    const reporte = await reportesService.redondeoComercial({
+      fecha_inicio: fixture.today,
+      fecha_fin: fixture.today
+    });
+
+    assert(reporte.data.resumen.total_redondeo_bruto_centavos === 20, 'Bruto redondeo inválido');
+    assert(reporte.data.resumen.total_redondeo_centavos <= 20, 'Neto redondeo no aplicó reversas');
+    assert(Array.isArray(reporte.data.por_cajero), 'No devolvió agrupación por cajero');
+    assert(Array.isArray(reporte.data.comparativas ? [reporte.data.comparativas] : []), 'No devolvió comparativas');
+    add(13, 'Reporte redondeo comercial netea devoluciones/anulaciones y expone comparativas', true);
+  } catch (error) {
+    add(13, 'Reporte redondeo comercial netea devoluciones/anulaciones y expone comparativas', false, error.message);
+  }
+
   const report = printSuiteReport('MODULO 5 - REPORTES OPERATIVOS', results);
   const summary = { total: report.total, passed: report.passed, failed: report.failed, results: report.sorted };
   if (destroyDb) await cleanupRuntime({ db });

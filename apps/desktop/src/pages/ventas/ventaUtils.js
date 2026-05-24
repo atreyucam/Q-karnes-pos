@@ -194,6 +194,34 @@ export function centsToMoney(cents) {
   return Number((Number(cents || 0) / 100).toFixed(2));
 }
 
+export function normalizeRoundingConfig(config = {}) {
+  const activeRaw = config.redondeo_precios_venta_activo ?? config.activo;
+  const incrementRaw = config.redondeo_incremento_centavos ?? config.incrementoCentavos ?? 5;
+  const avoid45Raw = config.redondeo_evitar_45 ?? config.evitar45;
+  const incrementoCentavos = Number(incrementRaw || 5);
+  return {
+    activo: Boolean(activeRaw),
+    incrementoCentavos: Number.isInteger(incrementoCentavos) && incrementoCentavos > 0
+      ? incrementoCentavos
+      : 5,
+    evitar45: avoid45Raw === undefined ? true : Boolean(avoid45Raw)
+  };
+}
+
+export function redondearPrecioVentaCentavos(precioCentavos, opciones = {}) {
+  const { activo, incrementoCentavos, evitar45 } = normalizeRoundingConfig(opciones);
+  const centavos = Number(precioCentavos || 0);
+  if (!activo || !Number.isInteger(centavos)) return centavos;
+
+  let redondeado = Math.ceil(centavos / incrementoCentavos) * incrementoCentavos;
+  if (evitar45 && redondeado % 100 === 45) redondeado += 5;
+  return redondeado;
+}
+
+export function redondearPrecioVenta(precio, opciones = {}) {
+  return centsToMoney(redondearPrecioVentaCentavos(moneyToCents(precio), opciones));
+}
+
 export function computePartialAllocation(totalCentavos, alreadyAllocatedCentavos, totalBase, allocatedBase, requestBase) {
   const fullTotal = Number(totalCentavos || 0);
   const already = Number(alreadyAllocatedCentavos || 0);

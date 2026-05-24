@@ -19,6 +19,7 @@ router.get('/inventario-actual', authorizeRoles('ADMIN'), controller.inventarioA
 router.get('/kardex', authorizeRoles('ADMIN'), controller.kardex);
 router.get('/transformaciones', authorizeRoles('ADMIN'), controller.transformaciones);
 router.get('/caja-diaria', authorizeRoles('ADMIN'), controller.cajaDiaria);
+router.get('/redondeo-comercial', authorizeRoles('ADMIN'), controller.redondeoComercial);
 router.get('/ventas', authorizeRoles('ADMIN'), controller.ventas);
 router.get('/ventas-diarias', authorizeRoles('ADMIN'), controller.ventasDiarias);
 router.get('/ventas-producto', authorizeRoles('ADMIN'), controller.ventasProducto);

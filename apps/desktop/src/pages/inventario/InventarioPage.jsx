@@ -776,7 +776,9 @@ export default function InventarioPage() {
               {tab === 'stock' && (
                 <>
                   <TablaCelda as="th" className="w-3 px-0" aria-hidden />
+                  <TablaCelda as="th">Código</TablaCelda>
                   <TablaCelda as="th">Producto</TablaCelda>
+                  <TablaCelda as="th">Categoría</TablaCelda>
                   <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
                   <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
                   <TablaCelda as="th" className="text-right">Valor visible</TablaCelda>
@@ -830,7 +832,7 @@ export default function InventarioPage() {
           <TablaCuerpo>
             {pagedRows.length === 0 && (
               <TablaFila>
-                <TablaCelda colSpan={tab === 'stock' ? 7 : tab === 'movimientos' ? 8 : tab === 'conteos' ? 7 : tab === 'ajustes' ? 6 : 4}>
+                <TablaCelda colSpan={tab === 'stock' ? 9 : tab === 'movimientos' ? 8 : tab === 'conteos' ? 7 : tab === 'ajustes' ? 6 : 4}>
                   <EmptyState title="Sin registros" description="No hay datos para la vista actual." />
                 </TablaCelda>
               </TablaFila>
@@ -851,12 +853,9 @@ export default function InventarioPage() {
                     <TablaCelda className="w-3 px-0">
                       <span className={`block h-14 w-[3px] rounded-r ${statusAccentClass}`} aria-hidden />
                     </TablaCelda>
-                    <TablaCelda className="font-semibold text-[var(--color-text)]">
-                      <div>
-                        <p>{row.nombre}</p>
-                        <p className="text-xs font-normal text-[var(--color-text-muted)]">{row.categoria_nombre || 'Sin categoría'}</p>
-                      </div>
-                    </TablaCelda>
+                    <TablaCelda className="font-semibold text-[var(--color-text)]">{row.codigo || '-'}</TablaCelda>
+                    <TablaCelda className="font-semibold text-[var(--color-text)]">{row.nombre}</TablaCelda>
+                    <TablaCelda>{row.categoria_nombre || 'Sin categoría'}</TablaCelda>
                     <TablaCelda className="text-right">
                       <div className="font-semibold text-[var(--color-text)]">{formatInventoryQty(row.stock_actual, row.unidad_medida || row.unidad, { appendUnit: true })}</div>
                       <p className="text-[11px] text-[var(--color-text-muted)]">Mín: {formatInventoryQty(row.stock_minimo, row.unidad_medida || row.unidad, { appendUnit: true })}</p>

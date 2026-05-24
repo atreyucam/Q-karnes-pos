@@ -16,6 +16,10 @@ async function loginCajero() {
   return (await authService.login({ usuario: 'cajero', password: 'cajero123' })).user;
 }
 
+async function loginAdmin() {
+  return (await authService.login({ usuario: 'admin', password: 'admin123' })).user;
+}
+
 async function openTurno(cajero, observacion = 'Turno ventas caja ticket') {
   const turno = await cajaService.turnoActual();
   if (turno) return turno;
@@ -38,6 +42,7 @@ async function runSuite(options = {}) {
   try {
     await prepareDatabase(db, { seedProfile: 'minimal' });
     const cajero = await loginCajero();
+    const admin = await loginAdmin();
 
     const categoria = await createCategoria(db, { nombre: 'Ventas ticket flow' });
     const cliente = await createCliente(db, { nombre: 'Cliente crédito ticket' });
@@ -75,6 +80,13 @@ async function runSuite(options = {}) {
     }
 
     try {
+      const currentConfig = (await configuracionService.getConfiguracion()).data;
+      await configuracionService.updateConfiguracion({
+        ...currentConfig,
+        redondeo_precios_venta_activo: false,
+        redondeo_incremento_centavos: 5,
+        redondeo_evitar_45: true
+      }, admin);
       await openTurno(cajero, 'Turno contado');
       const venta = await ventasService.createVenta(
         {
@@ -151,14 +163,70 @@ async function runSuite(options = {}) {
     }
 
     try {
+      const currentConfig = (await configuracionService.getConfiguracion()).data;
+      await configuracionService.updateConfiguracion({
+        ...currentConfig,
+        redondeo_precios_venta_activo: true,
+        redondeo_incremento_centavos: 5,
+        redondeo_evitar_45: true
+      }, admin);
+      await db('productos').where({ id: producto.id }).update({ precio_venta: 2.12, precio_referencia: 2.12 });
+      await closeTurnoIfAny(cajero);
+      await openTurno(cajero, 'Turno redondeo activo');
+      const venta = await ventasService.createVenta(
+        {
+          cliente_id: null,
+          items: [{ producto_id: producto.id, cantidad: 1 }],
+          pagos: { codigo: 'EFECTIVO', contado: 2.15, credito: 0 },
+          descuento_total: 0
+        },
+        cajero
+      );
+      const detalle = await db('venta_detalle').where({ venta_id: venta.data.venta.id }).first();
+      const ventaDb = await db('ventas').where({ id: venta.data.venta.id }).first();
+      assert(Number(detalle.precio_unit_centavos) === 215, `Precio unitario redondeado invalido: ${detalle.precio_unit_centavos}`);
+      assert(Number(ventaDb.total_centavos) === 215, `Total redondeado invalido: ${ventaDb.total_centavos}`);
+      add(6, 'Redondeo activo convierte 2.12 en 2.15 para cobro y total de caja', true);
+    } catch (error) {
+      add(6, 'Redondeo activo convierte 2.12 en 2.15 para cobro y total de caja', false, error.message);
+    }
+
+    try {
+      const currentConfig = (await configuracionService.getConfiguracion()).data;
+      await configuracionService.updateConfiguracion({
+        ...currentConfig,
+        redondeo_precios_venta_activo: true,
+        redondeo_incremento_centavos: 5,
+        redondeo_evitar_45: true
+      }, admin);
+      await db('productos').where({ id: producto.id }).update({ precio_venta: 2.45, precio_referencia: 2.45 });
+      await closeTurnoIfAny(cajero);
+      await openTurno(cajero, 'Turno evitar 45');
+      const venta = await ventasService.createVenta(
+        {
+          cliente_id: null,
+          items: [{ producto_id: producto.id, cantidad: 1 }],
+          pagos: { codigo: 'EFECTIVO', contado: 2.5, credito: 0 },
+          descuento_total: 0
+        },
+        cajero
+      );
+      const detalle = await db('venta_detalle').where({ venta_id: venta.data.venta.id }).first();
+      assert(Number(detalle.precio_unit_centavos) === 250, `Precio .45 debió pasar a .50 y obtuvo ${detalle.precio_unit_centavos}`);
+      add(7, 'Regla especial evita .45 y cobra .50', true);
+    } catch (error) {
+      add(7, 'Regla especial evita .45 y cobra .50', false, error.message);
+    }
+
+    try {
       const metodos = await configuracionService.getMetodosPago();
       const codes = new Set((metodos.data || []).filter((row) => row.habilitado).map((row) => row.codigo));
       assert(codes.has('EFECTIVO'), 'Falta EFECTIVO');
       assert(codes.has('TRANSFERENCIA'), 'Falta TRANSFERENCIA');
       assert(codes.has('CREDITO_CLIENTE'), 'Falta CREDITO_CLIENTE');
-      add(5, 'Configuración expone métodos de pago requeridos', true);
+      add(8, 'Configuración expone métodos de pago requeridos', true);
     } catch (error) {
-      add(5, 'Configuración expone métodos de pago requeridos', false, error.message);
+      add(8, 'Configuración expone métodos de pago requeridos', false, error.message);
     }
   } catch (fatalError) {
     add(999, 'Preparación de suite', false, fatalError.message);

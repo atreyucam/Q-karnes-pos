@@ -47,7 +47,7 @@ function buildSystemConfigRow(overrides = {}) {
     id: 1
   };
 
-  return {
+  const normalized = {
     ...row,
     negocio_nombre: String(row.negocio_nombre || '').trim(),
     negocio_ruc: String(row.negocio_ruc || '').trim(),
@@ -65,6 +65,27 @@ function buildSystemConfigRow(overrides = {}) {
     ticket_prefijo: String(row.ticket_prefijo || 'TK').trim().toUpperCase(),
     ticket_mensaje: String(row.ticket_mensaje || '').trim()
   };
+
+  if (Object.prototype.hasOwnProperty.call(row, 'redondeo_precios_venta_activo')) {
+    normalized.redondeo_precios_venta_activo = toBooleanFlag(row.redondeo_precios_venta_activo, false);
+  }
+  if (Object.prototype.hasOwnProperty.call(row, 'redondeo_incremento_centavos')) {
+    normalized.redondeo_incremento_centavos = Number(row.redondeo_incremento_centavos || 5);
+  }
+  if (Object.prototype.hasOwnProperty.call(row, 'redondeo_evitar_45')) {
+    normalized.redondeo_evitar_45 = toBooleanFlag(row.redondeo_evitar_45, true);
+  }
+  if (Object.prototype.hasOwnProperty.call(row, 'alertas_redondeo_activas')) {
+    normalized.alertas_redondeo_activas = toBooleanFlag(row.alertas_redondeo_activas, true);
+  }
+  if (Object.prototype.hasOwnProperty.call(row, 'umbral_redondeo_diario_cajero_centavos')) {
+    normalized.umbral_redondeo_diario_cajero_centavos = Number(row.umbral_redondeo_diario_cajero_centavos || 1000);
+  }
+  if (Object.prototype.hasOwnProperty.call(row, 'umbral_redondeo_turno_centavos')) {
+    normalized.umbral_redondeo_turno_centavos = Number(row.umbral_redondeo_turno_centavos || 2000);
+  }
+
+  return normalized;
 }
 
 function buildPaymentMethodsRows() {

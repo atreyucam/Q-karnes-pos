@@ -195,12 +195,16 @@ async function list(query) {
   };
 }
 
+async function getNextCode() {
+  return { codigo: await generateNextProductCode() };
+}
+
 async function create(body) {
   assertNoInventoryEditableFields(body);
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'Datos inválidos', zodError(parsed.error).details);
 
-  const codigo = parsed.data.codigo?.trim() || await generateNextProductCode();
+  const codigo = await generateNextProductCode();
   const exists = await repository.getByCodigo(codigo);
   if (exists) throw new AppError(400, 'El código del producto ya existe');
 
@@ -269,18 +273,9 @@ async function update(id, body, actorUser) {
     const nextCodigo = String(parsed.data.codigo || '').trim();
     const currentCodigo = String(product.codigo || '').trim();
     if (nextCodigo && nextCodigo.toLowerCase() !== currentCodigo.toLowerCase()) {
-      const hasMovements = await repository.hasInventoryMovements(id);
-      if (hasMovements) {
-        throw new AppError(400, 'No se puede cambiar el código: el producto ya tiene movimientos de inventario');
-      }
-      const exists = await repository.getByCodigo(nextCodigo);
-      if (exists && Number(exists.id) !== Number(id)) {
-        throw new AppError(400, 'El código del producto ya existe');
-      }
-      payload.codigo = nextCodigo;
-    } else {
-      delete payload.codigo;
+      throw new AppError(400, 'El código es autogenerado y no se puede modificar');
     }
+    delete payload.codigo;
   }
 
   if (parsed.data.unidad_medida) {
@@ -421,6 +416,7 @@ async function remove(id, body, actorUser) {
 
 module.exports = {
   list,
+  getNextCode,
   create,
   update,
   getById,

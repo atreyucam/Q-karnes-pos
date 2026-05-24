@@ -64,11 +64,11 @@ export function printSaleTicketDocument(ticket, options = {}) {
             font-family: "Courier New", Courier, monospace;
             font-size: 12px;
             line-height: 1.45;
-            color: black;
+            color: #000 !important;
             background: white;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
-            font-weight: 800;
+            font-weight: 900;
           }
           .ticket {
             width: 72mm;
@@ -76,7 +76,7 @@ export function printSaleTicketDocument(ticket, options = {}) {
             padding: 0;
           }
           .muted { color: black; }
-          .divider { border-top: 1.5px dashed black; margin: 8px 0; }
+          .divider { border-top: 2px solid #000; margin: 8px 0; }
           table {
             width: 100%;
             border-collapse: collapse;

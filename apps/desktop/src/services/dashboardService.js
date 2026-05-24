@@ -6,6 +6,8 @@ export function emptyDashboardData() {
     business_date: null,
     kpis: {
       ventas_hoy: 0,
+      ventas_efectivo_hoy: 0,
+      ventas_transferencia_hoy: 0,
       transacciones_hoy: 0,
       stock_bajo: 0,
       deudas_clientes: 0,

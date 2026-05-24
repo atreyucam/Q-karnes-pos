@@ -183,6 +183,9 @@ async function runSuite(options = {}) {
     const config = (await configuracionService.getConfiguracion()).data;
     const methods = (await configuracionService.getMetodosPago()).data;
     assert(config.negocio_nombre === 'QKarnes POS', 'La configuracion por defecto no fue creada');
+    assert(config.redondeo_precios_venta_activo === false, 'Redondeo de venta debe iniciar desactivado');
+    assert(Number(config.redondeo_incremento_centavos) === 5, 'Incremento de redondeo por defecto inválido');
+    assert(config.redondeo_evitar_45 === true, 'Regla evitar .45 debe iniciar activa');
     assert(Array.isArray(methods) && methods.length >= 3, 'No se cargaron metodos de pago por defecto');
     assert(methods.some((method) => method.codigo === 'EFECTIVO' && method.habilitado), 'EFECTIVO no quedo habilitado');
     assert(methods.some((method) => method.codigo === 'CREDITO_CLIENTE' && method.habilitado), 'CREDITO_CLIENTE no quedo habilitado');
@@ -197,6 +200,9 @@ async function runSuite(options = {}) {
       negocio_nombre: 'Carniceria Centro',
       moneda: 'USD',
       impuesto_porcentaje: 12,
+      redondeo_precios_venta_activo: true,
+      redondeo_incremento_centavos: 5,
+      redondeo_evitar_45: true,
       dias_credito_cliente_default: 12,
       dias_credito_proveedor_default: 18,
       ticket_prefijo: 'CC',
@@ -209,6 +215,7 @@ async function runSuite(options = {}) {
     const proveedor = await proveedoresService.create({ nombre: 'Proveedor config', tiene_credito: true });
     assert(updatedConfig.negocio_nombre === 'Carniceria Centro', 'ADMIN no pudo actualizar configuracion');
     assert(updatedConfig.impuesto_porcentaje === 12, 'No se guardo impuesto configurado');
+    assert(updatedConfig.redondeo_precios_venta_activo === true, 'No se activó redondeo de venta');
     assert(updatedMethods.some((method) => method.codigo === 'TRANSFERENCIA' && !method.habilitado), 'No se guardo el cambio de metodo de pago');
     assert(Number(cliente.dias_credito) === 12, 'El cliente no tomo el plazo por defecto configurado');
     assert(Number(proveedor.dias_pago) === 18, 'El proveedor no tomo el plazo por defecto configurado');

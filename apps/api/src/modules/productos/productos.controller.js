@@ -9,6 +9,14 @@ async function list(req, res, next) {
   }
 }
 
+async function getNextCode(req, res, next) {
+  try {
+    const data = await service.getNextCode();
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
 async function create(req, res, next) {
   try {
     const data = await service.create(req.body);
@@ -47,6 +55,7 @@ async function remove(req, res, next) {
 
 module.exports = {
   list,
+  getNextCode,
   create,
   update,
   getById,

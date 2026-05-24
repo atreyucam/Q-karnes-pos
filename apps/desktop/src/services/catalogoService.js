@@ -20,6 +20,11 @@ export async function deleteCategoria(id) {
   return normalizeResponse(response.data);
 }
 
+export async function fetchNextProductCode() {
+  const response = await apiClient.get('/api/productos/next-code');
+  return normalizeResponse(response.data);
+}
+
 export async function fetchProductos(params = {}) {
   const response = await apiClient.get('/api/productos', { params });
   return normalizeResponse(response.data) || [];

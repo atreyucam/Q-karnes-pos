@@ -23,6 +23,7 @@
     "test:ui-standardization": "node scripts/ui-standardization-tests.cjs",
     "test:sidebar:final": "node scripts/sidebar-final-tests.cjs",
     "test:reportes": "node scripts/reportes-graficos-tests.cjs",
+    "test:reportes-redondeo": "node scripts/reportes-redondeo-frontend-tests.cjs",
     "test:auditoria": "node scripts/auditoria-frontend-tests.cjs",
     "test:ticket": "node scripts/ticket-print-tests.cjs",
     "test:dashboard:v2": "node scripts/dashboard-v2-frontend-tests.cjs",

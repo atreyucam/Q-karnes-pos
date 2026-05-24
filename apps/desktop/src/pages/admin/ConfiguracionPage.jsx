@@ -31,7 +31,10 @@ function buildConfigPayload(form) {
     ...form,
     impuesto_porcentaje: normalizeNumber(form.impuesto_porcentaje),
     dias_credito_cliente_default: normalizeNumber(form.dias_credito_cliente_default),
-    dias_credito_proveedor_default: normalizeNumber(form.dias_credito_proveedor_default)
+    dias_credito_proveedor_default: normalizeNumber(form.dias_credito_proveedor_default),
+    redondeo_incremento_centavos: normalizeNumber(form.redondeo_incremento_centavos || 5),
+    umbral_redondeo_diario_cajero_centavos: normalizeNumber(form.umbral_redondeo_diario_cajero_centavos || 1000),
+    umbral_redondeo_turno_centavos: normalizeNumber(form.umbral_redondeo_turno_centavos || 2000)
   };
 }
 
@@ -310,6 +313,95 @@ export default function ConfiguracionPage() {
 
             <Field label="Mensaje ticket">
               <Textarea className="min-h-24" value={form.ticket_mensaje || ''} onChange={(event) => updateField('ticket_mensaje', event.target.value)} />
+            </Field>
+          </div>
+        </Card>
+
+        <Card className="space-y-4 p-5">
+          <div>
+            <h3 className="font-semibold text-[var(--color-text)]">Redondeo de precios de venta</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Ajusta precios de venta al siguiente múltiplo comercial permitido.</p>
+          </div>
+
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Activar redondeo de precios de venta</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">Aplica al cobrar en Nueva Venta, sin modificar el precio base del producto.</p>
+                </div>
+                <Switch
+                  checked={Boolean(form.redondeo_precios_venta_activo)}
+                  onChange={(checked) => updateField('redondeo_precios_venta_activo', checked)}
+                  aria-label="Activar redondeo de precios de venta"
+                />
+              </div>
+            </div>
+
+            <Field label="Incremento (centavos)">
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={form.redondeo_incremento_centavos ?? 5}
+                onChange={(event) => updateField('redondeo_incremento_centavos', event.target.value)}
+              />
+            </Field>
+
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Evitar precios terminados en .45</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">Si un redondeo cae en .45, se ajusta automáticamente a .50.</p>
+                </div>
+                <Switch
+                  checked={Boolean(form.redondeo_evitar_45)}
+                  onChange={(checked) => updateField('redondeo_evitar_45', checked)}
+                  aria-label="Evitar precios terminados en .45"
+                />
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="space-y-4 p-5">
+          <div>
+            <h3 className="font-semibold text-[var(--color-text)]">Alertas operativas de redondeo</h3>
+            <p className="text-sm text-[var(--color-text-muted)]">Alertas informativas para monitorear acumulados inusuales por cajero y turno.</p>
+          </div>
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Activar alertas de redondeo</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">No bloquea operaciones, solo alerta en reportes.</p>
+                </div>
+                <Switch
+                  checked={Boolean(form.alertas_redondeo_activas)}
+                  onChange={(checked) => updateField('alertas_redondeo_activas', checked)}
+                  aria-label="Activar alertas de redondeo"
+                />
+              </div>
+            </div>
+
+            <Field label="Umbral diario por cajero (centavos)">
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={form.umbral_redondeo_diario_cajero_centavos ?? 1000}
+                onChange={(event) => updateField('umbral_redondeo_diario_cajero_centavos', event.target.value)}
+              />
+            </Field>
+
+            <Field label="Umbral por turno (centavos)">
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={form.umbral_redondeo_turno_centavos ?? 2000}
+                onChange={(event) => updateField('umbral_redondeo_turno_centavos', event.target.value)}
+              />
             </Field>
           </div>
         </Card>

@@ -5,6 +5,43 @@ const {
 } = require('./configuracion.defaults');
 
 async function ensureSystemConfig(trx = db) {
+  const hasRoundActive = await trx.schema.hasColumn('configuracion_sistema', 'redondeo_precios_venta_activo');
+  if (!hasRoundActive) {
+    await trx.schema.alterTable('configuracion_sistema', (table) => {
+      table.boolean('redondeo_precios_venta_activo').notNullable().defaultTo(false);
+    });
+  }
+  const hasRoundStep = await trx.schema.hasColumn('configuracion_sistema', 'redondeo_incremento_centavos');
+  if (!hasRoundStep) {
+    await trx.schema.alterTable('configuracion_sistema', (table) => {
+      table.integer('redondeo_incremento_centavos').notNullable().defaultTo(5);
+    });
+  }
+  const hasAvoid45 = await trx.schema.hasColumn('configuracion_sistema', 'redondeo_evitar_45');
+  if (!hasAvoid45) {
+    await trx.schema.alterTable('configuracion_sistema', (table) => {
+      table.boolean('redondeo_evitar_45').notNullable().defaultTo(true);
+    });
+  }
+  const hasAlertas = await trx.schema.hasColumn('configuracion_sistema', 'alertas_redondeo_activas');
+  if (!hasAlertas) {
+    await trx.schema.alterTable('configuracion_sistema', (table) => {
+      table.boolean('alertas_redondeo_activas').notNullable().defaultTo(true);
+    });
+  }
+  const hasUmbralCajero = await trx.schema.hasColumn('configuracion_sistema', 'umbral_redondeo_diario_cajero_centavos');
+  if (!hasUmbralCajero) {
+    await trx.schema.alterTable('configuracion_sistema', (table) => {
+      table.integer('umbral_redondeo_diario_cajero_centavos').notNullable().defaultTo(1000);
+    });
+  }
+  const hasUmbralTurno = await trx.schema.hasColumn('configuracion_sistema', 'umbral_redondeo_turno_centavos');
+  if (!hasUmbralTurno) {
+    await trx.schema.alterTable('configuracion_sistema', (table) => {
+      table.integer('umbral_redondeo_turno_centavos').notNullable().defaultTo(2000);
+    });
+  }
+
   const existing = await trx('configuracion_sistema').first();
   if (existing) return existing;
 

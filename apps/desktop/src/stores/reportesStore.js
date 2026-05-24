@@ -23,6 +23,7 @@ export const REPORT_VIEW_KEYS = [
   'comprasProductos',
   'transformaciones',
   'transformacionesResumen',
+  'redondeoComercial',
   'cxc',
   'cxp'
 ];

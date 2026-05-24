@@ -28,7 +28,7 @@ import {
 } from '../../shared/ui';
 import { parseApiError } from '../../lib/apiClient';
 import { useProductosStore } from '../../stores/productosStore';
-import { createCategoria, deleteCategoria, fetchCategorias, fetchProductos, updateCategoria } from '../../services/catalogoService';
+import { createCategoria, deleteCategoria, fetchCategorias, fetchNextProductCode, fetchProductos, updateCategoria } from '../../services/catalogoService';
 import { formatCurrency, formatWeight } from '../../lib/formatNumber';
 import { sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
@@ -169,6 +169,7 @@ export default function ProductosPage() {
   const [productoModal, setProductoModal] = useState({ open: false, mode: 'create' });
   const [productoForm, setProductoForm] = useState(emptyProductoForm);
   const [localError, setLocalError] = useState('');
+  const [nextProductCode, setNextProductCode] = useState('QK-001');
   const [feedback, setFeedback] = useState(null);
   const [toastVisible, setToastVisible] = useState(false);
   const [categoriaManagerOpen, setCategoriaManagerOpen] = useState(false);
@@ -319,10 +320,16 @@ export default function ProductosPage() {
     });
   };
 
-  const openCreateModal = () => {
+  const openCreateModal = async () => {
     setLocalError('');
     setProductoModal({ open: true, mode: 'create' });
     setProductoForm(emptyProductoForm);
+    try {
+      const next = await fetchNextProductCode();
+      setNextProductCode(String(next?.codigo || 'QK-001').toUpperCase());
+    } catch (_) {
+      setNextProductCode('QK-001');
+    }
   };
 
   const openEditModal = (producto) => {
@@ -417,7 +424,6 @@ export default function ProductosPage() {
     }
 
     const payload = {
-      codigo: String(productoForm.codigo || '').trim().toUpperCase() || undefined,
       nombre: productoForm.nombre.trim(),
       categoria_id: productoForm.categoria_id ? Number(productoForm.categoria_id) : null,
       unidad_medida: productoForm.unidad_medida,
@@ -663,6 +669,7 @@ export default function ProductosPage() {
                   <TablaCelda as="th" className="w-3 px-0" aria-hidden />
                   <TablaCelda as="th">Código</TablaCelda>
                   <TablaCelda as="th">Producto</TablaCelda>
+                  <TablaCelda as="th">Categoría</TablaCelda>
                   <TablaCelda as="th" className="text-right">Stock visible</TablaCelda>
                   <TablaCelda as="th" className="text-right">Precio venta</TablaCelda>
                   <TablaCelda as="th" className="text-right">Costo visible</TablaCelda>
@@ -699,9 +706,10 @@ export default function ProductosPage() {
                       <TablaCelda>
                         <div className="space-y-1">
                           <p className="font-semibold text-[var(--color-text)]">{producto.nombre}</p>
-                          <p className="text-xs text-[var(--color-text-muted)]">{`${producto.categoria_nombre || 'Sin categoría'} · ${roleText}`}</p>
+                          <p className="text-xs text-[var(--color-text-muted)]">{roleText}</p>
                         </div>
                       </TablaCelda>
+                      <TablaCelda>{producto.categoria_nombre || 'Sin categoría'}</TablaCelda>
                       <TablaCelda>
                         <div className="text-right font-semibold text-[var(--color-text)]">{formatWeight(stockVisible, unidadMedida)}</div>
                         <p className="text-right text-[11px] text-[var(--color-text-muted)]">Mín: {formatWeight(stockMinimo, unidadMedida)}</p>
@@ -767,6 +775,9 @@ export default function ProductosPage() {
         {(() => {
           const productoActual = productos.find((row) => row.id === productoForm.id) || null;
           const isEditMode = productoModal.mode === 'edit';
+          const codigoMostrado = isEditMode
+            ? String(productoForm.codigo || '').toUpperCase()
+            : String(nextProductCode || 'QK-001').toUpperCase();
           const tieneMovimientos = Boolean(productoActual?.tiene_movimientos_inventario);
           const precioVentaForm = Number(String(productoForm.precio_venta || '0').replace(',', '.')) || 0;
           const costoVisibleActual = Number((productoActual?.costo_visible ?? productoActual?.costo_promedio) || 0);
@@ -832,14 +843,14 @@ export default function ProductosPage() {
                 <label className={labelClassName()}>Código</label>
                 <Input
                   className="mt-2 uppercase"
-                  value={productoForm.codigo}
-                  onChange={(e) => setProductoForm((prev) => ({ ...prev, codigo: e.target.value.toUpperCase() }))}
-                  disabled={isEditMode && tieneMovimientos}
+                  value={codigoMostrado}
+                  readOnly
+                  disabled
                   placeholder="QK-001"
                 />
-                {isEditMode && tieneMovimientos ? (
-                  <p className="mt-1 text-xs text-[var(--color-text-muted)]">Bloqueado por movimientos de inventario.</p>
-                ) : null}
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  {isEditMode ? 'Código actual del producto.' : 'Código asignado al confirmar el nuevo producto.'}
+                </p>
               </div>
 
               <div>

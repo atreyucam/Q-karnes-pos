@@ -25,6 +25,7 @@ const {
   buildProductInventoryUpdatePayload,
   computeOutgoingInventory
 } = require('../../helpers/inventoryState');
+const { redondearPrecioVentaCentavos } = require('../../helpers/salePriceRounding');
 const { CASH_MOVEMENT_TYPES, buildCashMovementPayload } = require('../caja/cashMovement');
 
 const SALE_STATUS = {
@@ -338,6 +339,18 @@ function normalizeVentaDetalleRow(row) {
     ...row,
     cantidad: Number(row.cantidad || 0),
     cantidad_base: Number(row.cantidad_base || 0),
+    precio_unitario_base_centavos: Number(
+      row.precio_unitario_base_centavos
+      ?? row.precio_unit_centavos
+      ?? moneyToCents(row.precio_unit ?? 0, 'precio_unit')
+    ),
+    precio_unitario_final_centavos: Number(
+      row.precio_unitario_final_centavos
+      ?? row.precio_unit_centavos
+      ?? moneyToCents(row.precio_unit ?? 0, 'precio_unit')
+    ),
+    redondeo_aplicado: Boolean(Number(row.redondeo_aplicado || 0)),
+    redondeo_diferencia_centavos: Number(row.redondeo_diferencia_centavos || 0),
     precio_unit_centavos: Number(row.precio_unit_centavos || moneyToCents(row.precio_unit ?? 0, 'precio_unit')),
     total_linea_centavos: totalLineaCentavos,
     descuento_centavos: descuentoCentavos,
@@ -365,11 +378,13 @@ function normalizeVentaPack(pack) {
       subtotal_centavos: Number(pack.venta.subtotal_centavos || moneyToCents(pack.venta.subtotal ?? 0, 'subtotal')),
       descuento_total_centavos: Number(pack.venta.descuento_total_centavos || moneyToCents(pack.venta.descuento_total ?? 0, 'descuento_total')),
       total_centavos: Number(pack.venta.total_centavos || moneyToCents(pack.venta.total ?? 0, 'total')),
+      total_redondeo_centavos: Number(pack.venta.total_redondeo_centavos || 0),
       total_costo_centavos: Number(pack.venta.total_costo_centavos || 0),
       total_margen_centavos: Number(pack.venta.total_margen_centavos || 0),
       subtotal: centsToMoney(Number(pack.venta.subtotal_centavos || moneyToCents(pack.venta.subtotal ?? 0, 'subtotal'))),
       descuento_total: centsToMoney(Number(pack.venta.descuento_total_centavos || moneyToCents(pack.venta.descuento_total ?? 0, 'descuento_total'))),
       total: centsToMoney(Number(pack.venta.total_centavos || moneyToCents(pack.venta.total ?? 0, 'total'))),
+      total_redondeo: centsToMoney(Number(pack.venta.total_redondeo_centavos || 0)),
       total_costo: centsToMoney(Number(pack.venta.total_costo_centavos || 0)),
       total_margen: centsToMoney(Number(pack.venta.total_margen_centavos || 0))
     },
@@ -616,9 +631,20 @@ function normalizeCreatePaymentRows(rawPagos, totalCentavos) {
 
   validatePaymentRowsAgainstMethod(rows, metodo);
 
+  const targetTotalCentavos = Number(totalCentavos || 0);
   const paymentSummary = summarizePayments(rows);
-  if (paymentSummary.total_centavos !== Number(totalCentavos || 0)) {
-    throw new AppError(400, 'Pagos no cuadran con el total');
+
+  if (paymentSummary.total_centavos !== targetTotalCentavos) {
+    throw new AppError(400, 'Pagos no cuadran con el total', {
+      esperado_centavos: targetTotalCentavos,
+      recibido_centavos: Number(paymentSummary.total_centavos || 0),
+      diferencia_centavos: targetTotalCentavos - Number(paymentSummary.total_centavos || 0),
+      pagos: {
+        contado_centavos: Number(contadoCentavos || 0),
+        transferencia_centavos: Number(transferenciaCentavos || 0),
+        credito_centavos: Number(creditoCentavos || 0)
+      }
+    });
   }
   if (!rows.length && totalCentavos > 0) {
     throw new AppError(400, 'Debe registrar al menos un método de pago');
@@ -638,7 +664,7 @@ function assertProductCanBeSold(product) {
   }
 }
 
-async function buildSaleComputation(items, trx) {
+async function buildSaleComputation(items, config, trx) {
   const productIds = [...new Set(items.map((item) => item.producto_id))];
   const products = await repository.getProductsByIds(productIds, trx);
   const productMap = new Map(products.map((row) => [row.id, row]));
@@ -665,10 +691,11 @@ async function buildSaleComputation(items, trx) {
       details: { product_id: product.id, codigo: product.codigo || null }
     });
 
-    const precioUnitCentavos = moneyToCents(
+    const precioBaseCentavos = moneyToCents(
       product.precio_venta ?? product.precio_referencia ?? 0,
       `items[${index}].precio_unit`
     );
+    const precioUnitCentavos = redondearPrecioVentaCentavos(precioBaseCentavos, config);
     if (precioUnitCentavos <= 0) {
       throw new AppError(400, `Precio unitario inválido para ${product.codigo}`);
     }
@@ -677,6 +704,12 @@ async function buildSaleComputation(items, trx) {
       Number(qty || 0) * centsToMoney(precioUnitCentavos),
       `items[${index}].total_linea`
     );
+    const totalLineaBaseCentavos = moneyToCents(
+      Number(qty || 0) * centsToMoney(precioBaseCentavos),
+      `items[${index}].total_linea_base`
+    );
+    const redondeoDiferenciaCentavos = Math.max(0, precioUnitCentavos - precioBaseCentavos);
+    const redondeoLineaCentavos = Math.max(0, totalLineaCentavos - totalLineaBaseCentavos);
 
     return {
       index,
@@ -685,6 +718,12 @@ async function buildSaleComputation(items, trx) {
       unidad_operativa: product.unidad_operativa,
       cantidad: qty,
       cantidad_base: qtyBase,
+      precio_base_centavos: precioBaseCentavos,
+      precio_unitario_base_centavos: precioBaseCentavos,
+      precio_unitario_final_centavos: precioUnitCentavos,
+      redondeo_aplicado: redondeoDiferenciaCentavos > 0,
+      redondeo_diferencia_centavos: redondeoDiferenciaCentavos,
+      redondeo_linea_centavos: redondeoLineaCentavos,
       precio_unit_centavos: precioUnitCentavos,
       precio_unit: centsToMoney(precioUnitCentavos),
       total_linea_centavos: totalLineaCentavos,
@@ -811,6 +850,7 @@ function applyDiscountAndMargin(lines, descuentoTotalCentavos) {
   return {
     subtotalCentavos,
     totalCentavos: subtotalCentavos - descuentoTotalCentavos,
+    totalRedondeoCentavos: lines.reduce((acc, line) => acc + Number(line.redondeo_linea_centavos || 0), 0),
     totalCostoCentavos: lines.reduce((acc, line) => acc + line.subtotal_costo_centavos, 0),
     totalMargenCentavos: lines.reduce((acc, line) => acc + line.margen_centavos, 0)
   };
@@ -837,6 +877,7 @@ function buildSaleInsertPayload({
   subtotalCentavos,
   descuentoTotalCentavos,
   totalCentavos,
+  totalRedondeoCentavos,
   totalCostoCentavos,
   totalMargenCentavos,
   metodoPagoCodigo,
@@ -856,6 +897,7 @@ function buildSaleInsertPayload({
     descuento_total_centavos: descuentoTotalCentavos,
     total: centsToMoney(totalCentavos),
     total_centavos: totalCentavos,
+    total_redondeo_centavos: Number(totalRedondeoCentavos || 0),
     total_costo_centavos: totalCostoCentavos,
     total_margen_centavos: totalMargenCentavos,
     metodo_pago_codigo: metodoPagoCodigo,
@@ -870,6 +912,10 @@ function buildSaleDetailInsertRows(ventaId, lines) {
     producto_id: line.producto_id,
     cantidad: line.cantidad,
     cantidad_base: line.cantidad_base,
+    precio_unitario_base_centavos: line.precio_unitario_base_centavos,
+    precio_unitario_final_centavos: line.precio_unitario_final_centavos,
+    redondeo_aplicado: line.redondeo_aplicado ? 1 : 0,
+    redondeo_diferencia_centavos: line.redondeo_diferencia_centavos,
     precio_unit: centsToMoney(line.precio_unit_centavos),
     precio_unit_centavos: line.precio_unit_centavos,
     total_linea: centsToMoney(line.total_linea_centavos),
@@ -906,7 +952,7 @@ async function createVenta(body, authUser) {
 
   return db.transaction(async (trx) => {
     const config = await configuracionService.getRuntimeConfig(trx);
-    const saleBuild = await buildSaleComputation(payload.items, trx);
+    const saleBuild = await buildSaleComputation(payload.items, config, trx);
     const totals = applyDiscountAndMargin(saleBuild.lines, descuentoTotalCentavos);
     const paymentData = normalizeCreatePaymentRows(payload.pagos || {}, totals.totalCentavos);
     const transferCentavos = Number(paymentData.summary.transferencia_centavos || 0);
@@ -937,7 +983,7 @@ async function createVenta(body, authUser) {
     await ensurePaymentMethodsEnabled(paymentData.rows, trx);
 
     const turno = await resolveTurnoForCashFlow({
-      requiresOpenShift: paymentData.rows.length > 0,
+      requiresOpenShift: paymentData.rows.some((row) => Boolean(row.afecta_caja)),
       config,
       trx
     });
@@ -950,6 +996,7 @@ async function createVenta(body, authUser) {
         subtotalCentavos: totals.subtotalCentavos,
         descuentoTotalCentavos,
         totalCentavos: totals.totalCentavos,
+        totalRedondeoCentavos: totals.totalRedondeoCentavos,
         totalCostoCentavos: totals.totalCostoCentavos,
         totalMargenCentavos: totals.totalMargenCentavos,
         metodoPagoCodigo: paymentData.summary.codigo,
@@ -1044,6 +1091,7 @@ async function createVenta(body, authUser) {
           subtotal_centavos: totals.subtotalCentavos,
           descuento_total_centavos: descuentoTotalCentavos,
           total_centavos: totals.totalCentavos,
+          total_redondeo_centavos: totals.totalRedondeoCentavos,
           total_costo_centavos: totals.totalCostoCentavos,
           total_margen_centavos: totals.totalMargenCentavos,
           cobro: payload.cobro || null,
@@ -1057,6 +1105,11 @@ async function createVenta(body, authUser) {
             producto_id: line.producto_id,
             cantidad: line.cantidad,
             cantidad_base: line.cantidad_base,
+            precio_unitario_base_centavos: line.precio_unitario_base_centavos,
+            precio_unitario_final_centavos: line.precio_unitario_final_centavos,
+            redondeo_aplicado: Boolean(line.redondeo_aplicado),
+            redondeo_diferencia_centavos: line.redondeo_diferencia_centavos,
+            redondeo_linea_centavos: line.redondeo_linea_centavos,
             precio_unit_centavos: line.precio_unit_centavos,
             total_linea_centavos: line.total_linea_centavos,
             subtotal_costo_centavos: line.subtotal_costo_centavos,
@@ -1486,6 +1539,7 @@ async function createDevolucion(ventaId, body, actorUser) {
     let totalDevueltoCentavos = 0;
     let totalCostoDevueltoCentavos = 0;
     let totalMargenRevertidoCentavos = 0;
+    let totalRedondeoRevertidoCentavos = 0;
 
     for (const item of parsed.data.items) {
       const detail = detailMap.get(item.venta_detalle_id);
@@ -1523,10 +1577,15 @@ async function createDevolucion(ventaId, body, actorUser) {
         requestedBase
       );
       const margenRevertidoCentavos = subtotalCentavos - subtotalCostoCentavos;
+      const redondeoRevertidoCentavos = moneyToCents(
+        requestedQty * centsToMoney(Number(detail.redondeo_diferencia_centavos || 0)),
+        'redondeo_revertido'
+      );
 
       totalDevueltoCentavos += subtotalCentavos;
       totalCostoDevueltoCentavos += subtotalCostoCentavos;
       totalMargenRevertidoCentavos += margenRevertidoCentavos;
+      totalRedondeoRevertidoCentavos += redondeoRevertidoCentavos;
 
       devolucionDetalleRows.push({
         venta_detalle_id: detail.id,
@@ -1537,7 +1596,8 @@ async function createDevolucion(ventaId, body, actorUser) {
         subtotal_costo: centsToMoney(subtotalCostoCentavos),
         subtotal_costo_centavos: subtotalCostoCentavos,
         margen_revertido: centsToMoney(margenRevertidoCentavos),
-        margen_revertido_centavos: margenRevertidoCentavos
+        margen_revertido_centavos: margenRevertidoCentavos,
+        redondeo_revertido_centavos: redondeoRevertidoCentavos
       });
 
       const existingGroup = productReturnGroups.get(detail.producto_id) || {
@@ -1578,7 +1638,8 @@ async function createDevolucion(ventaId, body, actorUser) {
         transferencia: centsToMoney(refundBreakdown.transferencia_centavos),
         transferencia_centavos: refundBreakdown.transferencia_centavos,
         credito: centsToMoney(refundBreakdown.credito_centavos),
-        credito_centavos: refundBreakdown.credito_centavos
+        credito_centavos: refundBreakdown.credito_centavos,
+        total_redondeo_revertido_centavos: totalRedondeoRevertidoCentavos
       },
       trx
     );
@@ -1735,12 +1796,14 @@ async function createDevolucion(ventaId, body, actorUser) {
           total_devuelto_centavos: totalDevueltoCentavos,
           total_costo_devuelto_centavos: totalCostoDevueltoCentavos,
           total_margen_revertido_centavos: totalMargenRevertidoCentavos,
+          total_redondeo_revertido_centavos: totalRedondeoRevertidoCentavos,
           breakdown: refundBreakdown,
           items: devolucionDetalleRows.map((row) => ({
             venta_detalle_id: row.venta_detalle_id,
             cantidad_base: row.cantidad_base,
             subtotal_centavos: row.subtotal_centavos,
-            subtotal_costo_centavos: row.subtotal_costo_centavos
+            subtotal_costo_centavos: row.subtotal_costo_centavos,
+            redondeo_revertido_centavos: row.redondeo_revertido_centavos
           }))
         }
       },
@@ -1867,6 +1930,7 @@ async function anularVenta(ventaId, body, actorUser) {
     }
 
     const productRestoreGroups = new Map();
+    let totalRedondeoRevertidoCentavos = 0;
     for (const detail of pack.detalle) {
       const existingGroup = productRestoreGroups.get(detail.producto_id) || {
         producto_id: detail.producto_id,
@@ -1878,6 +1942,10 @@ async function anularVenta(ventaId, body, actorUser) {
       existingGroup.cantidad_base += Number(detail.cantidad_base || 0);
       existingGroup.subtotal_costo_centavos += Number(detail.subtotal_costo_centavos || 0);
       productRestoreGroups.set(detail.producto_id, existingGroup);
+      totalRedondeoRevertidoCentavos += moneyToCents(
+        Number(detail.cantidad || 0) * centsToMoney(Number(detail.redondeo_diferencia_centavos || 0)),
+        'redondeo_revertido_anulacion'
+      );
     }
 
     const inventoryMovements = [];
@@ -2006,7 +2074,8 @@ async function anularVenta(ventaId, body, actorUser) {
         impacto_caja: centsToMoney(pack.resumen_pago.contado_centavos),
         impacto_caja_centavos: pack.resumen_pago.contado_centavos,
         impacto_cxc: centsToMoney(pack.resumen_pago.credito_centavos),
-        impacto_cxc_centavos: pack.resumen_pago.credito_centavos
+        impacto_cxc_centavos: pack.resumen_pago.credito_centavos,
+        impacto_redondeo_centavos: totalRedondeoRevertidoCentavos
       },
       trx
     );
@@ -2040,7 +2109,8 @@ async function anularVenta(ventaId, body, actorUser) {
           impacto_stock: stockImpact,
           impacto_caja_centavos: pack.resumen_pago.contado_centavos,
           impacto_transferencia_centavos: pack.resumen_pago.transferencia_centavos,
-          impacto_cxc_centavos: pack.resumen_pago.credito_centavos
+          impacto_cxc_centavos: pack.resumen_pago.credito_centavos,
+          impacto_redondeo_centavos: totalRedondeoRevertidoCentavos
         }
       },
       trx

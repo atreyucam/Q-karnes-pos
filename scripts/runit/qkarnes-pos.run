@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+INSTALL_ROOT="/opt/qkarnes-pos"
+APP_DIR="$INSTALL_ROOT/app"
+ENV_FILE="$INSTALL_ROOT/config/qkarnes.env"
+
+[ -f "$ENV_FILE" ] && . "$ENV_FILE"
+
+export NODE_ENV="${NODE_ENV:-production}"
+export WEB_LOCAL="${WEB_LOCAL:-true}"
+export HOST="${HOST:-127.0.0.1}"
+export PORT="${PORT:-3000}"
+export LOG_LEVEL="${LOG_LEVEL:-warn}"
+export LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-15}"
+export LOG_HTTP_REQUESTS="${LOG_HTTP_REQUESTS:-false}"
+export ALLOW_DEMO_SEED="${ALLOW_DEMO_SEED:-false}"
+export ALLOW_NETWORK_BIND="${ALLOW_NETWORK_BIND:-false}"
+export PERF_BOOT_LOG="${PERF_BOOT_LOG:-false}"
+export QKARNES_DATA_DIR="${QKARNES_DATA_DIR:-/opt/qkarnes-pos/data}"
+export QKARNES_LOG_DIR="${QKARNES_LOG_DIR:-/opt/qkarnes-pos/logs}"
+export QKARNES_BACKUP_DIR="${QKARNES_BACKUP_DIR:-/opt/qkarnes-pos/backups}"
+export DB_FILE="${DB_FILE:-/opt/qkarnes-pos/data/qkarnes.sqlite}"
+export WEB_DIST_DIR="${WEB_DIST_DIR:-/opt/qkarnes-pos/app/apps/desktop/dist}"
+
+cd "$APP_DIR"
+exec chpst -u qkarnes:qkarnes npm --workspace apps/api run start

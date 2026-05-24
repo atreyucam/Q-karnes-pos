@@ -47,6 +47,8 @@
     "test:bloque9:frontend": "npm --workspace apps/desktop run test:bloque9",
     "test:sidebar:final": "npm --workspace apps/desktop run test:sidebar:final",
     "test:reportes:frontend": "npm --workspace apps/desktop run test:reportes",
-    "test:ticket:frontend": "npm --workspace apps/desktop run test:ticket"
+    "test:ticket:frontend": "npm --workspace apps/desktop run test:ticket",
+    "test:hardening-15m": "npm --workspace apps/api run test:hardening-15m",
+    "test:hardening-web-local-2h": "npm --workspace apps/api run test:hardening-web-local-2h"
   }
 }

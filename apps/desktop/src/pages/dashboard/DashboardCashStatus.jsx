@@ -32,7 +32,6 @@ function CashMetric({ label, value }) {
 export default function DashboardCashStatus({ kpis }) {
   const navigate = useNavigate();
   const status = resolveCashStatus(Boolean(kpis?.caja_abierta));
-  const hasTransactions = Number(kpis?.transacciones_hoy || 0) > 0;
 
   return (
     <Panel className="p-5">
@@ -40,8 +39,8 @@ export default function DashboardCashStatus({ kpis }) {
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         <CashMetric label="Ventas totales" value={formatDashboardMoney(kpis?.ventas_hoy)} />
-        <CashMetric label="Efectivo" value={hasTransactions ? 'No disponible' : '$0.00'} />
-        <CashMetric label="Transferencias" value={hasTransactions ? 'No disponible' : '$0.00'} />
+        <CashMetric label="Efectivo" value={formatDashboardMoney(kpis?.ventas_efectivo_hoy)} />
+        <CashMetric label="Transferencias" value={formatDashboardMoney(kpis?.ventas_transferencia_hoy)} />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-2">
