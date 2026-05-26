@@ -19,3 +19,5 @@ test-results/
 dist-web-local/
 deploy/
 dis-web-local/
+dist/
+scripts/

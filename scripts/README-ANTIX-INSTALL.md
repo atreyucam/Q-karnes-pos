@@ -15,6 +15,23 @@ Resultado:
 dist/qkarnes-pos-antix.tar.gz
 ```
 
+## Empaquetado `.deb` (instalador recomendado)
+```bash
+sh scripts/package-antix-deb.sh 1.0.0 all
+```
+
+Resultado:
+```text
+dist/install-qkarnes-pos_1.0.0_all.deb
+dist/install-qkarnes-pos
+```
+
+Instalación en antiX:
+```bash
+cd dist
+sh ./install-qkarnes-pos
+```
+
 ## Instalación en antiX
 ```bash
 tar -xzf qkarnes-pos-antix.tar.gz
