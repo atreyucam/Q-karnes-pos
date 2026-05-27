@@ -22,12 +22,12 @@
   --radius-lg: 12px;
   --radius-xl: 14px;
 
-  --shadow-sm: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0px 48px 64px -16px rgba(0, 0, 0, 0.25);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
 
-  --motion-fast: 160ms;
-  --motion-normal: 240ms;
+  --motion-fast: 0ms;
+  --motion-normal: 0ms;
 
   --sidebar-width-expanded: 240px;
   --sidebar-width-collapsed: 72px;
@@ -1128,8 +1128,7 @@ button:focus-visible {
   justify-content: center;
   background: color-mix(in oklab, black 50%, transparent);
   padding: 1rem;
-  backdrop-filter: blur(1px);
-  animation: modalFadeIn var(--motion-normal) ease;
+  animation: modalFadeIn 120ms ease-out;
 }
 
 .ui-modal-panel {
@@ -1139,10 +1138,10 @@ button:focus-visible {
   border-radius: 0;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
-  animation: modalPopIn var(--motion-normal) ease;
+  animation: modalPopIn 120ms ease-out;
 }
 
 @media (min-width: 640px) {
@@ -1219,8 +1218,8 @@ button:focus-visible {
   border-radius: var(--radius-xl);
   border: 1px solid var(--color-border);
   background: color-mix(in oklab, var(--color-surface) 96%, var(--color-surface-alt) 4%);
-  box-shadow: var(--shadow-lg);
-  animation: modalPopIn var(--motion-normal) ease;
+  box-shadow: var(--shadow-md);
+  animation: modalPopIn 120ms ease-out;
 }
 
 .ui-drawer-header {
@@ -1246,11 +1245,20 @@ button:focus-visible {
 @keyframes modalPopIn {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.985);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-modal-backdrop,
+  .ui-drawer-backdrop,
+  .ui-modal-panel,
+  .ui-drawer-panel {
+    animation: none !important;
   }
 }
 
@@ -2254,4 +2262,16 @@ body {
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+/* Modo rendimiento maximo para hardware limitado (Atom) */
+*,
+*::before,
+*::after {
+  animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
 }

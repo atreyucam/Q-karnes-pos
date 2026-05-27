@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PiArrowsClockwise, PiReceipt, PiWarningCircle } from 'react-icons/pi';
+import { useShallow } from 'zustand/react/shallow';
 import { useVentasStore } from '../../stores/ventasStore';
 import { useCajaStore } from '../../stores/cajaStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useConfiguracionStore } from '../../stores/configuracionStore';
 import {
   Alert,
   BackButton,
@@ -18,9 +20,10 @@ import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatQtyByUnit, getUnidad } from '../../lib/formatQty';
 import { printSaleTicketDocument } from './printTicket';
-import DevolucionModal from './DevolucionModal';
 import { SALE_STATUS } from './ventaUtils';
 import useFormErrors from '../../shared/hooks/useFormErrors';
+
+const DevolucionModal = lazy(() => import('./DevolucionModal'));
 
 function resolveMetodoLabel(value) {
   return String(value || '-').replace(/_/g, ' ');
@@ -85,20 +88,35 @@ export default function VentaDetallePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const ventaId = Number(id);
-  const detalleVenta = useVentasStore((s) => s.detalle);
-  const cargarDevoluciones = useVentasStore((s) => s.cargarDevoluciones);
-  const cargarTicket = useVentasStore((s) => s.cargarTicket);
-  const crearDevolucion = useVentasStore((s) => s.crearDevolucion);
-  const anularVenta = useVentasStore((s) => s.anularVenta);
-  const ventaDetalle = useVentasStore((s) => s.ventaDetalle);
-  const devoluciones = useVentasStore((s) => s.devoluciones);
-  const loading = useVentasStore((s) => s.loading);
-  const error = useVentasStore((s) => s.error);
+  const {
+    detalleVenta,
+    cargarDevoluciones,
+    cargarTicket,
+    crearDevolucion,
+    anularVenta,
+    ventaDetalle,
+    devoluciones,
+    loading,
+    error
+  } = useVentasStore(useShallow((s) => ({
+    detalleVenta: s.detalle,
+    cargarDevoluciones: s.cargarDevoluciones,
+    cargarTicket: s.cargarTicket,
+    crearDevolucion: s.crearDevolucion,
+    anularVenta: s.anularVenta,
+    ventaDetalle: s.ventaDetalle,
+    devoluciones: s.devoluciones,
+    loading: s.loading,
+    error: s.error
+  })));
 
-  const turnoActual = useCajaStore((s) => s.turnoActual);
-  const fetchTurnoActual = useCajaStore((s) => s.fetchTurnoActual);
+  const { turnoActual, fetchTurnoActual } = useCajaStore(useShallow((s) => ({
+    turnoActual: s.turnoActual,
+    fetchTurnoActual: s.fetchTurnoActual
+  })));
 
   const user = useAuthStore((s) => s.user);
+  const ticketImpresionActiva = useConfiguracionStore((s) => s.configuracion?.ticket_impresion_activa ?? true);
 
   const [devolucionOpen, setDevolucionOpen] = useState(false);
   const [anulacionOpen, setAnulacionOpen] = useState(false);
@@ -331,6 +349,7 @@ export default function VentaDetallePage() {
   }, [canAnular, canReturn, salesPolicyMessage, searchParams, setSearchParams, venta]);
 
   const handlePrint = async () => {
+    if (!ticketImpresionActiva) return;
     try {
       setPrinting(true);
       const ticketData = await cargarTicket(ventaId);
@@ -428,7 +447,7 @@ export default function VentaDetallePage() {
           Volver a ventas
         </BackButton>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" variant="neutral" onClick={handlePrint} disabled={printing || !venta}>
+          <Button type="button" size="sm" variant="neutral" onClick={handlePrint} disabled={!ticketImpresionActiva || printing || !venta}>
             <PiReceipt className="text-base" />
             {printing ? 'Generando...' : 'Ver ticket'}
           </Button>
@@ -688,16 +707,18 @@ export default function VentaDetallePage() {
         </section>
       ) : null}
 
-      <DevolucionModal
-        open={devolucionOpen}
-        onClose={() => setDevolucionOpen(false)}
-        ventaDetalle={ventaDetalle}
-        devoluciones={devoluciones}
-        turnoActual={turnoActual}
-        submitting={submittingDevolucion}
-        error={error}
-        onSubmit={handleSubmitDevolucion}
-      />
+      <Suspense fallback={null}>
+        <DevolucionModal
+          open={devolucionOpen}
+          onClose={() => setDevolucionOpen(false)}
+          ventaDetalle={ventaDetalle}
+          devoluciones={devoluciones}
+          turnoActual={turnoActual}
+          submitting={submittingDevolucion}
+          error={error}
+          onSubmit={handleSubmitDevolucion}
+        />
+      </Suspense>
 
       <Modal
         open={anulacionOpen}

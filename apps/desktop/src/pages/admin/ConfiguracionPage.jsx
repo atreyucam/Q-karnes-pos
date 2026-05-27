@@ -307,6 +307,20 @@ export default function ConfiguracionPage() {
           </div>
 
           <div className="grid gap-4">
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Impresion de ticket activa</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">Permite generar e imprimir tickets de venta desde los modulos de ventas.</p>
+                </div>
+                <Switch
+                  checked={Boolean(form.ticket_impresion_activa)}
+                  onChange={(checked) => updateField('ticket_impresion_activa', checked)}
+                  aria-label="Impresion de ticket activa"
+                />
+              </div>
+            </div>
+
             <Field label="Prefijo ticket">
               <Input value={form.ticket_prefijo || ''} onChange={(event) => updateField('ticket_prefijo', event.target.value.toUpperCase())} />
             </Field>

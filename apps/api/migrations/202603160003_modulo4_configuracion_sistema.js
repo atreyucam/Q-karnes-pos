@@ -24,6 +24,7 @@ exports.up = async function up(knex) {
       table.boolean('exigir_caja_abierta_para_pagos').notNullable().defaultTo(true);
       table.boolean('permitir_ventas_credito').notNullable().defaultTo(true);
       table.boolean('permitir_compras_credito').notNullable().defaultTo(true);
+      table.boolean('ticket_impresion_activa').notNullable().defaultTo(true);
       table.string('ticket_prefijo').notNullable().defaultTo('TK');
       table.string('ticket_mensaje').notNullable().defaultTo('Gracias por su compra');
       table.dateTime('created_at').notNullable().defaultTo(knex.fn.now());

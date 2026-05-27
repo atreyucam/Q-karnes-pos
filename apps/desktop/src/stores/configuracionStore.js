@@ -16,6 +16,7 @@ const DEFAULT_CONFIG = {
   exigir_caja_abierta_para_pagos: true,
   permitir_ventas_credito: true,
   permitir_compras_credito: true,
+  ticket_impresion_activa: true,
   redondeo_precios_venta_activo: false,
   redondeo_incremento_centavos: 5,
   redondeo_evitar_45: true,
@@ -25,6 +26,7 @@ const DEFAULT_CONFIG = {
   ticket_prefijo: 'TK',
   ticket_mensaje: 'Gracias por su compra'
 };
+const CONFIG_TTL_MS = 60 * 1000;
 
 function normalizeConfig(data) {
   return {
@@ -36,17 +38,23 @@ function normalizeConfig(data) {
 export const useConfiguracionStore = create((set, get) => ({
   configuracion: DEFAULT_CONFIG,
   metodosPago: [],
+  lastConfigLoadAt: 0,
+  lastMethodsLoadAt: 0,
   loading: false,
   saving: false,
   error: null,
   initialized: false,
-  cargarConfiguracion: async () => {
+  cargarConfiguracion: async ({ force = false } = {}) => {
+    const now = Date.now();
+    if (!force && get().initialized && now - Number(get().lastConfigLoadAt || 0) < CONFIG_TTL_MS) {
+      return get().configuracion;
+    }
     set({ loading: true, error: null });
     try {
       const response = await apiClient.get('/api/configuracion');
       const data = normalizeConfig(normalizeResponse(response.data));
       setMoneyCurrency(data.moneda);
-      set({ configuracion: data, loading: false, initialized: true });
+      set({ configuracion: data, loading: false, initialized: true, lastConfigLoadAt: now });
       return data;
     } catch (error) {
       const message = parseApiError(error);
@@ -55,12 +63,16 @@ export const useConfiguracionStore = create((set, get) => ({
       return get().configuracion;
     }
   },
-  cargarMetodosPago: async () => {
+  cargarMetodosPago: async ({ force = false } = {}) => {
+    const now = Date.now();
+    if (!force && get().initialized && now - Number(get().lastMethodsLoadAt || 0) < CONFIG_TTL_MS) {
+      return get().metodosPago;
+    }
     set({ loading: true, error: null });
     try {
       const response = await apiClient.get('/api/configuracion/metodos-pago');
       const data = normalizeResponse(response.data) || [];
-      set({ metodosPago: data, loading: false, initialized: true });
+      set({ metodosPago: data, loading: false, initialized: true, lastMethodsLoadAt: now });
       return data;
     } catch (error) {
       const message = parseApiError(error);
@@ -68,10 +80,10 @@ export const useConfiguracionStore = create((set, get) => ({
       return get().metodosPago;
     }
   },
-  cargarTodo: async () => {
+  cargarTodo: async ({ force = false } = {}) => {
     const [config, methods] = await Promise.all([
-      get().cargarConfiguracion(),
-      get().cargarMetodosPago()
+      get().cargarConfiguracion({ force }),
+      get().cargarMetodosPago({ force })
     ]);
     return { config, methods };
   },

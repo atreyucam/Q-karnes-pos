@@ -41,6 +41,12 @@ async function ensureSystemConfig(trx = db) {
       table.integer('umbral_redondeo_turno_centavos').notNullable().defaultTo(2000);
     });
   }
+  const hasTicketPrintEnabled = await trx.schema.hasColumn('configuracion_sistema', 'ticket_impresion_activa');
+  if (!hasTicketPrintEnabled) {
+    await trx.schema.alterTable('configuracion_sistema', (table) => {
+      table.boolean('ticket_impresion_activa').notNullable().defaultTo(true);
+    });
+  }
 
   const existing = await trx('configuracion_sistema').first();
   if (existing) return existing;

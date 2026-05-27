@@ -14,10 +14,10 @@ export const useVentasStore = create((set) => ({
   devoluciones: null,
   loading: false,
   error: null,
-  listar: async (params = {}) => {
+  listar: async (params = {}, options = {}) => {
     set({ loading: true, error: null });
     try {
-      const response = await apiClient.get('/api/ventas', { params });
+      const response = await apiClient.get('/api/ventas', { params, signal: options.signal });
       const normalized = normalizeResponse(response.data);
       if (Array.isArray(normalized)) {
         set({
@@ -44,6 +44,10 @@ export const useVentasStore = create((set) => ({
         });
       }
     } catch (error) {
+      if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') {
+        set({ loading: false });
+        return;
+      }
       set({ loading: false, error: parseApiError(error) });
     }
   },

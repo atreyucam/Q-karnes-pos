@@ -54,8 +54,8 @@ export const uiClassTokens = {
     error: 'border-danger focus:border-danger focus:shadow-[0_0_0_3px_rgba(239,68,68,0.14)]'
   },
   modal: {
-    overlay: 'fixed inset-0 z-[1000] bg-black/50 backdrop-blur-[1px] p-0 sm:p-4 flex sm:items-center sm:justify-center',
-    panel: 'flex h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-border bg-surface shadow-posLg sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl',
+    overlay: 'fixed inset-0 z-[1000] bg-black/45 p-0 sm:p-4 flex sm:items-center sm:justify-center',
+    panel: 'flex h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-border bg-surface shadow-posSm sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl',
     width: {
       default: 'sm:max-w-[min(880px,calc(100vw-1rem))]',
       medium: 'sm:max-w-[min(840px,calc(100vw-1rem))]',

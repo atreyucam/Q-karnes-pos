@@ -11,6 +11,29 @@ export function useVentaCatalogo({ enabled = true } = {}) {
   const [loadingCatalogo, setLoadingCatalogo] = useState(false);
   const [catalogError, setCatalogError] = useState('');
 
+  const productosIndexados = useMemo(
+    () => productosAll.map((producto) => ({
+      ...producto,
+      __search: [
+        String(producto.codigo || '').toLowerCase(),
+        String(producto.nombre || '').toLowerCase(),
+        String(producto.sku || '').toLowerCase(),
+        String(producto.barcode || producto.codigo_barras || '').toLowerCase()
+      ].join(' ')
+    })),
+    [productosAll]
+  );
+
+  const productosOrdenadosPorStock = useMemo(
+    () => [...productosIndexados].sort((a, b) => {
+      const aOut = Number(a?.stock_actual || 0) <= 0 ? 1 : 0;
+      const bOut = Number(b?.stock_actual || 0) <= 0 ? 1 : 0;
+      if (aOut !== bOut) return aOut - bOut;
+      return 0;
+    }),
+    [productosIndexados]
+  );
+
   useEffect(() => {
     if (!enabled) {
       setDebouncedSearch('');
@@ -65,38 +88,16 @@ export function useVentaCatalogo({ enabled = true } = {}) {
   const productosMostrados = useMemo(() => {
     if (!enabled) return [];
 
-    const ordenarConSinStockAlFinal = (items) => (
-      [...items].sort((a, b) => {
-        const aOut = Number(a?.stock_actual || 0) <= 0 ? 1 : 0;
-        const bOut = Number(b?.stock_actual || 0) <= 0 ? 1 : 0;
-        if (aOut !== bOut) return aOut - bOut;
-        return 0;
-      })
-    );
-
     if (debouncedSearch) {
-      const filtrados = productosAll.filter((producto) => {
-        const codigo = String(producto.codigo || '').toLowerCase();
-        const nombre = String(producto.nombre || '').toLowerCase();
-        const sku = String(producto.sku || '').toLowerCase();
-        const barcode = String(producto.barcode || producto.codigo_barras || '').toLowerCase();
-        return (
-          codigo.includes(debouncedSearch)
-          || nombre.includes(debouncedSearch)
-          || sku.includes(debouncedSearch)
-          || barcode.includes(debouncedSearch)
-        );
-      });
-      return ordenarConSinStockAlFinal(filtrados);
+      return productosOrdenadosPorStock.filter((producto) => producto.__search.includes(debouncedSearch));
     }
 
-    if (categoriaActiva == null) return ordenarConSinStockAlFinal(productosAll);
+    if (categoriaActiva == null) return productosOrdenadosPorStock;
 
-    const filtradosCategoria = productosAll.filter(
+    return productosOrdenadosPorStock.filter(
       (producto) => Number(producto.categoria_id) === Number(categoriaActiva)
     );
-    return ordenarConSinStockAlFinal(filtradosCategoria);
-  }, [enabled, productosAll, categoriaActiva, debouncedSearch]);
+  }, [enabled, productosOrdenadosPorStock, categoriaActiva, debouncedSearch]);
 
   return {
     categorias,

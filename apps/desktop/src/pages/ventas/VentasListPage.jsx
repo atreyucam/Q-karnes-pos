@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PiArrowsClockwise, PiEye, PiPlus, PiReceipt } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
+import { useShallow } from 'zustand/react/shallow';
 import {
   Alert,
   Button,
@@ -21,6 +22,7 @@ import {
   TablaCelda
 } from '../../ui';
 import { useVentasStore } from '../../stores/ventasStore';
+import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { printSaleTicketDocument } from './printTicket';
@@ -30,29 +32,42 @@ const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 export default function VentasListPage() {
   const navigate = useNavigate();
-  const ventas = useVentasStore((s) => s.ventas);
-  const ventasMeta = useVentasStore((s) => s.ventasMeta);
-  const error = useVentasStore((s) => s.error);
-  const listar = useVentasStore((s) => s.listar);
-  const cargarTicket = useVentasStore((s) => s.cargarTicket);
+  const { ventas, ventasMeta, error, listar, cargarTicket } = useVentasStore(useShallow((s) => ({
+    ventas: s.ventas,
+    ventasMeta: s.ventasMeta,
+    error: s.error,
+    listar: s.listar,
+    cargarTicket: s.cargarTicket
+  })));
+  const ticketImpresionActiva = useConfiguracionStore((s) => s.configuracion?.ticket_impresion_activa ?? true);
 
   const [filters, setFilters] = useState({ search: '', estado: 'TODOS', metodo: 'TODOS', desde: '', hasta: '' });
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [pagina, setPagina] = useState(1);
   const [printingSaleId, setPrintingSaleId] = useState(null);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(filters.search);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [filters.search]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const offset = (pagina - 1) * PAGE_SIZE;
     listar({
       paginado: 1,
       limit: PAGE_SIZE,
       offset,
-      search: filters.search || undefined,
+      search: debouncedSearch || undefined,
       estado: filters.estado === 'TODOS' ? undefined : filters.estado,
       metodo_pago: filters.metodo === 'TODOS' ? undefined : filters.metodo,
       desde: filters.desde || undefined,
       hasta: filters.hasta || undefined
-    });
-  }, [filters.desde, filters.estado, filters.hasta, filters.search, filters.metodo, listar, pagina]);
+    }, { signal: controller.signal });
+    return () => controller.abort();
+  }, [debouncedSearch, filters.desde, filters.estado, filters.hasta, filters.metodo, listar, pagina]);
 
   useEffect(() => {
     setPagina(1);
@@ -64,6 +79,7 @@ export default function VentasListPage() {
   const totalRegistros = Number(ventasMeta?.total || ventasFiltradas.length);
 
   const handlePrintTicket = async (saleId) => {
+    if (!ticketImpresionActiva) return;
     try {
       setPrintingSaleId(saleId);
       const ticketData = await cargarTicket(saleId);
@@ -217,7 +233,7 @@ export default function VentasListPage() {
                     icon={<PiReceipt />}
                     aria-label={`Imprimir venta ${venta.id}`}
                     title="Imprimir"
-                    disabled={printingSaleId === venta.id}
+                    disabled={!ticketImpresionActiva || printingSaleId === venta.id}
                     onClick={() => handlePrintTicket(venta.id)}
                   >
                     {printingSaleId === venta.id ? 'Imprimiendo...' : 'Imprimir'}

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { PiTrash, PiX } from 'react-icons/pi';
 import { useNavigate } from 'react-router-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { useVentasStore } from '../../stores/ventasStore';
-import apiClient, { normalizeResponse } from '../../lib/apiClient';
 import {
   Alert,
   Button,
@@ -12,7 +12,6 @@ import {
   PageHeader,
   Toast
 } from '../../ui';
-import FacturaModal from './FacturaModal';
 import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/formatQty';
 import { formatMoney } from '../../lib/formatMoney';
 import { useVentaCatalogo } from './hooks/useVentaCatalogo';
@@ -30,6 +29,8 @@ import {
   paymentRequiresClient,
   redondearPrecioVenta
 } from './ventaUtils';
+
+const FacturaModal = lazy(() => import('./FacturaModal'));
 
 function round2(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
@@ -72,16 +73,25 @@ function formatQtyWithUnit(value, unidad) {
   return `${qty.toFixed(3)} ${unit}`;
 }
 
+const PRODUCT_ROW_HEIGHT = 90;
+const PRODUCT_OVERSCAN = 6;
+
 export default function NuevaVentaPage() {
   const navigate = useNavigate();
-  const crearVenta = useVentasStore((s) => s.crear);
-  const cargarTicket = useVentasStore((s) => s.cargarTicket);
-  const errorVenta = useVentasStore((s) => s.error);
-  const configuracion = useConfiguracionStore((s) => s.configuracion);
-  const metodosPago = useConfiguracionStore((s) => s.metodosPago);
-  const cargarConfiguracionTodo = useConfiguracionStore((s) => s.cargarTodo);
-  const turnoActual = useCajaStore((s) => s.turnoActual);
-  const fetchTurnoActual = useCajaStore((s) => s.fetchTurnoActual);
+  const { crearVenta, cargarTicket, errorVenta } = useVentasStore(useShallow((s) => ({
+    crearVenta: s.crear,
+    cargarTicket: s.cargarTicket,
+    errorVenta: s.error
+  })));
+  const { configuracion, metodosPago, cargarConfiguracionTodo } = useConfiguracionStore(useShallow((s) => ({
+    configuracion: s.configuracion,
+    metodosPago: s.metodosPago,
+    cargarConfiguracionTodo: s.cargarTodo
+  })));
+  const { turnoActual, fetchTurnoActual } = useCajaStore(useShallow((s) => ({
+    turnoActual: s.turnoActual,
+    fetchTurnoActual: s.fetchTurnoActual
+  })));
   const {
     categorias,
     categoriaActiva,
@@ -116,10 +126,11 @@ export default function NuevaVentaPage() {
   const [creditAbonoInput, setCreditAbonoInput] = useState('');
   const [checkoutSubmitPhase, setCheckoutSubmitPhase] = useState('confirm');
   const [checkoutConfirmPromptVisible, setCheckoutConfirmPromptVisible] = useState(false);
-  const [runtimeConfig, setRuntimeConfig] = useState(null);
 
-  const productRefs = useRef([]);
+  const productListViewportRef = useRef(null);
   const cashReceivedInputRef = useRef(null);
+  const [productScrollTop, setProductScrollTop] = useState(0);
+  const [productViewportHeight, setProductViewportHeight] = useState(520);
 
   const enabledPaymentMethods = useMemo(() => {
     const methods = normalizePaymentMethods(metodosPago);
@@ -130,7 +141,7 @@ export default function NuevaVentaPage() {
       return true;
     });
   }, [configuracion?.permitir_ventas_credito, metodosPago]);
-  const effectiveConfig = runtimeConfig || configuracion;
+  const effectiveConfig = configuracion;
   const roundingConfig = useMemo(() => normalizeRoundingConfig(effectiveConfig), [effectiveConfig]);
   const roundingActive = Boolean(roundingConfig?.activo);
 
@@ -165,31 +176,7 @@ export default function NuevaVentaPage() {
   const requiresOpenCashShift = paymentImpactsCash && (configuracion?.exigir_caja_abierta_para_cobros ?? true);
 
   useEffect(() => {
-    const syncRuntimeConfig = async () => {
-      await cargarConfiguracionTodo().catch(() => {});
-      try {
-        const response = await apiClient.get('/api/configuracion');
-        setRuntimeConfig(normalizeResponse(response.data) || null);
-      } catch (_) {
-        setRuntimeConfig(null);
-      }
-    };
-    syncRuntimeConfig();
-  }, [cargarConfiguracionTodo]);
-
-  useEffect(() => {
-    const refreshConfig = () => {
-      cargarConfiguracionTodo().catch(() => {});
-      apiClient.get('/api/configuracion')
-        .then((response) => setRuntimeConfig(normalizeResponse(response.data) || null))
-        .catch(() => setRuntimeConfig(null));
-    };
-    window.addEventListener('focus', refreshConfig);
-    document.addEventListener('visibilitychange', refreshConfig);
-    return () => {
-      window.removeEventListener('focus', refreshConfig);
-      document.removeEventListener('visibilitychange', refreshConfig);
-    };
+    cargarConfiguracionTodo().catch(() => {});
   }, [cargarConfiguracionTodo]);
 
   useEffect(() => {
@@ -216,9 +203,27 @@ export default function NuevaVentaPage() {
   }, [productosMostrados]);
 
   useEffect(() => {
-    if (selectedProductoIndex < 0) return;
-    productRefs.current[selectedProductoIndex]?.scrollIntoView({ block: 'nearest' });
+    const container = productListViewportRef.current;
+    if (!container || selectedProductoIndex < 0) return;
+    const rowTop = selectedProductoIndex * PRODUCT_ROW_HEIGHT;
+    const rowBottom = rowTop + PRODUCT_ROW_HEIGHT;
+    const viewportTop = container.scrollTop;
+    const viewportBottom = viewportTop + container.clientHeight;
+    if (rowTop < viewportTop) {
+      container.scrollTop = rowTop;
+    } else if (rowBottom > viewportBottom) {
+      container.scrollTop = Math.max(0, rowBottom - container.clientHeight);
+    }
   }, [selectedProductoIndex]);
+
+  useEffect(() => {
+    const container = productListViewportRef.current;
+    if (!container) return undefined;
+    const syncHeight = () => setProductViewportHeight(container.clientHeight || 520);
+    syncHeight();
+    window.addEventListener('resize', syncHeight);
+    return () => window.removeEventListener('resize', syncHeight);
+  }, []);
 
   useEffect(() => {
     if (!successToast.open) return undefined;
@@ -359,6 +364,159 @@ export default function NuevaVentaPage() {
     || !paymentOptions.length
     || (selectedPaymentOption?.requiere_cliente && !clienteSeleccionado);
 
+  const virtualProductWindow = useMemo(() => {
+    const total = productosMostrados.length;
+    if (!total) return { totalHeight: 0, topPad: 0, bottomPad: 0, start: 0, end: 0 };
+    const visibleCount = Math.max(1, Math.ceil(productViewportHeight / PRODUCT_ROW_HEIGHT));
+    const start = Math.max(0, Math.floor(productScrollTop / PRODUCT_ROW_HEIGHT) - PRODUCT_OVERSCAN);
+    const end = Math.min(total, start + visibleCount + PRODUCT_OVERSCAN * 2);
+    const topPad = start * PRODUCT_ROW_HEIGHT;
+    const totalHeight = total * PRODUCT_ROW_HEIGHT;
+    const bottomPad = Math.max(0, totalHeight - topPad - (end - start) * PRODUCT_ROW_HEIGHT);
+    return { totalHeight, topPad, bottomPad, start, end };
+  }, [productosMostrados.length, productViewportHeight, productScrollTop]);
+
+  const renderedProductRows = useMemo(() => (
+    productosMostrados.slice(virtualProductWindow.start, virtualProductWindow.end).map((producto, offsetIndex) => {
+      const index = virtualProductWindow.start + offsetIndex;
+      const unidad = getUnidad(producto.unidad_medida || producto.unidad);
+      const selected = index === selectedProductoIndex;
+      const stockActual = Number(producto.stock_actual || 0);
+      const stockMinimo = Number(producto.stock_minimo || 0);
+      const isOut = stockActual <= 0;
+      const isLow = !isOut && ((stockMinimo > 0 && stockActual <= stockMinimo) || stockActual <= 5);
+      const stockBadgeLabel = isOut ? 'SIN STOCK' : (isLow ? 'BAJO STOCK' : null);
+      const stockBadgeClass = isOut
+        ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_74%,white_26%)] text-[var(--color-danger)]'
+        : isLow
+          ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_83%,white_17%)] text-[var(--color-warning)]'
+          : '';
+      const stateTintClass = isOut
+        ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)]'
+        : isLow
+          ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_40%,white_60%)]'
+          : 'bg-[var(--color-surface)]';
+      const precioBase = round2(producto.precio_venta || producto.precio_referencia || 0);
+      const precioFinal = round2(redondearPrecioVenta(precioBase, roundingConfig));
+      const priceText = `${formatMoney(precioBase)} / ${unidad}`;
+      const roundedText = `${formatMoney(precioFinal)} / ${unidad}`;
+      const stockText = `${formatStock(producto.stock_actual, unidad)} ${unidad} disponibles`;
+
+      return (
+        <div
+          key={producto.id}
+          role="button"
+          tabIndex={0}
+          onMouseEnter={() => setSelectedProductoIndex(index)}
+          onClick={() => addProductoToCarrito(producto)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              addProductoToCarrito(producto);
+            }
+          }}
+          className={`w-full rounded-lg border px-3 py-2 text-left ${stateTintClass} ${
+            selected
+              ? 'border-[var(--color-border-strong)]'
+              : 'border-[var(--color-border)]'
+          } ${isOut ? 'opacity-90' : ''}`}
+          style={{ minHeight: `${PRODUCT_ROW_HEIGHT - 6}px` }}
+        >
+          <div className="space-y-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 truncate text-sm font-semibold leading-tight text-[var(--color-text)]">
+                {producto.nombre}
+              </p>
+              <div className="shrink-0 flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-sm font-bold leading-none text-[var(--color-text)]">
+                    {isOut ? 'AGOTADO' : priceText}
+                  </p>
+                  {!isOut && roundingActive ? (
+                    <p className="mt-0.5 text-xs font-semibold text-[var(--color-brand)]">
+                      Cobro: {roundedText}
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  variant={isOut ? 'secondary' : 'primary'}
+                  size="sm"
+                  className="min-h-7 px-2 py-0 text-[11px] font-semibold leading-none"
+                  disabled={isOut}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    addProductoToCarrito(producto);
+                  }}
+                >
+                  {isOut ? 'No vender' : 'Agregar'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-[var(--color-text-muted)]">{stockText}</p>
+              {stockBadgeLabel ? (
+                <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stockBadgeClass}`}>
+                  {stockBadgeLabel}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      );
+    })
+  ), [productosMostrados, virtualProductWindow.start, virtualProductWindow.end, selectedProductoIndex, roundingConfig, roundingActive]);
+
+  const renderedCarritoRows = useMemo(() => (
+    carritoConEstado.map((item) => (
+      <article
+        key={item.producto_id}
+        className={`rounded-lg border px-3 py-2 ${
+          item.cantidadError
+            ? 'border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-soft)_52%,white_48%)]'
+            : 'border-[var(--color-border)] bg-[var(--color-surface-alt)]'
+        }`}
+      >
+        <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:gap-3">
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">{item.nombre}</p>
+
+          <div className="flex shrink-0 items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+            <input
+              type="text"
+              inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
+              className="h-8 w-[78px] shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0 text-right text-sm font-semibold text-[var(--color-text)] outline-none"
+              value={item.cantidadInput}
+              onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
+            />
+            <span className="shrink-0 font-semibold uppercase">{getUnidad(item.unidad_medida)}</span>
+            <span className="shrink-0">x</span>
+            <span className="shrink-0 font-semibold text-[var(--color-text)]">{formatMoney(item.precio)}</span>
+          </div>
+
+          <p className="w-[74px] shrink-0 text-right text-sm font-bold text-[var(--color-text)]">{formatMoney(item.subtotal)}</p>
+
+          <button
+            type="button"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[color-mix(in_oklab,var(--color-danger)_30%,transparent)] bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)] text-[var(--color-danger)]"
+            aria-label={`Quitar ${item.nombre}`}
+            title="Quitar"
+            onClick={() => removeItem(item.producto_id)}
+          >
+            <PiTrash className="text-base" />
+          </button>
+        </div>
+
+        {item.cantidadError ? (
+          <p className="mt-1.5 text-xs font-semibold text-[var(--color-danger)]">{item.cantidadError}</p>
+        ) : null}
+        {!item.cantidadError && roundingActive && round2(item.precio_venta) !== round2(item.precio) ? (
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Redondeado desde {formatMoney(item.precio_venta)}</p>
+        ) : null}
+      </article>
+    ))
+  ), [carritoConEstado, roundingActive]);
+
   const handleSearchKeyDown = (event) => {
     if (!productosMostrados.length) return;
 
@@ -381,7 +539,7 @@ export default function NuevaVentaPage() {
     }
   };
 
-  const addProductoToCarrito = (producto) => {
+  function addProductoToCarrito(producto) {
     const unidad = getUnidad(producto.unidad_medida || producto.unidad);
     const qtyToAdd = unidad === 'UND' ? 1 : 1;
     const stockActual = Number(producto.stock_actual || 0);
@@ -434,7 +592,7 @@ export default function NuevaVentaPage() {
         }
       ];
     });
-  };
+  }
 
   const updateItemCantidadInput = (productoId, unidad, rawValue) => {
     const normalized = sanitizeQtyInput(rawValue, unidad);
@@ -708,7 +866,7 @@ export default function NuevaVentaPage() {
       const totalVenta = effectiveTotal;
       const result = await crearVenta(payload);
       const ventaId = result?.venta?.id;
-      if (ventaId) {
+      if (ventaId && (effectiveConfig?.ticket_impresion_activa ?? true)) {
         const ticketData = await cargarTicket(ventaId);
         printSaleTicketDocument(ticketData);
       }
@@ -799,7 +957,11 @@ export default function NuevaVentaPage() {
               {loadingCatalogo && <p className="text-sm text-[var(--color-text-muted)]">Cargando productos...</p>}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-auto pt-1.5 pr-1 pb-1">
+            <div
+              ref={productListViewportRef}
+              onScroll={(event) => setProductScrollTop(event.currentTarget.scrollTop)}
+              className="flex-1 min-h-0 overflow-auto pt-1.5 pr-1 pb-1"
+            >
               {!loadingCatalogo && productosMostrados.length === 0 && (
                 <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-alt)] px-4 py-6 text-center">
                   <p className="text-sm font-semibold text-[var(--color-text)]">No se encontraron productos.</p>
@@ -809,98 +971,10 @@ export default function NuevaVentaPage() {
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                {productosMostrados.map((producto, index) => {
-                  const unidad = getUnidad(producto.unidad_medida || producto.unidad);
-                  const selected = index === selectedProductoIndex;
-                  const stockActual = Number(producto.stock_actual || 0);
-                  const stockMinimo = Number(producto.stock_minimo || 0);
-                  const isOut = stockActual <= 0;
-                  const isLow = !isOut && ((stockMinimo > 0 && stockActual <= stockMinimo) || stockActual <= 5);
-                  const stockBadgeLabel = isOut ? 'SIN STOCK' : (isLow ? 'BAJO STOCK' : null);
-                  const stockBadgeClass = isOut
-                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_74%,white_26%)] text-[var(--color-danger)]'
-                    : isLow
-                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_83%,white_17%)] text-[var(--color-warning)]'
-                      : '';
-                  const stateTintClass = isOut
-                    ? 'bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)]'
-                    : isLow
-                      ? 'bg-[color-mix(in_oklab,var(--color-warning-soft)_40%,white_60%)]'
-                      : 'bg-[var(--color-surface)]';
-                  const precioBase = round2(producto.precio_venta || producto.precio_referencia || 0);
-                  const precioFinal = round2(redondearPrecioVenta(precioBase, roundingConfig));
-                  const priceText = `${formatMoney(precioBase)} / ${unidad}`;
-                  const roundedText = `${formatMoney(precioFinal)} / ${unidad}`;
-                  const precioFueRedondeado = precioBase !== precioFinal;
-                  const stockText = `${formatStock(producto.stock_actual, unidad)} ${unidad} disponibles`;
-
-                  return (
-                    <div
-                      key={producto.id}
-                      role="button"
-                      tabIndex={0}
-                      ref={(node) => { productRefs.current[index] = node; }}
-                      onMouseEnter={() => setSelectedProductoIndex(index)}
-                      onClick={() => addProductoToCarrito(producto)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          addProductoToCarrito(producto);
-                        }
-                      }}
-                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${stateTintClass} ${
-                        selected
-                          ? 'border-[var(--color-border-strong)]'
-                          : 'border-[var(--color-border)] hover:bg-[color-mix(in_oklab,var(--color-surface-muted)_65%,white_35%)]'
-                      } ${isOut ? 'opacity-90' : ''}`}
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="min-w-0 truncate text-sm font-semibold leading-tight text-[var(--color-text)]">
-                            {producto.nombre}
-                          </p>
-                          <div className="shrink-0 flex items-center gap-4">
-                            <div className="text-right">
-                              <p className="text-sm font-bold leading-none text-[var(--color-text)]">
-                                {isOut ? 'AGOTADO' : priceText}
-                              </p>
-                              {!isOut && roundingActive ? (
-                                <p className="mt-0.5 text-xs font-semibold text-[var(--color-brand)]">
-                                  Cobro: {roundedText}
-                                </p>
-                              ) : null}
-                            </div>
-                            <Button
-                              type="button"
-                              variant={isOut ? 'secondary' : 'primary'}
-                              size="sm"
-                              className="min-h-7 px-2 py-0 text-[11px] font-semibold leading-none"
-                              disabled={isOut}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                addProductoToCarrito(producto);
-                              }}
-                            >
-                              {isOut ? 'No vender' : 'Agregar'}
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm text-[var(--color-text-muted)]">
-                            {stockText}
-                          </p>
-                          {stockBadgeLabel ? (
-                            <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stockBadgeClass}`}>
-                              {stockBadgeLabel}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div style={{ height: `${virtualProductWindow.totalHeight}px`, position: 'relative' }}>
+                <div style={{ paddingTop: `${virtualProductWindow.topPad}px`, paddingBottom: `${virtualProductWindow.bottomPad}px` }} className="space-y-1.5">
+                  {renderedProductRows}
+                </div>
               </div>
             </div>
           </div>
@@ -945,63 +1019,7 @@ export default function NuevaVentaPage() {
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {carritoConEstado.map((item) => (
-                    <article
-                      key={item.producto_id}
-                      className={`rounded-lg border px-3 py-2 ${
-                        item.cantidadError
-                          ? 'border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-soft)_52%,white_48%)]'
-                          : 'border-[var(--color-border)] bg-[var(--color-surface-alt)]'
-                      }`}
-                    >
-                      <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:gap-3">
-                        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">
-                          {item.nombre}
-                        </p>
-
-                        <div className="flex shrink-0 items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
-                          <input
-                            type="text"
-                            inputMode={item.unidad_medida === 'UND' ? 'numeric' : 'decimal'}
-                            className="h-8 w-[78px] shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0 text-right text-sm font-semibold text-[var(--color-text)] outline-none transition focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--color-brand)_25%,transparent)]"
-                            value={item.cantidadInput}
-                            onChange={(e) => updateItemCantidadInput(item.producto_id, item.unidad_medida, e.target.value)}
-                          />
-
-                          <span className="shrink-0 font-semibold uppercase">
-                            {getUnidad(item.unidad_medida)}
-                          </span>
-
-                          <span className="shrink-0">x</span>
-
-                          <span className="shrink-0 font-semibold text-[var(--color-text)]">
-                            {formatMoney(item.precio)}
-                          </span>
-                        </div>
-
-                        <p className="w-[74px] shrink-0 text-right text-sm font-bold text-[var(--color-text)]">
-                          {formatMoney(item.subtotal)}
-                        </p>
-
-                        <button
-                          type="button"
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[color-mix(in_oklab,var(--color-danger)_30%,transparent)] bg-[color-mix(in_oklab,var(--color-danger-soft)_35%,white_65%)] text-[var(--color-danger)] transition hover:bg-[color-mix(in_oklab,var(--color-danger-soft)_58%,white_42%)]"
-                          aria-label={`Quitar ${item.nombre}`}
-                          title="Quitar"
-                          onClick={() => removeItem(item.producto_id)}
-                        >
-                          <PiTrash className="text-base" />
-                        </button>
-                      </div>
-
-                      {item.cantidadError ? (
-                        <p className="mt-1.5 text-xs font-semibold text-[var(--color-danger)]">{item.cantidadError}</p>
-                      ) : null}
-                      {!item.cantidadError && roundingActive && round2(item.precio_venta) !== round2(item.precio) ? (
-                        <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Redondeado desde {formatMoney(item.precio_venta)}</p>
-                      ) : null}
-                    </article>
-                  ))}
+                  {renderedCarritoRows}
                 </div>
               )}
             </div>
@@ -1340,14 +1358,16 @@ export default function NuevaVentaPage() {
         </div>
       </Modal>
 
-      <FacturaModal
-        open={modalFacturaOpen}
-        onClose={() => setModalFacturaOpen(false)}
-        onSelectCliente={(cliente) => {
-          setClienteSeleccionado(cliente);
-          setLocalError('');
-        }}
-      />
+      <Suspense fallback={null}>
+        <FacturaModal
+          open={modalFacturaOpen}
+          onClose={() => setModalFacturaOpen(false)}
+          onSelectCliente={(cliente) => {
+            setClienteSeleccionado(cliente);
+            setLocalError('');
+          }}
+        />
+      </Suspense>
 
       {successToast.open ? (
         <div className="fixed right-5 top-5 z-[1200] max-w-sm">

@@ -13,6 +13,7 @@ const SYSTEM_CONFIG_DEFAULTS = Object.freeze({
   exigir_caja_abierta_para_pagos: true,
   permitir_ventas_credito: true,
   permitir_compras_credito: true,
+  ticket_impresion_activa: true,
   ticket_prefijo: 'TK',
   ticket_mensaje: 'Gracias por su compra'
 });
@@ -62,6 +63,7 @@ function buildSystemConfigRow(overrides = {}) {
     exigir_caja_abierta_para_pagos: toBooleanFlag(row.exigir_caja_abierta_para_pagos, true),
     permitir_ventas_credito: toBooleanFlag(row.permitir_ventas_credito, true),
     permitir_compras_credito: toBooleanFlag(row.permitir_compras_credito, true),
+    ticket_impresion_activa: toBooleanFlag(row.ticket_impresion_activa, true),
     ticket_prefijo: String(row.ticket_prefijo || 'TK').trim().toUpperCase(),
     ticket_mensaje: String(row.ticket_mensaje || '').trim()
   };
