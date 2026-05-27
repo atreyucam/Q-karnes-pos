@@ -1081,7 +1081,7 @@ export default function NuevaVentaPage() {
         <div className="max-h-[86vh] overflow-y-auto" onKeyDown={handleCheckoutKeyDown}>
           <div className="space-y-3 p-4 sm:p-5">
           <div className="ui-modal-header">
-            <div className="relative w-full">
+            <div className="relative w-full flex justify-between">
               <div className="ui-modal-header-copy pr-10">
                 <h3 className="text-lg font-semibold text-[var(--color-text)]">Cobrar venta</h3>
               </div>
