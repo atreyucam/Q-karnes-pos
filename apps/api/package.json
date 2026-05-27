@@ -30,6 +30,7 @@
     "test:productos": "node tests/productos/productos-flags.test.js",
     "test:transformaciones": "node tests/transformaciones/transformaciones-partial-despiece.test.js",
     "test:ventas": "node tests/ventas/ventas-basic.test.js",
+    "test:impresion-ticket": "node tests/ventas/impresion-ticket.test.js",
     "test:ventas-redondeo": "node tests/ventas/precio-redondeo.test.js",
     "test:ventas-hardening": "node tests/ventas/ventas-operational-hardening.test.js",
     "test:security": "node tests/security/security-permissions.test.js",

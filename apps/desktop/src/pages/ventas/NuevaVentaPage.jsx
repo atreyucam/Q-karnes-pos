@@ -16,7 +16,6 @@ import { getUnidad, sanitizeDecimalInput, sanitizeQtyInput } from '../../lib/for
 import { formatMoney } from '../../lib/formatMoney';
 import { useVentaCatalogo } from './hooks/useVentaCatalogo';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
-import { printSaleTicketDocument } from './printTicket';
 import { useCajaStore } from '../../stores/cajaStore';
 import {
   PAYMENT_CODES,
@@ -78,9 +77,9 @@ const PRODUCT_OVERSCAN = 6;
 
 export default function NuevaVentaPage() {
   const navigate = useNavigate();
-  const { crearVenta, cargarTicket, errorVenta } = useVentasStore(useShallow((s) => ({
+  const { crearVenta, imprimirTicketVenta, errorVenta } = useVentasStore(useShallow((s) => ({
     crearVenta: s.crear,
-    cargarTicket: s.cargarTicket,
+    imprimirTicketVenta: s.imprimirTicketVenta,
     errorVenta: s.error
   })));
   const { configuracion, metodosPago, cargarConfiguracionTodo } = useConfiguracionStore(useShallow((s) => ({
@@ -112,6 +111,7 @@ export default function NuevaVentaPage() {
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
   const [successToast, setSuccessToast] = useState({ open: false, total: 0 });
+  const [printToast, setPrintToast] = useState({ open: false, tone: 'success', text: '' });
   const [selectedProductoIndex, setSelectedProductoIndex] = useState(-1);
   const [cajaRequiredModalOpen, setCajaRequiredModalOpen] = useState(false);
   const [stockIssue, setStockIssue] = useState(null);
@@ -232,6 +232,12 @@ export default function NuevaVentaPage() {
     }, 5600);
     return () => window.clearTimeout(timer);
   }, [successToast.open]);
+
+  useEffect(() => {
+    if (!printToast.open) return undefined;
+    const timer = window.setTimeout(() => setPrintToast({ open: false, tone: 'success', text: '' }), 4000);
+    return () => window.clearTimeout(timer);
+  }, [printToast.open]);
 
   const carritoConEstado = useMemo(
     () => carrito.map((item) => {
@@ -867,8 +873,12 @@ export default function NuevaVentaPage() {
       const result = await crearVenta(payload);
       const ventaId = result?.venta?.id;
       if (ventaId && (effectiveConfig?.ticket_impresion_activa ?? true)) {
-        const ticketData = await cargarTicket(ventaId);
-        printSaleTicketDocument(ticketData);
+        try {
+          await imprimirTicketVenta(ventaId);
+          setPrintToast({ open: true, tone: 'success', text: 'Ticket enviado a impresion' });
+        } catch (_) {
+          setPrintToast({ open: true, tone: 'danger', text: 'No se pudo imprimir el ticket' });
+        }
       }
       resetVentaDraft();
       await fetchTurnoActual({ silent: true }).catch(() => {});
@@ -1376,6 +1386,13 @@ export default function NuevaVentaPage() {
               Venta aprobada correctamente por {formatMoney(successToast.total)}.
             </Toast>
           </button>
+        </div>
+      ) : null}
+      {printToast.open ? (
+        <div className="fixed right-5 top-24 z-[1200] max-w-sm">
+          <Toast tone={printToast.tone}>
+            {printToast.text}
+          </Toast>
         </div>
       ) : null}
 

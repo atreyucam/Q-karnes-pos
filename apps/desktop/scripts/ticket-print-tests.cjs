@@ -27,9 +27,11 @@ function run() {
   const add = (id, name, ok, detail = '') => results.push({ id, name, ok, detail });
 
   const printTicket = read('apps/desktop/src/pages/ventas/printTicket.js');
-  const indexCss = read('apps/desktop/src/index.css');
-  const ventasService = read('apps/api/src/modules/ventas/ventas.service.js');
+  const impresionService = read('apps/api/src/modules/impresion/impresion.service.js');
   const ventasStore = read('apps/desktop/src/stores/ventasStore.js');
+  const ventasListPage = read('apps/desktop/src/pages/ventas/VentasListPage.jsx');
+  const ventaDetallePage = read('apps/desktop/src/pages/ventas/VentaDetallePage.jsx');
+  const nuevaVentaPage = read('apps/desktop/src/pages/ventas/NuevaVentaPage.jsx');
 
   try {
     assert(printTicket.includes('Comprobante de venta'), 'No existe cabecera visual de ticket');
@@ -42,39 +44,35 @@ function run() {
   }
 
   try {
-    assert(printTicket.includes("document.createElement('iframe')"), 'No existe iframe de impresión aislado');
-    assert(printTicket.includes('frameWindow.print()'), 'No existe trigger de impresión sobre el iframe');
-    assert(printTicket.includes('hasPrinted'), 'No existe guard para evitar impresión duplicada');
-    assert(printTicket.includes("frameWindow.addEventListener('afterprint'"), 'No existe cierre tras afterprint');
-    add(2, 'El flujo de ticket dispara impresion simulada', true);
+    assert(impresionService.includes("spawnFn('lp', ['-d', printerName, '-o', 'raw'])"), 'No existe impresion CUPS RAW via spawn');
+    assert(impresionService.includes('normalizarTextoTicket'), 'No existe normalizacion de texto ticket');
+    assert(impresionService.includes('construirTicketVenta'), 'No existe constructor de ticket plano');
+    add(2, 'Backend usa impresion directa CUPS RAW con ticket plano', true);
   } catch (error) {
-    add(2, 'El flujo de ticket dispara impresion simulada', false, error.message);
+    add(2, 'Backend usa impresion directa CUPS RAW con ticket plano', false, error.message);
   }
 
   try {
-    assert(indexCss.includes('@media print'), 'No existe bloque CSS de impresion');
-    assert(indexCss.includes('.ticket-print-root'), 'No existe clase de raiz imprimible');
-    assert(indexCss.includes('.ticket-print-actions'), 'No existe clase para ocultar acciones en impresion');
-    add(3, 'La impresion oculta UI y prioriza el comprobante', true);
+    assert(ventasStore.includes('/api/impresion/ticket/venta/${id}'), 'Store de ventas no llama endpoint de impresion directa');
+    add(3, 'Frontend usa endpoint de impresion directa', true);
   } catch (error) {
-    add(3, 'La impresion oculta UI y prioriza el comprobante', false, error.message);
+    add(3, 'Frontend usa endpoint de impresion directa', false, error.message);
   }
 
   try {
-    assert(ventasService.includes('metodo_pago'), 'Backend ticket no expone metodo de pago');
-    assert(ventasService.includes('detalle: (ventaPack.detalle || []).map'), 'Backend ticket no expone detalle de lineas');
-    assert(ventasService.includes('pagos: pagos.map'), 'Backend ticket no expone desglose de pagos');
-    assert(ventasService.includes('saldo_pendiente'), 'Backend ticket no expone saldo pendiente');
-    add(4, 'Backend ticket entrega datos necesarios para impresion', true);
+    assert(!ventasListPage.includes('printSaleTicketDocument('), 'VentasListPage no debe usar printSaleTicketDocument');
+    assert(!ventaDetallePage.includes('printSaleTicketDocument('), 'VentaDetallePage no debe usar printSaleTicketDocument');
+    assert(!nuevaVentaPage.includes('printSaleTicketDocument('), 'NuevaVentaPage no debe usar printSaleTicketDocument');
+    add(4, 'No se usa window.print en flujo principal Epson', true);
   } catch (error) {
-    add(4, 'Backend ticket entrega datos necesarios para impresion', false, error.message);
+    add(4, 'No se usa window.print en flujo principal Epson', false, error.message);
   }
 
   try {
-    assert(ventasStore.includes('/api/ventas/${id}/ticket'), 'Store de ventas no carga endpoint de ticket');
-    add(5, 'Frontend mantiene integracion ticket sin romper flujo de ventas', true);
+    assert(printTicket.includes('Comprobante de venta'), 'Se perdio vista de comprobante');
+    add(5, 'Se mantiene vista de comprobante para consulta', true);
   } catch (error) {
-    add(5, 'Frontend mantiene integracion ticket sin romper flujo de ventas', false, error.message);
+    add(5, 'Se mantiene vista de comprobante para consulta', false, error.message);
   }
 
   print(results);

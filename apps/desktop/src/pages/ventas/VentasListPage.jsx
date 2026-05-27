@@ -25,19 +25,19 @@ import { useVentasStore } from '../../stores/ventasStore';
 import { useConfiguracionStore } from '../../stores/configuracionStore';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
-import { printSaleTicketDocument } from './printTicket';
 import { GLOBAL_PAGE_SIZE } from '../../constants/pagination';
+import { Toast } from '../../shared/ui';
 
 const PAGE_SIZE = GLOBAL_PAGE_SIZE;
 
 export default function VentasListPage() {
   const navigate = useNavigate();
-  const { ventas, ventasMeta, error, listar, cargarTicket } = useVentasStore(useShallow((s) => ({
+  const { ventas, ventasMeta, error, listar, imprimirTicketVenta } = useVentasStore(useShallow((s) => ({
     ventas: s.ventas,
     ventasMeta: s.ventasMeta,
     error: s.error,
     listar: s.listar,
-    cargarTicket: s.cargarTicket
+    imprimirTicketVenta: s.imprimirTicketVenta
   })));
   const ticketImpresionActiva = useConfiguracionStore((s) => s.configuracion?.ticket_impresion_activa ?? true);
 
@@ -45,6 +45,19 @@ export default function VentasListPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [pagina, setPagina] = useState(1);
   const [printingSaleId, setPrintingSaleId] = useState(null);
+  const [toast, setToast] = useState({ open: false, tone: 'success', text: '' });
+  const [toastVisible, setToastVisible] = useState(false);
+
+  useEffect(() => {
+    if (!toast.open) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setToast({ open: false, tone: 'success', text: '' }), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [toast]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -82,10 +95,10 @@ export default function VentasListPage() {
     if (!ticketImpresionActiva) return;
     try {
       setPrintingSaleId(saleId);
-      const ticketData = await cargarTicket(saleId);
-      printSaleTicketDocument(ticketData);
+      await imprimirTicketVenta(saleId);
+      setToast({ open: true, tone: 'success', text: 'Ticket enviado a impresion' });
     } catch (_) {
-      // store handles message
+      setToast({ open: true, tone: 'danger', text: 'No se pudo imprimir el ticket' });
     } finally {
       setPrintingSaleId(null);
     }
@@ -98,6 +111,20 @@ export default function VentasListPage() {
 
   return (
     <div className="space-y-5">
+      {toast.open ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone={toast.tone}
+            title={toast.tone === 'success' ? 'Operacion completada' : 'Error de impresion'}
+            description={toast.text}
+            onClose={() => {
+              setToastVisible(false);
+              setToast({ open: false, tone: 'success', text: '' });
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
       <PageHeader
         title="Ventas"
         description="Consulta ventas emitidas, abre el detalle operativo y dispara devoluciones o anulaciones desde la ficha completa."

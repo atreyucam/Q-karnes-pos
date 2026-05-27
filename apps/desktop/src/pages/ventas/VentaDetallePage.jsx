@@ -14,12 +14,12 @@ import {
   Input,
   Modal,
   StatusBadge,
-  Textarea
+  Textarea,
+  Toast
 } from '../../ui';
 import { formatDateQuito } from '../../lib/formatDateQuito';
 import { formatMoney } from '../../lib/formatMoney';
 import { formatQtyByUnit, getUnidad } from '../../lib/formatQty';
-import { printSaleTicketDocument } from './printTicket';
 import { SALE_STATUS } from './ventaUtils';
 import useFormErrors from '../../shared/hooks/useFormErrors';
 
@@ -91,7 +91,7 @@ export default function VentaDetallePage() {
   const {
     detalleVenta,
     cargarDevoluciones,
-    cargarTicket,
+    imprimirTicketVenta,
     crearDevolucion,
     anularVenta,
     ventaDetalle,
@@ -101,7 +101,7 @@ export default function VentaDetallePage() {
   } = useVentasStore(useShallow((s) => ({
     detalleVenta: s.detalle,
     cargarDevoluciones: s.cargarDevoluciones,
-    cargarTicket: s.cargarTicket,
+    imprimirTicketVenta: s.imprimirTicketVenta,
     crearDevolucion: s.crearDevolucion,
     anularVenta: s.anularVenta,
     ventaDetalle: s.ventaDetalle,
@@ -123,6 +123,8 @@ export default function VentaDetallePage() {
   const [submittingDevolucion, setSubmittingDevolucion] = useState(false);
   const [submittingAnulacion, setSubmittingAnulacion] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [toast, setToast] = useState({ open: false, tone: 'success', text: '' });
+  const [toastVisible, setToastVisible] = useState(false);
   const [localError, setLocalError] = useState('');
   const [anulacionForm, setAnulacionForm] = useState({
     motivo: '',
@@ -320,6 +322,17 @@ export default function VentaDetallePage() {
   const clienteLabel = String(venta?.cliente_nombre || '').trim() || 'Consumidor final';
 
   useEffect(() => {
+    if (!toast.open) return undefined;
+    setToastVisible(true);
+    const hideTimer = window.setTimeout(() => setToastVisible(false), 3800);
+    const clearTimer = window.setTimeout(() => setToast({ open: false, tone: 'success', text: '' }), 4000);
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [toast]);
+
+  useEffect(() => {
     if (!venta) return;
 
     const action = searchParams.get('action');
@@ -352,10 +365,10 @@ export default function VentaDetallePage() {
     if (!ticketImpresionActiva) return;
     try {
       setPrinting(true);
-      const ticketData = await cargarTicket(ventaId);
-      printSaleTicketDocument(ticketData);
+      await imprimirTicketVenta(ventaId);
+      setToast({ open: true, tone: 'success', text: 'Ticket enviado a impresion' });
     } catch (_) {
-      // store handles message
+      setToast({ open: true, tone: 'danger', text: 'No se pudo imprimir el ticket' });
     } finally {
       setPrinting(false);
     }
@@ -442,6 +455,20 @@ export default function VentaDetallePage() {
 
   return (
     <div className="mx-auto w-full max-w-[1320px] space-y-4 px-4 py-4 sm:px-5 lg:px-6">
+      {toast.open ? (
+        <div className="fixed right-5 top-5 z-[1200]">
+          <Toast
+            tone={toast.tone}
+            title={toast.tone === 'success' ? 'Operacion completada' : 'Error de impresion'}
+            description={toast.text}
+            onClose={() => {
+              setToastVisible(false);
+              setToast({ open: false, tone: 'success', text: '' });
+            }}
+            className={toastVisible ? 'ui-toast-floating' : 'ui-toast-floating-out'}
+          />
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <BackButton className="h-9 px-3 text-sm" onClick={() => navigate('/ventas')}>
           Volver a ventas
@@ -449,7 +476,7 @@ export default function VentaDetallePage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="neutral" onClick={handlePrint} disabled={!ticketImpresionActiva || printing || !venta}>
             <PiReceipt className="text-base" />
-            {printing ? 'Generando...' : 'Ver ticket'}
+            {printing ? 'Imprimiendo...' : 'Imprimir ticket'}
           </Button>
           <Button
             type="button"

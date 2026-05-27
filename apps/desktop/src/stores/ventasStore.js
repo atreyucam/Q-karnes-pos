@@ -86,6 +86,19 @@ export const useVentasStore = create((set) => ({
       throw new Error(message);
     }
   },
+  imprimirTicketVenta: async (id) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await apiClient.post(`/api/impresion/ticket/venta/${id}`);
+      const data = response?.data || {};
+      set({ loading: false });
+      return data;
+    } catch (error) {
+      const message = parseApiError(error);
+      set({ loading: false, error: message });
+      throw new Error(message);
+    }
+  },
   crearDevolucion: async (id, payload) => {
     set({ loading: true, error: null });
     try {

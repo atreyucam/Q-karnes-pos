@@ -35,6 +35,7 @@ const productosRoutes = require('./modules/productos/productos.routes');
 const cxpRoutes = require('./modules/cxp/cxp.routes');
 const configuracionRoutes = require('./modules/configuracion/configuracion.routes');
 const transformacionesRoutes = require('./modules/transformaciones/transformaciones.routes');
+const impresionRoutes = require('./modules/impresion/impresion.routes');
 
 function isWebLocalEnabled() {
   return ['1', 'true', 'yes', 'on'].includes(String(process.env.WEB_LOCAL || '').trim().toLowerCase());
@@ -126,6 +127,7 @@ function createApp(options = {}) {
   app.use('/api/cxp', cxpRoutes);
   app.use('/api/configuracion', configuracionRoutes);
   app.use('/api/transformaciones', transformacionesRoutes);
+  app.use('/api/impresion', impresionRoutes);
 
   if (webLocal) {
     app.use('/api', notFound);
